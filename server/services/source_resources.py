@@ -16,11 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from server.config.storage import dataset_directory, source_resource_directory
+from server.models.analysis_artifacts import AnalysisArtifact
+from server.models.dashboard import Dashboard
 from server.models.datasets import Dataset
 from server.models.files import File
 from server.models.knowledge_resources import EvidenceFragment, KnowledgeResource
 from server.models.notebook_assets import NotebookAsset
-from server.models.notebooks import Notebook
+from server.models.notebooks import Notebook, NotebookDataset
+from server.models.semantic_models import SemanticModel
 from server.models.source_connections import SourceConnection
 from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
@@ -446,6 +449,7 @@ class SourceResourceService:
             evidence_count = int(
                 await session.scalar(
                     select(func.count(EvidenceFragment.id)).where(
+                        EvidenceFragment.tenant_id == tenant_id,
                         EvidenceFragment.knowledge_resource_id == knowledge_resource.id
                     )
                 )
@@ -520,6 +524,236 @@ class SourceResourceService:
             payload["is_latest"] = snapshot.id == resource.latest_snapshot_id
             items.append(payload)
         return {"resource_id": resource.id, "items": items, "total": len(items)}
+
+    async def parsed_assets_payload(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        resource_id: str | UUID,
+    ) -> dict[str, Any]:
+        resource = await self.get_resource(session=session, tenant_id=tenant_id, resource_id=resource_id)
+        if resource is None:
+            raise ValueError("Source resource not found")
+        latest_snapshot = await session.get(SourceSnapshot, resource.latest_snapshot_id) if resource.latest_snapshot_id else None
+        knowledge_resource = await self._latest_knowledge_resource(
+            session=session,
+            tenant_id=tenant_id,
+            resource_id=resource.id,
+        )
+        evidence_count = 0
+        if knowledge_resource:
+            evidence_count = int(
+                await session.scalar(
+                    select(func.count(EvidenceFragment.id)).where(
+                        EvidenceFragment.knowledge_resource_id == knowledge_resource.id
+                    )
+                )
+                or 0
+            )
+        metadata = latest_snapshot.metadata_json if latest_snapshot and isinstance(latest_snapshot.metadata_json, dict) else {}
+        projection = (resource.sync_config_json or {}).get("projected_dataset") or metadata.get("projected_dataset") or {}
+        files = self._parsed_asset_items_from_projection(projection, key="files", asset_type="file")
+        tables = (
+            self._parsed_asset_items_from_projection(projection, key="schema_tables", asset_type="table")
+            + self._parsed_asset_items_from_metadata(metadata, key="tables", asset_type="table")
+            + self._parsed_asset_items_from_metadata(metadata, key="detected_tables", asset_type="table")
+        )
+        return {
+            "resource_id": resource.id,
+            "latest_snapshot_id": resource.latest_snapshot_id,
+            "projected_dataset_id": (resource.sync_config_json or {}).get("projected_dataset_id"),
+            "parse_status": knowledge_resource.parse_status if knowledge_resource else self._parse_status_for_snapshot(latest_snapshot),
+            "parser_version": latest_snapshot.parser_version if latest_snapshot else None,
+            "parser_warnings": self._parser_warnings(metadata),
+            "files": files,
+            "tables": tables,
+            "evidence_count": evidence_count,
+            "metadata": {
+                "content_hash": latest_snapshot.content_hash if latest_snapshot else None,
+                "raw_storage_uri": latest_snapshot.raw_storage_uri if latest_snapshot else None,
+                "content_size": metadata.get("content_size"),
+                "fragment_hint": metadata.get("fragment_hint"),
+            },
+        }
+
+    async def lineage_payload(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        resource_id: str | UUID,
+    ) -> dict[str, Any]:
+        resource = await self.get_resource(session=session, tenant_id=tenant_id, resource_id=resource_id)
+        if resource is None:
+            raise ValueError("Source resource not found")
+        latest_snapshot = await session.get(SourceSnapshot, resource.latest_snapshot_id) if resource.latest_snapshot_id else None
+        knowledge_resource = await self._latest_knowledge_resource(
+            session=session,
+            tenant_id=tenant_id,
+            resource_id=resource.id,
+        )
+        projected_dataset_id = (resource.sync_config_json or {}).get("projected_dataset_id")
+        nodes = [
+            {
+                "id": f"source:{resource.id}",
+                "node_type": "source_resource",
+                "label": resource.name,
+                "status": resource.status,
+                "metadata": {
+                    "resource_type": resource.resource_type,
+                    "external_id": resource.external_id,
+                    "source_url": resource.source_url,
+                },
+            }
+        ]
+        edges: list[dict[str, Any]] = []
+        if resource.source_connection_id:
+            nodes.append(
+                {
+                    "id": f"source_connection:{resource.source_connection_id}",
+                    "node_type": "source_connection",
+                    "label": str(resource.source_connection_id),
+                    "status": None,
+                    "metadata": {},
+                }
+            )
+            edges.append(
+                {
+                    "from_id": f"source_connection:{resource.source_connection_id}",
+                    "to_id": f"source:{resource.id}",
+                    "relationship": "selects_resource",
+                    "metadata": {},
+                }
+            )
+        if latest_snapshot:
+            nodes.append(
+                {
+                    "id": f"snapshot:{latest_snapshot.id}",
+                    "node_type": "source_snapshot",
+                    "label": f"Snapshot {latest_snapshot.captured_at.isoformat()}",
+                    "status": latest_snapshot.status,
+                    "metadata": {
+                        "external_revision": latest_snapshot.external_revision,
+                        "content_hash": latest_snapshot.content_hash,
+                        "raw_storage_uri": latest_snapshot.raw_storage_uri,
+                        "parser_version": latest_snapshot.parser_version,
+                    },
+                }
+            )
+            edges.append(
+                {
+                    "from_id": f"source:{resource.id}",
+                    "to_id": f"snapshot:{latest_snapshot.id}",
+                    "relationship": "captured_as",
+                    "metadata": {},
+                }
+            )
+        if knowledge_resource:
+            nodes.append(
+                {
+                    "id": f"knowledge:{knowledge_resource.id}",
+                    "node_type": "knowledge_resource",
+                    "label": knowledge_resource.context_uri or knowledge_resource.provider_resource_id or str(knowledge_resource.id),
+                    "status": knowledge_resource.index_status,
+                    "metadata": {
+                        "provider": knowledge_resource.provider,
+                        "provider_status": knowledge_resource.provider_status,
+                        "context_uri": knowledge_resource.context_uri,
+                        "retrieval_debug_uri": knowledge_resource.retrieval_debug_uri,
+                    },
+                }
+            )
+            if latest_snapshot:
+                edges.append(
+                    {
+                        "from_id": f"snapshot:{latest_snapshot.id}",
+                        "to_id": f"knowledge:{knowledge_resource.id}",
+                        "relationship": "indexed_as",
+                        "metadata": {"provider": knowledge_resource.provider},
+                    }
+                )
+        if projected_dataset_id:
+            nodes.append(
+                {
+                    "id": f"dataset:{projected_dataset_id}",
+                    "node_type": "projected_dataset",
+                    "label": str(projected_dataset_id),
+                    "status": "projected",
+                    "metadata": {},
+                }
+            )
+            if latest_snapshot:
+                edges.append(
+                    {
+                        "from_id": f"snapshot:{latest_snapshot.id}",
+                        "to_id": f"dataset:{projected_dataset_id}",
+                        "relationship": "projected_to",
+                        "metadata": {},
+                    }
+                )
+        return {"resource_id": resource.id, "nodes": nodes, "edges": edges}
+
+    async def consumers_payload(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        resource_id: str | UUID,
+    ) -> dict[str, Any]:
+        resource = await self.get_resource(session=session, tenant_id=tenant_id, resource_id=resource_id)
+        if resource is None:
+            raise ValueError("Source resource not found")
+        knowledge_resource = await self._latest_knowledge_resource(
+            session=session,
+            tenant_id=tenant_id,
+            resource_id=resource.id,
+        )
+        projected_dataset_id = (resource.sync_config_json or {}).get("projected_dataset_id")
+        source_ids = {str(resource.id)}
+        projected_dataset_ids: set[str] = set()
+        if projected_dataset_id:
+            source_ids.add(str(projected_dataset_id))
+            projected_dataset_ids.add(str(projected_dataset_id))
+        consumers: list[dict[str, Any]] = []
+        semantic_result = await session.execute(
+            select(SemanticModel).where(
+                SemanticModel.tenant_id == tenant_id,
+                SemanticModel.datasource_id.in_(source_ids),
+            )
+        )
+        for model in semantic_result.scalars().all():
+            consumers.append(
+                {
+                    "id": str(model.id),
+                    "consumer_type": "semantic_model",
+                    "name": model.name,
+                    "status": model.status,
+                    "relationship": "models_source",
+                    "created_at": model.created_at,
+                    "updated_at": model.updated_at,
+                    "metadata": {
+                        "slug": model.slug,
+                        "readiness": model.readiness,
+                        "readiness_level": model.readiness_level,
+                        "published_version": model.published_version,
+                    },
+                }
+            )
+        consumers.extend(
+            await self._notebook_consumers(
+                session=session,
+                tenant_id=tenant_id,
+                projected_dataset_ids=projected_dataset_ids,
+                knowledge_resource=knowledge_resource,
+            )
+        )
+        consumers.extend(await self._dashboard_consumers(session=session, tenant_id=tenant_id, notebook_ids=self._notebook_ids(consumers)))
+        consumers.extend(await self._analysis_artifact_consumers(session=session, tenant_id=tenant_id, notebook_ids=self._notebook_ids(consumers)))
+        counts: dict[str, int] = {}
+        for consumer in consumers:
+            counts[consumer["consumer_type"]] = counts.get(consumer["consumer_type"], 0) + 1
+        return {"resource_id": resource.id, "items": consumers, "total": len(consumers), "counts": counts}
 
     async def search_knowledge(
         self,
@@ -1616,6 +1850,227 @@ class SourceResourceService:
             "metadata_json": snapshot.metadata_json,
             "status": snapshot.status,
             "error_json": snapshot.error_json,
+        }
+
+    async def _latest_knowledge_resource(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        resource_id: UUID,
+    ) -> KnowledgeResource | None:
+        return await session.scalar(
+            select(KnowledgeResource)
+            .where(KnowledgeResource.tenant_id == tenant_id, KnowledgeResource.resource_id == resource_id)
+            .order_by(KnowledgeResource.created_at.desc())
+            .limit(1)
+        )
+
+    def _parse_status_for_snapshot(self, snapshot: SourceSnapshot | None) -> str:
+        if snapshot is None:
+            return "pending"
+        if snapshot.status == "failed":
+            return "failed"
+        return "parsed"
+
+    def _parser_warnings(self, metadata: dict[str, Any]) -> list[Any]:
+        for key in ("parser_warnings", "warnings"):
+            value = metadata.get(key)
+            if isinstance(value, list):
+                return value
+        return []
+
+    def _parsed_asset_items_from_projection(
+        self,
+        projection: dict[str, Any],
+        *,
+        key: str,
+        asset_type: str,
+    ) -> list[dict[str, Any]]:
+        value = projection.get(key)
+        if not isinstance(value, list):
+            return []
+        return [self._parsed_asset_item(item=item, index=index, asset_type=asset_type) for index, item in enumerate(value, start=1)]
+
+    def _parsed_asset_items_from_metadata(
+        self,
+        metadata: dict[str, Any],
+        *,
+        key: str,
+        asset_type: str,
+    ) -> list[dict[str, Any]]:
+        value = metadata.get(key)
+        if not isinstance(value, list):
+            return []
+        return [self._parsed_asset_item(item=item, index=index, asset_type=asset_type) for index, item in enumerate(value, start=1)]
+
+    def _parsed_asset_item(self, *, item: Any, index: int, asset_type: str) -> dict[str, Any]:
+        if isinstance(item, dict):
+            name = (
+                item.get("name")
+                or item.get("filename")
+                or item.get("table_name")
+                or item.get("sheet_name")
+                or item.get("title")
+                or f"{asset_type.title()} {index}"
+            )
+            locator = item.get("source_locator") or item.get("locator") or {}
+            metadata = {
+                key: value
+                for key, value in item.items()
+                if key not in {"source_locator", "locator", "data"}
+            }
+            return {
+                "asset_type": asset_type,
+                "name": str(name),
+                "status": str(item.get("status") or "available"),
+                "locator": locator if isinstance(locator, dict) else {},
+                "metadata": metadata,
+            }
+        return {
+            "asset_type": asset_type,
+            "name": str(item or f"{asset_type.title()} {index}"),
+            "status": "available",
+            "locator": {},
+            "metadata": {},
+        }
+
+    async def _notebook_consumers(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        projected_dataset_ids: set[str],
+        knowledge_resource: KnowledgeResource | None,
+    ) -> list[dict[str, Any]]:
+        notebook_map: dict[str, dict[str, Any]] = {}
+        if projected_dataset_ids:
+            dataset_result = await session.execute(
+                select(NotebookDataset, Notebook)
+                .join(Notebook, Notebook.id == NotebookDataset.notebook_id)
+                .where(Notebook.tenant_id == tenant_id, NotebookDataset.dataset_id.in_(projected_dataset_ids))
+            )
+            for link, notebook in dataset_result.all():
+                notebook_map[str(notebook.id)] = self._consumer_item(
+                    id=str(notebook.id),
+                    consumer_type="notebook",
+                    name=notebook.notebook_name,
+                    status=None,
+                    relationship="uses_projected_dataset",
+                    created_at=notebook.created_at,
+                    updated_at=notebook.updated_at,
+                    metadata={"asset_id": str(link.dataset_id)},
+                )
+        if knowledge_resource:
+            asset_result = await session.execute(
+                select(NotebookAsset, Notebook)
+                .join(Notebook, Notebook.id == NotebookAsset.notebook_id)
+                .where(
+                    NotebookAsset.tenant_id == tenant_id,
+                    NotebookAsset.asset_type == "knowledge_resource",
+                    NotebookAsset.asset_id == str(knowledge_resource.id),
+                )
+            )
+            for asset, notebook in asset_result.all():
+                notebook_map[str(notebook.id)] = self._consumer_item(
+                    id=str(notebook.id),
+                    consumer_type="notebook",
+                    name=notebook.notebook_name,
+                    status=None,
+                    relationship="uses_knowledge_resource",
+                    created_at=notebook.created_at,
+                    updated_at=notebook.updated_at,
+                    metadata={"asset_id": asset.asset_id, "usage_policy": asset.usage_policy_json},
+                )
+        return list(notebook_map.values())
+
+    async def _dashboard_consumers(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        notebook_ids: set[str],
+    ) -> list[dict[str, Any]]:
+        if not notebook_ids:
+            return []
+        result = await session.execute(
+            select(Dashboard, Notebook)
+            .join(Notebook, Notebook.id == Dashboard.notebook_id)
+            .where(Dashboard.tenant_id == tenant_id, Dashboard.notebook_id.in_(notebook_ids))
+        )
+        return [
+            self._consumer_item(
+                id=str(dashboard.id),
+                consumer_type="dashboard",
+                name=f"{notebook.notebook_name} dashboard v{dashboard.version_num}",
+                status="published",
+                relationship="created_from_notebook",
+                created_at=dashboard.created_at,
+                updated_at=None,
+                metadata={"notebook_id": str(notebook.id), "version_num": dashboard.version_num},
+            )
+            for dashboard, notebook in result.all()
+        ]
+
+    async def _analysis_artifact_consumers(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        notebook_ids: set[str],
+    ) -> list[dict[str, Any]]:
+        if not notebook_ids:
+            return []
+        result = await session.execute(
+            select(AnalysisArtifact)
+            .where(AnalysisArtifact.tenant_id == tenant_id, AnalysisArtifact.notebook_id.in_(notebook_ids))
+        )
+        return [
+            self._consumer_item(
+                id=str(artifact.id),
+                consumer_type="analysis_artifact",
+                name=artifact.name,
+                status=artifact.status,
+                relationship="created_from_notebook",
+                created_at=artifact.created_at,
+                updated_at=artifact.updated_at,
+                metadata={
+                    "notebook_id": str(artifact.notebook_id),
+                    "version": artifact.version,
+                    "latest_result_snapshot_id": artifact.latest_result_snapshot_id,
+                },
+            )
+            for artifact in result.scalars().all()
+        ]
+
+    def _notebook_ids(self, consumers: list[dict[str, Any]]) -> set[str]:
+        return {
+            consumer["id"]
+            for consumer in consumers
+            if consumer.get("consumer_type") == "notebook" and consumer.get("id")
+        }
+
+    def _consumer_item(
+        self,
+        *,
+        id: str,
+        consumer_type: str,
+        name: str,
+        status: str | None,
+        relationship: str,
+        created_at: datetime | None,
+        updated_at: datetime | None,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "id": id,
+            "consumer_type": consumer_type,
+            "name": name,
+            "status": status,
+            "relationship": relationship,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "metadata": metadata,
         }
 
     async def _knowledge_resource_payload(

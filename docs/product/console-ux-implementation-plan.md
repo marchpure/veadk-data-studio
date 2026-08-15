@@ -360,15 +360,12 @@ Files:
 - new `client/src/components/sources/SourceEvidencePanel.tsx`
 - `client/src/services/api.ts`
 
-Current API support:
+API support:
 
 - `GET /source-resources/{resource_id}`
 - `GET /source-resources/{resource_id}/snapshots`
 - `GET /source-resources/{resource_id}/processing`
 - `POST /knowledge/search`
-
-Needed API:
-
 - `GET /source-resources/{resource_id}/consumers`
 - `GET /source-resources/{resource_id}/parsed-assets`
 - `GET /source-resources/{resource_id}/lineage`
@@ -389,13 +386,14 @@ Current implementation:
 - `client/src/pages/SourceDetailPage.tsx` implements the read-only MVP for `SourceResource` sources.
 - `/sources/:sourceId` is registered in enterprise, community/local, and legacy local route trees.
 - The Sources inventory links `source_kind = source_resource` rows to `/sources/:sourceId`; connection-backed sources still use the existing edit sidebar.
-- The page reads `GET /source-resources/{resource_id}`, `GET /source-resources/{resource_id}/snapshots`, `GET /source-resources/{resource_id}/processing`, and `POST /knowledge/search`.
+- The page reads `GET /source-resources/{resource_id}`, `GET /source-resources/{resource_id}/snapshots`, `GET /source-resources/{resource_id}/processing`, `GET /source-resources/{resource_id}/parsed-assets`, `GET /source-resources/{resource_id}/lineage`, `GET /source-resources/{resource_id}/consumers`, and `POST /knowledge/search`.
 - The page shows metric cards for snapshot capture, dataset projection, context index status, and evidence count.
 - The Processing section uses the same commercial step labels as post-import processing: `Capture`, `Parse`, `Detect tables`, `Normalize dataset`, `Index context`, `Generate semantic suggestions`, and `Ready`.
-- Overview and Lineage show external identity, source URL, sync mode, connection id, latest snapshot id, projected dataset id, knowledge resource id, and context URI.
-- Parsed content and Tables are read-only. They use snapshot metadata, parser version, parser warnings, content hash, projected dataset id, and detected table metadata when available.
+- Overview shows external identity, source URL, sync mode, and timestamps.
+- Lineage is backed by the support API and shows source resource, source connection, latest snapshot, knowledge resource, and projected dataset nodes with captured/indexed/projected edges.
+- Parsed content and Tables are read-only and backed by the support API. They show parser version, parser warnings, content hash, raw artifact URI, detected files, detected tables, projected dataset id, and evidence count.
 - Evidence search is scoped to the current source resource and shows evidence type, confidence, and text preview.
-- Consumers is intentionally a placeholder for the future `/consumers` API; current consumer counts remain visible in the Sources inventory.
+- Consumers is backed by the support API and shows semantic models, notebooks, dashboards, and analysis artifacts that reference the source or its latest knowledge resource.
 - Settings exposes visibility, context provider, provider status, last indexed time, retrieval debug URI, delete behavior, reindex behavior, and provider error metadata for admin/debug use.
 
 Acceptance:

@@ -12,6 +12,9 @@ from server.schemas.source_resources import (
     KnowledgeSearchResponse,
     NotebookAssetCreate,
     NotebookAssetRead,
+    SourceConsumersRead,
+    SourceLineageRead,
+    SourceParsedAssetsRead,
     SourceResourceCreate,
     SourceResourceImportRequest,
     SourceResourceProcessingRead,
@@ -110,6 +113,57 @@ async def list_source_resource_snapshots(
             resource_id=resource_id,
         )
         return success_response(data=data, message="Retrieved source resource snapshots")
+    except ValueError as error:
+        raise _bad_request_or_not_found(error)
+
+
+@router.get("/source-resources/{resource_id}/parsed-assets", response_model=StandardResponse[SourceParsedAssetsRead])
+async def get_source_resource_parsed_assets(
+    resource_id: str,
+    auth: AuthContext = Depends(require_scope(Scope.DATASET_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        data = await source_resource_service.parsed_assets_payload(
+            session=session,
+            tenant_id=auth.tenant_id,
+            resource_id=resource_id,
+        )
+        return success_response(data=data, message="Retrieved source resource parsed assets")
+    except ValueError as error:
+        raise _bad_request_or_not_found(error)
+
+
+@router.get("/source-resources/{resource_id}/lineage", response_model=StandardResponse[SourceLineageRead])
+async def get_source_resource_lineage(
+    resource_id: str,
+    auth: AuthContext = Depends(require_scope(Scope.DATASET_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        data = await source_resource_service.lineage_payload(
+            session=session,
+            tenant_id=auth.tenant_id,
+            resource_id=resource_id,
+        )
+        return success_response(data=data, message="Retrieved source resource lineage")
+    except ValueError as error:
+        raise _bad_request_or_not_found(error)
+
+
+@router.get("/source-resources/{resource_id}/consumers", response_model=StandardResponse[SourceConsumersRead])
+async def get_source_resource_consumers(
+    resource_id: str,
+    auth: AuthContext = Depends(require_scope(Scope.DATASET_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        data = await source_resource_service.consumers_payload(
+            session=session,
+            tenant_id=auth.tenant_id,
+            resource_id=resource_id,
+        )
+        return success_response(data=data, message="Retrieved source resource consumers")
     except ValueError as error:
         raise _bad_request_or_not_found(error)
 

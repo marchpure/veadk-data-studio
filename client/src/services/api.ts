@@ -976,6 +976,66 @@ export interface SourceResourceProcessing {
   next_actions: string[]
 }
 
+export interface SourceParsedAssetItem {
+  asset_type: string
+  name: string
+  status: string
+  locator: Record<string, any>
+  metadata: Record<string, any>
+}
+
+export interface SourceParsedAssetsResponse {
+  resource_id: string
+  latest_snapshot_id?: string | null
+  projected_dataset_id?: string | null
+  parse_status: string
+  parser_version?: string | null
+  parser_warnings: unknown[]
+  files: SourceParsedAssetItem[]
+  tables: SourceParsedAssetItem[]
+  evidence_count: number
+  metadata: Record<string, any>
+}
+
+export interface SourceLineageNode {
+  id: string
+  node_type: string
+  label: string
+  status?: string | null
+  metadata: Record<string, any>
+}
+
+export interface SourceLineageEdge {
+  from_id: string
+  to_id: string
+  relationship: string
+  metadata: Record<string, any>
+}
+
+export interface SourceLineageResponse {
+  resource_id: string
+  nodes: SourceLineageNode[]
+  edges: SourceLineageEdge[]
+}
+
+export interface SourceConsumerItem {
+  id: string
+  consumer_type: string
+  name: string
+  status?: string | null
+  relationship: string
+  created_at?: string | null
+  updated_at?: string | null
+  metadata: Record<string, any>
+}
+
+export interface SourceConsumersResponse {
+  resource_id: string
+  items: SourceConsumerItem[]
+  total: number
+  counts: Record<string, number>
+}
+
 export interface SourceResourceCreateRequest {
   resource_type: SourceResourceType
   name: string
@@ -3153,6 +3213,51 @@ export class ApiService {
       return extractData<SourceResourceSnapshotsResponse>(responseData)
     } catch (error) {
       console.error('Error fetching source resource snapshots:', error)
+      throw error
+    }
+  }
+
+  static async getSourceResourceParsedAssets(resourceId: string): Promise<SourceParsedAssetsResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/source-resources/${resourceId}/parsed-assets`)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
+      }
+      const responseData = await response.json()
+      return extractData<SourceParsedAssetsResponse>(responseData)
+    } catch (error) {
+      console.error('Error fetching source resource parsed assets:', error)
+      throw error
+    }
+  }
+
+  static async getSourceResourceLineage(resourceId: string): Promise<SourceLineageResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/source-resources/${resourceId}/lineage`)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
+      }
+      const responseData = await response.json()
+      return extractData<SourceLineageResponse>(responseData)
+    } catch (error) {
+      console.error('Error fetching source resource lineage:', error)
+      throw error
+    }
+  }
+
+  static async getSourceResourceConsumers(resourceId: string): Promise<SourceConsumersResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/source-resources/${resourceId}/consumers`)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
+      }
+      const responseData = await response.json()
+      return extractData<SourceConsumersResponse>(responseData)
+    } catch (error) {
+      console.error('Error fetching source resource consumers:', error)
       throw error
     }
   }

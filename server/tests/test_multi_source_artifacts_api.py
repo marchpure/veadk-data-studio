@@ -7,11 +7,13 @@ import pytest
 from sqlalchemy import select
 
 from server.models.analysis_artifacts import AnalysisArtifact
+from server.models.dashboard import Dashboard
 from server.models.datasets import Dataset
 from server.models.files import File
 from server.models.knowledge_resources import EvidenceFragment, KnowledgeResource
 from server.models.notebook_assets import NotebookAsset
 from server.models.notebooks import Notebook
+from server.models.semantic_models import SemanticModel
 from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
 from server.models.tenant import Tenant
@@ -556,6 +558,97 @@ async def test_notebook_assets_bind_knowledge_resource(test_client, test_session
     rows = (await test_session.execute(select(NotebookAsset))).scalars().all()
     assert len(rows) == 1
     assert rows[0].usage_policy_json["purpose"] == "evidence"
+
+
+async def test_source_detail_support_apis_return_parsed_assets_lineage_and_consumers(test_client, test_session):
+    tenant = await _tenant(test_session)
+    notebook = await _create_notebook(test_client)
+    created = await test_client.post(
+        "/api/source-resources",
+        json={
+            "resource_type": "feishu_doc",
+            "name": "经营规则说明",
+            "external_id": "docx_rules",
+            "source_url": "https://example.feishu.cn/docx/docx_rules",
+            "content": "渠道收入达成率 = 实际收入 / 目标收入。",
+            "external_revision": "rev-20",
+            "metadata": {
+                "tables": [{"name": "rules_table", "row_count": 1, "column_count": 2}],
+                "parser_warnings": ["one formula was kept as text"],
+                "locator": {"document_token": "docx_rules", "block_id": "blk_rule"},
+            },
+        },
+    )
+    assert created.status_code == 201
+    resource = created.json()["data"]
+    knowledge_id = resource["knowledge_resource"]["id"]
+
+    bind = await test_client.post(
+        f"/api/notebooks/{notebook['id']}/assets",
+        json={"asset_type": "knowledge_resource", "asset_id": knowledge_id, "usage_policy": {"purpose": "evidence"}},
+    )
+    assert bind.status_code == 200
+
+    semantic_model = SemanticModel(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        slug="rules_model",
+        name="Rules Model",
+        domain="Operations",
+        owner="Data Team",
+        datasource_id=resource["id"],
+        datasource_name=resource["name"],
+        datasource_kind="feishu_doc",
+        description="Rules semantic draft",
+        status="Draft",
+        readiness=45,
+        readiness_level="review",
+        published_version="v0",
+    )
+    test_session.add(semantic_model)
+    test_session.add(
+        Dashboard(
+            tenant_id=tenant.id,
+            notebook_id=notebook["id"],
+            version_num=1,
+            html_content="<html>dashboard</html>",
+        )
+    )
+    test_session.add(
+        AnalysisArtifact(
+            tenant_id=tenant.id,
+            notebook_id=notebook["id"],
+            name="经营规则分析",
+            objective="Explain rules",
+            definition_json={"source_snapshot_refs": [resource["latest_snapshot_id"]]},
+            status="published",
+        )
+    )
+    await test_session.commit()
+
+    parsed = await test_client.get(f"/api/source-resources/{resource['id']}/parsed-assets")
+    assert parsed.status_code == 200
+    parsed_payload = parsed.json()["data"]
+    assert parsed_payload["latest_snapshot_id"] == resource["latest_snapshot_id"]
+    assert parsed_payload["parser_warnings"] == ["one formula was kept as text"]
+    assert parsed_payload["tables"][0]["name"] == "rules_table"
+    assert parsed_payload["evidence_count"] == 1
+
+    lineage = await test_client.get(f"/api/source-resources/{resource['id']}/lineage")
+    assert lineage.status_code == 200
+    lineage_payload = lineage.json()["data"]
+    node_types = {node["node_type"] for node in lineage_payload["nodes"]}
+    assert {"source_resource", "source_snapshot", "knowledge_resource"}.issubset(node_types)
+    assert any(edge["relationship"] == "captured_as" for edge in lineage_payload["edges"])
+    assert any(edge["relationship"] == "indexed_as" for edge in lineage_payload["edges"])
+
+    consumers = await test_client.get(f"/api/source-resources/{resource['id']}/consumers")
+    assert consumers.status_code == 200
+    consumer_payload = consumers.json()["data"]
+    consumer_types = {item["consumer_type"] for item in consumer_payload["items"]}
+    assert {"semantic_model", "notebook", "dashboard", "analysis_artifact"}.issubset(consumer_types)
+    assert consumer_payload["counts"]["semantic_model"] == 1
+    assert consumer_payload["counts"]["notebook"] == 1
 
 
 async def test_agent_asset_search_and_describe_spans_dataset_and_knowledge_resource(test_client, test_session):

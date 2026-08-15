@@ -20,6 +20,9 @@ import {
   type SourceConnectionCreateRequest,
   type SourceResourceImportRequest,
   type SourceResourceImportResponse,
+  type SourceConsumersResponse,
+  type SourceLineageResponse,
+  type SourceParsedAssetsResponse,
   type SourceResourcePickerResponse,
   type SourceResourceProcessing,
   type SourceResourceQuickLocateResponse,
@@ -60,6 +63,9 @@ export const sourceConnectorKeys = {
   processing: (resourceId?: string) => [...sourceConnectorKeys.all, 'processing', resourceId || 'none'] as const,
   sourceResource: (resourceId?: string) => [...sourceConnectorKeys.all, 'source-resource', resourceId || 'none'] as const,
   snapshots: (resourceId?: string) => [...sourceConnectorKeys.all, 'snapshots', resourceId || 'none'] as const,
+  parsedAssets: (resourceId?: string) => [...sourceConnectorKeys.all, 'parsed-assets', resourceId || 'none'] as const,
+  lineage: (resourceId?: string) => [...sourceConnectorKeys.all, 'lineage', resourceId || 'none'] as const,
+  consumers: (resourceId?: string) => [...sourceConnectorKeys.all, 'consumers', resourceId || 'none'] as const,
   knowledgeSearch: (resourceId?: string, query?: string) => [...sourceConnectorKeys.all, 'knowledge-search', resourceId || 'none', query || ''] as const,
 }
 
@@ -502,6 +508,45 @@ export function useSourceResourceSnapshots(resourceId?: string) {
     queryFn: async (): Promise<SourceResourceSnapshotsResponse> => {
       if (!resourceId) throw new Error('Missing source resource id')
       return ApiService.listSourceResourceSnapshots(resourceId)
+    },
+    enabled: !!resourceId,
+    staleTime: 30 * 1000,
+    gcTime: 2 * 60 * 1000,
+  })
+}
+
+export function useSourceResourceParsedAssets(resourceId?: string) {
+  return useQuery({
+    queryKey: sourceConnectorKeys.parsedAssets(resourceId),
+    queryFn: async (): Promise<SourceParsedAssetsResponse> => {
+      if (!resourceId) throw new Error('Missing source resource id')
+      return ApiService.getSourceResourceParsedAssets(resourceId)
+    },
+    enabled: !!resourceId,
+    staleTime: 30 * 1000,
+    gcTime: 2 * 60 * 1000,
+  })
+}
+
+export function useSourceResourceLineage(resourceId?: string) {
+  return useQuery({
+    queryKey: sourceConnectorKeys.lineage(resourceId),
+    queryFn: async (): Promise<SourceLineageResponse> => {
+      if (!resourceId) throw new Error('Missing source resource id')
+      return ApiService.getSourceResourceLineage(resourceId)
+    },
+    enabled: !!resourceId,
+    staleTime: 30 * 1000,
+    gcTime: 2 * 60 * 1000,
+  })
+}
+
+export function useSourceResourceConsumers(resourceId?: string) {
+  return useQuery({
+    queryKey: sourceConnectorKeys.consumers(resourceId),
+    queryFn: async (): Promise<SourceConsumersResponse> => {
+      if (!resourceId) throw new Error('Missing source resource id')
+      return ApiService.getSourceResourceConsumers(resourceId)
     },
     enabled: !!resourceId,
     staleTime: 30 * 1000,

@@ -142,6 +142,66 @@ class SourceResourceProcessingRead(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class SourceParsedAssetItem(BaseModel):
+    asset_type: str
+    name: str
+    status: str = "available"
+    locator: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceParsedAssetsRead(BaseModel):
+    resource_id: UUID
+    latest_snapshot_id: UUID | None = None
+    projected_dataset_id: UUID | None = None
+    parse_status: str
+    parser_version: str | None = None
+    parser_warnings: list[Any] = Field(default_factory=list)
+    files: list[SourceParsedAssetItem] = Field(default_factory=list)
+    tables: list[SourceParsedAssetItem] = Field(default_factory=list)
+    evidence_count: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceLineageNode(BaseModel):
+    id: str
+    node_type: str
+    label: str
+    status: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceLineageEdge(BaseModel):
+    from_id: str
+    to_id: str
+    relationship: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceLineageRead(BaseModel):
+    resource_id: UUID
+    nodes: list[SourceLineageNode]
+    edges: list[SourceLineageEdge]
+
+
+class SourceConsumerItem(BaseModel):
+    id: str
+    consumer_type: str
+    name: str
+    status: str | None = None
+    relationship: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceConsumersRead(BaseModel):
+    resource_id: UUID
+    items: list[SourceConsumerItem]
+    total: int
+    counts: dict[str, int] = Field(default_factory=dict)
+
+
 class KnowledgeSearchRequest(BaseModel):
     query: str
     resource_ids: list[UUID] = Field(default_factory=list)

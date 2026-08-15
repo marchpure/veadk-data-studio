@@ -4,8 +4,16 @@ import { useState, type ReactNode } from 'react'
 import { Button } from '../components/ui/button'
 import { Card } from '../components/ui/card'
 import { Input } from '../components/ui/input'
-import { useKnowledgeSearch, useSourceResource, useSourceResourceProcessing, useSourceResourceSnapshots } from '../hooks/useDBConnections'
-import type { SourceResource, SourceResourceProcessing, SourceSnapshot } from '../services/api'
+import {
+  useKnowledgeSearch,
+  useSourceResource,
+  useSourceResourceConsumers,
+  useSourceResourceLineage,
+  useSourceResourceParsedAssets,
+  useSourceResourceProcessing,
+  useSourceResourceSnapshots,
+} from '../hooks/useDBConnections'
+import type { SourceConsumerItem, SourceLineageEdge, SourceLineageNode, SourceParsedAssetItem, SourceResource, SourceResourceProcessing, SourceSnapshot } from '../services/api'
 
 const sourceDetailSteps = [
   'Capture',
@@ -62,27 +70,24 @@ export default function SourceDetailPage() {
   const resourceQuery = useSourceResource(sourceId)
   const snapshotsQuery = useSourceResourceSnapshots(sourceId)
   const processingQuery = useSourceResourceProcessing(sourceId)
+  const parsedAssetsQuery = useSourceResourceParsedAssets(sourceId)
+  const lineageQuery = useSourceResourceLineage(sourceId)
+  const consumersQuery = useSourceResourceConsumers(sourceId)
   const knowledgeQuery = useKnowledgeSearch(sourceId, evidenceQuery, !!sourceId && !!resourceQuery.data?.knowledge_resource)
 
   const resource = resourceQuery.data
   const processing = processingQuery.data
   const snapshots = snapshotsQuery.data?.items || []
   const latestSnapshot = resource?.latest_snapshot || snapshots[0] || null
-  const snapshotMetadata = latestSnapshot?.metadata_json || {}
+  const parsedAssets = parsedAssetsQuery.data || null
+  const lineage = lineageQuery.data || null
+  const consumers = consumersQuery.data || null
   const evidence = knowledgeQuery.data?.items || []
   const progressIndex = processingIndex(resource, processing)
-  const parserWarnings = Array.isArray(snapshotMetadata.parser_warnings)
-    ? snapshotMetadata.parser_warnings
-    : Array.isArray(snapshotMetadata.warnings)
-      ? snapshotMetadata.warnings
-      : []
-  const detectedTables = Array.isArray(snapshotMetadata.tables)
-    ? snapshotMetadata.tables
-    : Array.isArray(snapshotMetadata.detected_tables)
-      ? snapshotMetadata.detected_tables
-      : []
-  const fragmentHint = typeof snapshotMetadata.fragment_hint === 'string' ? snapshotMetadata.fragment_hint : null
-  const contentSize = typeof snapshotMetadata.content_size === 'number' ? snapshotMetadata.content_size : null
+  const parserWarnings = parsedAssets?.parser_warnings || []
+  const contentSize = typeof parsedAssets?.metadata?.content_size === 'number' ? parsedAssets.metadata.content_size : null
+  const fragmentHint = typeof parsedAssets?.metadata?.fragment_hint === 'string' ? parsedAssets.metadata.fragment_hint : null
+  const evidenceCount = parsedAssets?.evidence_count ?? resource?.knowledge_resource?.evidence_count ?? processing?.evidence_count ?? 0
 
   if (resourceQuery.isLoading) {
     return (
@@ -141,7 +146,7 @@ export default function SourceDetailPage() {
           <Metric label="Snapshot" value={resource.latest_snapshot_id ? 'Captured' : 'Missing'} tone={resource.latest_snapshot_id ? 'ready' : 'warn'} />
           <Metric label="Dataset" value={resource.projected_dataset_id ? 'Projected' : 'Not projected'} tone={resource.projected_dataset_id ? 'ready' : 'muted'} />
           <Metric label="Context" value={resource.knowledge_resource?.index_status || 'Unavailable'} tone={resource.knowledge_resource?.index_status === 'indexed' ? 'ready' : 'muted'} />
-          <Metric label="Evidence" value={`${resource.knowledge_resource?.evidence_count || processing?.evidence_count || 0}`} tone={(resource.knowledge_resource?.evidence_count || processing?.evidence_count || 0) > 0 ? 'ready' : 'muted'} />
+          <Metric label="Evidence" value={`${evidenceCount}`} tone={evidenceCount > 0 ? 'ready' : 'muted'} />
         </div>
 
         <Section title="Processing" icon={<Clock className="h-4 w-4" />}>
@@ -183,21 +188,33 @@ export default function SourceDetailPage() {
           </Section>
 
           <Section title="Lineage" icon={<Network className="h-4 w-4" />}>
-            <KeyValue label="Connection" value={resource.source_connection_id || resource.connection_id || 'Direct source'} />
-            <KeyValue label="Latest snapshot" value={resource.latest_snapshot_id || '-'} />
-            <KeyValue label="Projected dataset" value={resource.projected_dataset_id || '-'} />
-            <KeyValue label="Knowledge resource" value={resource.knowledge_resource?.id || '-'} />
-            <KeyValue label="Context URI" value={resource.knowledge_resource?.context_uri || '-'} />
+            {lineageQuery.isLoading ? (
+              <LoadingRow label="Loading lineage..." />
+            ) : lineage && lineage.nodes.length > 0 ? (
+              <LineageList nodes={lineage.nodes} edges={lineage.edges} />
+            ) : (
+              <EmptyText>No lineage has been captured for this source.</EmptyText>
+            )}
           </Section>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Section title="Parsed content" icon={<FileText className="h-4 w-4" />}>
-            <KeyValue label="Parser version" value={latestSnapshot?.parser_version || resource.knowledge_resource?.parse_status || '-'} />
-            <KeyValue label="Parse status" value={resource.knowledge_resource?.parse_status || latestSnapshot?.status || 'pending'} />
-            <KeyValue label="Content hash" value={latestSnapshot?.content_hash || '-'} />
+            <KeyValue label="Parser version" value={parsedAssets?.parser_version || latestSnapshot?.parser_version || '-'} />
+            <KeyValue label="Parse status" value={parsedAssets?.parse_status || resource.knowledge_resource?.parse_status || latestSnapshot?.status || 'pending'} />
+            <KeyValue label="Content hash" value={parsedAssets?.metadata?.content_hash || latestSnapshot?.content_hash || '-'} />
+            <KeyValue label="Raw artifact" value={parsedAssets?.metadata?.raw_storage_uri || latestSnapshot?.raw_storage_uri || '-'} />
             <KeyValue label="Content size" value={contentSize === null ? '-' : `${contentSize.toLocaleString()} bytes`} />
             <KeyValue label="Fragment hint" value={fragmentHint || '-'} />
+            {parsedAssetsQuery.isLoading && <LoadingRow label="Loading parsed assets..." />}
+            {!!parsedAssets?.files.length && (
+              <div className="mt-4 space-y-2">
+                <div className="text-xs uppercase text-gray-500">Files</div>
+                {parsedAssets.files.slice(0, 5).map((file, index) => (
+                  <ParsedAssetRow key={`${file.name}-${index}`} item={file} />
+                ))}
+              </div>
+            )}
             {parserWarnings.length > 0 && (
               <div className="mt-4 rounded border border-amber-700/30 bg-amber-950/20 p-3">
                 <div className="text-xs uppercase text-amber-200/70">Parser warnings</div>
@@ -211,19 +228,19 @@ export default function SourceDetailPage() {
           </Section>
 
           <Section title="Tables" icon={<Database className="h-4 w-4" />}>
-            {resource.projected_dataset_id ? (
-              <>
-                <KeyValue label="Projection" value={resource.projected_dataset_id} />
-                <KeyValue label="Modeling mode" value="Projection review or semantic model generation can use this dataset." />
-              </>
-            ) : detectedTables.length > 0 ? (
+            {parsedAssetsQuery.isLoading ? (
+              <LoadingRow label="Loading tables..." />
+            ) : parsedAssets?.tables.length ? (
               <div className="space-y-2">
-                {detectedTables.slice(0, 6).map((table, index) => (
-                  <div key={index} className="rounded border border-[#333333] bg-[#151515] p-3 text-sm text-gray-300">
-                    {formatUnknownTable(table, index)}
-                  </div>
+                {parsedAssets.tables.slice(0, 8).map((table, index) => (
+                  <ParsedAssetRow key={`${table.name}-${index}`} item={table} />
                 ))}
               </div>
+            ) : parsedAssets?.projected_dataset_id || resource.projected_dataset_id ? (
+              <>
+                <KeyValue label="Projection" value={parsedAssets?.projected_dataset_id || resource.projected_dataset_id || '-'} />
+                <KeyValue label="Modeling mode" value="Projection review or semantic model generation can use this dataset." />
+              </>
             ) : (
               <EmptyText>No projected tables detected for this source yet.</EmptyText>
             )}
@@ -285,7 +302,13 @@ export default function SourceDetailPage() {
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Section title="Consumers" icon={<Network className="h-4 w-4" />}>
-            <EmptyText>Consumer detail is not yet expanded. The Sources inventory currently shows partial semantic, dashboard, notebook, and MCP counts from the overview facade.</EmptyText>
+            {consumersQuery.isLoading ? (
+              <LoadingRow label="Loading consumers..." />
+            ) : consumers && consumers.items.length > 0 ? (
+              <ConsumerList consumers={consumers.items} counts={consumers.counts} />
+            ) : (
+              <EmptyText>No semantic models, dashboards, notebooks, or artifacts currently consume this source.</EmptyText>
+            )}
           </Section>
           <Section title="Settings" icon={<ShieldAlert className="h-4 w-4" />}>
             <KeyValue label="Visibility" value={resource.visibility} />
@@ -350,6 +373,92 @@ function SnapshotRow({ snapshot }: { snapshot: SourceSnapshot }) {
   )
 }
 
+function ParsedAssetRow({ item }: { item: SourceParsedAssetItem }) {
+  const details = [
+    item.status,
+    formatAssetMetric(item.metadata.rows ?? item.metadata.row_count, 'rows'),
+    formatAssetMetric(item.metadata.columns ?? item.metadata.column_count, 'columns'),
+    formatAssetMetric(item.metadata.size ?? item.metadata.content_size, 'bytes'),
+  ].filter(Boolean)
+
+  return (
+    <div className="rounded border border-[#333333] bg-[#151515] p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium text-gray-200">{item.name}</span>
+        <span className="rounded border border-[#444444] px-2 py-0.5 text-xs capitalize text-gray-400">{item.asset_type}</span>
+      </div>
+      {details.length > 0 && <div className="mt-1 text-xs text-gray-500">{details.join(' · ')}</div>}
+      {Object.keys(item.locator || {}).length > 0 && (
+        <div className="mt-2 truncate text-xs text-gray-500" title={JSON.stringify(item.locator)}>
+          locator: {JSON.stringify(item.locator)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LineageList({ nodes, edges }: { nodes: SourceLineageNode[]; edges: SourceLineageEdge[] }) {
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        {nodes.map(node => (
+          <div key={node.id} className="rounded border border-[#333333] bg-[#151515] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-medium text-gray-200">{node.label}</span>
+              <span className="rounded border border-[#444444] px-2 py-0.5 text-xs text-gray-400">{typeLabel(node.node_type)}</span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-2 text-xs text-gray-500">
+              <span>{node.id}</span>
+              {node.status && <span>{node.status}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {edges.length > 0 && (
+        <div className="rounded border border-[#333333] bg-[#101010] p-3">
+          <div className="mb-2 text-xs uppercase text-gray-500">Edges</div>
+          <div className="space-y-1 text-xs text-gray-400">
+            {edges.map(edge => (
+              <div key={`${edge.from_id}-${edge.relationship}-${edge.to_id}`} className="truncate" title={`${edge.from_id} -> ${edge.to_id}`}>
+                {typeLabel(edge.relationship)}: {edge.from_id} {'->'} {edge.to_id}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ConsumerList({ consumers, counts }: { consumers: SourceConsumerItem[]; counts: Record<string, number> }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2">
+        {Object.entries(counts).map(([type, count]) => (
+          <span key={type} className="rounded border border-[#444444] px-2 py-1 text-xs text-gray-300">
+            {typeLabel(type)}: {count}
+          </span>
+        ))}
+      </div>
+      <div className="space-y-2">
+        {consumers.map(consumer => (
+          <div key={`${consumer.consumer_type}-${consumer.id}`} className="rounded border border-[#333333] bg-[#151515] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-medium text-gray-200">{consumer.name}</span>
+              <span className="rounded border border-[#444444] px-2 py-0.5 text-xs text-gray-400">{typeLabel(consumer.consumer_type)}</span>
+            </div>
+            <div className="mt-1 flex flex-wrap gap-2 text-xs text-gray-500">
+              <span>{typeLabel(consumer.relationship)}</span>
+              {consumer.status && <span>{consumer.status}</span>}
+              <span>{formatDate(consumer.updated_at || consumer.created_at)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function LoadingRow({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 text-sm text-gray-400">
@@ -359,20 +468,10 @@ function LoadingRow({ label }: { label: string }) {
   )
 }
 
-function formatUnknownTable(table: unknown, index: number) {
-  if (table && typeof table === 'object') {
-    const record = table as Record<string, unknown>
-    const name = record.name || record.table_name || record.sheet_name || `Table ${index + 1}`
-    const rows = record.rows ?? record.row_count
-    const columns = record.columns ?? record.column_count
-    const parts = [
-      String(name),
-      rows !== undefined ? `${String(rows)} rows` : null,
-      columns !== undefined ? `${String(columns)} columns` : null,
-    ].filter(Boolean)
-    return parts.join(' · ')
-  }
-  return String(table || `Table ${index + 1}`)
+function formatAssetMetric(value: unknown, unit: string) {
+  if (value === undefined || value === null || value === '') return null
+  if (typeof value === 'number') return `${value.toLocaleString()} ${unit}`
+  return `${String(value)} ${unit}`
 }
 
 function EmptyText({ children }: { children: ReactNode }) {
