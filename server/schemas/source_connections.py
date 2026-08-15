@@ -30,6 +30,7 @@ class ConnectorDefinitionRead(BaseModel):
     readiness_gates: list[dict[str, str]] = Field(default_factory=list)
     modeling_modes: list[str] = Field(default_factory=list)
     description: str = ""
+    entry_kind: str = "connector_backed"
 
 
 class SourceConnectionCreate(BaseModel):

@@ -49,6 +49,7 @@ const sourceConnectorId = (value: DatasourceCreateType): string | null =>
   isSourceConnectorType(value) ? value.slice('connector:'.length) : null
 const isDirectSourceResourceType = (value: DatasourceCreateType) => value === 'pdf' || value === 'web'
 const needsAttentionStates = new Set(['auth', 'permission', 'parse', 'index', 'stale', 'policy'])
+const connectorBackedProviders = new Set(['feishu', 'volcengine_tos'])
 
 const directSourceProcessingSteps = [
   { id: 'capture', label: 'Capture' },
@@ -286,6 +287,11 @@ export default function DatabasesPage() {
     return connectorDefinitions.find(item => item.id === id)
   }, [connectorDefinitions, selectedType])
   const addSourceOptions = useMemo<AddSourceOption[]>(() => {
+    const connectorById = new Map(connectorDefinitions.map(item => [item.id, item]))
+    const sqlConnector = connectorById.get('sql_databases')
+    const fileConnector = connectorById.get('local_files')
+    const webConnector = connectorById.get('web')
+    const databricksConnector = connectorById.get('databricks')
     const baseOptions: AddSourceOption[] = [
       {
         id: 'upload',
@@ -305,8 +311,9 @@ export default function DatabasesPage() {
         availability: 'available',
         outputs: ['Context', 'Dataset'],
         description: 'Capture PDF, CSV, Excel, Docx and PPTX snapshots with evidence and optional dataset projection.',
-        limitations: ['CSV and .xlsx/.xlsm Excel files can be projected into datasets; PDF, Docx and PPTX remain context-assisted unless tables are reviewed.'],
-        modelingModes: ['Context-assisted', 'Projection'],
+        limitations: fileConnector?.limitations ?? ['CSV and .xlsx/.xlsm Excel files can be projected into datasets; PDF, Docx and PPTX remain context-assisted unless tables are reviewed.'],
+        modelingModes: fileConnector?.modeling_modes.map(connectorModeLabel) ?? ['Context-assisted', 'Projection'],
+        connector: fileConnector,
       },
       {
         id: 'url',
@@ -326,14 +333,15 @@ export default function DatabasesPage() {
         availability: 'available',
         outputs: ['Context'],
         description: 'Capture a public web page with SSRF and redirect protections.',
-        limitations: ['Context-assisted only; cannot become a production metric fact source by itself.'],
-        modelingModes: ['Context-assisted'],
+        limitations: webConnector?.limitations ?? ['Context-assisted only; cannot become a production metric fact source by itself.'],
+        modelingModes: webConnector?.modeling_modes.map(connectorModeLabel) ?? ['Context-assisted'],
+        connector: webConnector,
       },
-      { id: 'pg', label: 'PostgreSQL', family: 'databases', icon: Cylinder, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect a PostgreSQL database for schema, sample and profile.', modelingModes: ['Relational'] },
-      { id: 'mysql', label: 'MySQL', family: 'databases', icon: Database, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect MySQL-compatible operational data.', modelingModes: ['Relational'] },
-      { id: 'mssql', label: 'SQL Server', family: 'databases', icon: Server, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect SQL Server data for semantic modeling.', modelingModes: ['Relational'] },
-      { id: 'oracle', label: 'Oracle', family: 'databases', icon: Database, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect Oracle schemas with service name or SID.', modelingModes: ['Relational'] },
-      { id: 'sqlite', label: 'SQLite', family: 'databases', icon: HardDrive, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Use a local SQLite file for repeatable demos and local data.', modelingModes: ['Relational'] },
+      { id: 'pg', label: 'PostgreSQL', family: 'databases', icon: Cylinder, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect a PostgreSQL database for schema, sample and profile.', limitations: sqlConnector?.limitations, modelingModes: sqlConnector?.modeling_modes.map(connectorModeLabel) ?? ['Relational'], connector: sqlConnector },
+      { id: 'mysql', label: 'MySQL', family: 'databases', icon: Database, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect MySQL-compatible operational data.', limitations: sqlConnector?.limitations, modelingModes: sqlConnector?.modeling_modes.map(connectorModeLabel) ?? ['Relational'], connector: sqlConnector },
+      { id: 'mssql', label: 'SQL Server', family: 'databases', icon: Server, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect SQL Server data for semantic modeling.', limitations: sqlConnector?.limitations, modelingModes: sqlConnector?.modeling_modes.map(connectorModeLabel) ?? ['Relational'], connector: sqlConnector },
+      { id: 'oracle', label: 'Oracle', family: 'databases', icon: Database, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect Oracle schemas with service name or SID.', limitations: sqlConnector?.limitations, modelingModes: sqlConnector?.modeling_modes.map(connectorModeLabel) ?? ['Relational'], connector: sqlConnector },
+      { id: 'sqlite', label: 'SQLite', family: 'databases', icon: HardDrive, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Use a local SQLite file for repeatable demos and local data.', limitations: sqlConnector?.limitations, modelingModes: sqlConnector?.modeling_modes.map(connectorModeLabel) ?? ['Relational'], connector: sqlConnector },
       { id: 'mongo', label: 'MongoDB', family: 'databases', icon: Leaf, availability: 'beta', outputs: ['Dataset'], description: 'MongoDB remains a beta structured-source connector.', limitations: ['No production semantic publish gate yet.'], modelingModes: ['Business object'] },
       { id: 'dynamodb', label: 'DynamoDB', family: 'databases', icon: Cloud, availability: 'beta', outputs: ['Dataset'], description: 'DynamoDB remains a beta NoSQL connector path.', limitations: ['No production semantic publish gate yet.'], modelingModes: ['Business object'] },
     ]
@@ -346,11 +354,15 @@ export default function DatabasesPage() {
         availability: 'available',
         outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'],
         description: 'Wrap the existing Databricks OAuth and catalog picker as a Source.',
-        modelingModes: ['Warehouse'],
+        limitations: databricksConnector?.limitations,
+        modelingModes: databricksConnector?.modeling_modes.map(connectorModeLabel) ?? ['Warehouse'],
+        connector: databricksConnector,
       })
     }
 
-    const connectorOptions = connectorDefinitions.map<AddSourceOption>(item => {
+    const connectorOptions = connectorDefinitions
+      .filter(item => item.entry_kind !== 'embedded_flow' && (item.availability === 'planned' || connectorBackedProviders.has(item.id)))
+      .map<AddSourceOption>(item => {
       const family = connectorCategoryFamily(item.category)
       const availability = item.availability
       return {

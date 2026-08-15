@@ -337,7 +337,28 @@ async def test_connector_catalog_marks_only_real_connectors_available(test_clien
     assert response.status_code == 200
     items = response.json()["data"]["items"]
     by_id = {item["id"]: item for item in items}
+    assert {
+        "local_files",
+        "feishu",
+        "web",
+        "sql_databases",
+        "volcengine_tos",
+        "databricks",
+    }.issubset(by_id)
+    assert by_id["local_files"]["availability"] == "available"
+    assert by_id["local_files"]["entry_kind"] == "embedded_flow"
+    assert by_id["local_files"]["family"] == "files"
+    assert by_id["local_files"]["resource_picker_type"] == "file_import"
+    assert by_id["local_files"]["modeling_modes"] == ["context_assisted", "projection"]
+    assert by_id["local_files"]["supported_resource_types"] == ["pdf", "file"]
+    assert {gate["status"] for gate in by_id["local_files"]["readiness_gates"]} == {"passed"}
+    assert by_id["web"]["availability"] == "available"
+    assert by_id["web"]["entry_kind"] == "embedded_flow"
+    assert by_id["web"]["family"] == "web"
+    assert by_id["web"]["resource_picker_type"] == "url_import"
+    assert by_id["web"]["modeling_modes"] == ["context_assisted"]
     assert by_id["feishu"]["availability"] == "available"
+    assert by_id["feishu"]["entry_kind"] == "connector_backed"
     assert by_id["feishu"]["provider"] == "feishu"
     assert by_id["feishu"]["family"] == "business_docs"
     assert by_id["feishu"]["resource_picker_type"] == "oauth_drive_picker"
@@ -352,14 +373,26 @@ async def test_connector_catalog_marks_only_real_connectors_available(test_clien
         "context_index_status",
         "lifecycle_actions",
     }
+    assert by_id["sql_databases"]["availability"] == "available"
+    assert by_id["sql_databases"]["entry_kind"] == "embedded_flow"
+    assert by_id["sql_databases"]["family"] == "databases"
+    assert by_id["sql_databases"]["resource_picker_type"] == "database_schema_picker"
+    assert by_id["sql_databases"]["modeling_modes"] == ["relational"]
     assert by_id["volcengine_tos"]["availability"] == "available"
+    assert by_id["volcengine_tos"]["entry_kind"] == "connector_backed"
     assert by_id["volcengine_tos"]["status"] == "available"
     assert by_id["volcengine_tos"]["family"] == "object_storage"
     assert by_id["volcengine_tos"]["resource_picker_type"] == "object_storage_browser"
     assert by_id["volcengine_tos"]["modeling_modes"] == ["projection", "context_assisted"]
     assert "tos:GetObject" in by_id["volcengine_tos"]["required_scopes"]
     assert {gate["status"] for gate in by_id["volcengine_tos"]["readiness_gates"]} == {"passed"}
+    assert by_id["databricks"]["availability"] == "available"
+    assert by_id["databricks"]["entry_kind"] == "embedded_flow"
+    assert by_id["databricks"]["family"] == "warehouses"
+    assert by_id["databricks"]["resource_picker_type"] == "warehouse_catalog_picker"
+    assert by_id["databricks"]["modeling_modes"] == ["warehouse"]
     assert by_id["aliyun_oss"]["availability"] == "planned"
+    assert by_id["aliyun_oss"]["entry_kind"] == "roadmap"
     assert by_id["aliyun_oss"]["status"] == "planned"
     assert by_id["aliyun_oss"]["resource_picker_type"] == "roadmap_only"
     assert by_id["aliyun_oss"]["supported_resource_types"] == []

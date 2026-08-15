@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 ConnectorAvailability = Literal["available", "beta", "planned"]
 ConnectorAuthMode = Literal["oauth", "access_key", "connection_string", "none"]
+ConnectorEntryKind = Literal["connector_backed", "embedded_flow", "roadmap"]
 ConnectorReadinessGateStatus = Literal["passed", "partial", "missing", "not_applicable"]
 ConnectorResourcePickerType = Literal[
     "none",
@@ -73,6 +74,7 @@ class ConnectorDefinition:
     resource_picker_type: ConnectorResourcePickerType = "none"
     modeling_modes: tuple[str, ...] = ()
     readiness_gates: tuple[dict[str, str], ...] = ()
+    entry_kind: ConnectorEntryKind = "connector_backed"
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -95,6 +97,7 @@ class ConnectorDefinition:
             "readiness_gates": list(self.readiness_gates),
             "modeling_modes": list(self.modeling_modes),
             "description": self.description,
+            "entry_kind": self.entry_kind,
         }
 
 
@@ -139,10 +142,72 @@ def _planned(
         resource_picker_type="roadmap_only",
         modeling_modes=(),
         readiness_gates=PLANNED_GATES,
+        entry_kind="roadmap",
     )
 
 
 CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
+    ConnectorDefinition(
+        id="local_files",
+        category="files",
+        display_name="Files as Source",
+        icon="file",
+        auth_mode="none",
+        capabilities=(
+            "file_import",
+            "snapshot_sync",
+            "parser_artifacts",
+            "knowledge_evidence",
+            "dataset_projection",
+        ),
+        config_schema={"embedded_flow": "files_source_upload", "fields": []},
+        resource_picker_schema={
+            "supported_extensions": ["pdf", "csv", "xlsx", "xlsm", "docx", "pptx"],
+            "max_upload_mb": 50,
+        },
+        supported_resource_types=("pdf", "file"),
+        availability="available",
+        description="Upload PDF, CSV, Excel, Docx, and PPTX as governed Sources.",
+        limitations=(
+            "CSV and .xlsx/.xlsm Excel files can project into datasets.",
+            "PDF, Docx, and PPTX are context-assisted unless a reviewed table projection exists.",
+            "Legacy .xls and .ppt require a conversion/parser worker before production support.",
+        ),
+        resource_picker_type="file_import",
+        modeling_modes=("context_assisted", "projection"),
+        readiness_gates=PRODUCTION_READY_GATES,
+        entry_kind="embedded_flow",
+    ),
+    ConnectorDefinition(
+        id="web",
+        category="web",
+        display_name="Web page",
+        icon="web",
+        auth_mode="none",
+        capabilities=(
+            "url_import",
+            "snapshot_sync",
+            "crawl_policy",
+            "knowledge_evidence",
+        ),
+        config_schema={"embedded_flow": "web_source_capture", "fields": []},
+        resource_picker_schema={
+            "supports_single_url": True,
+            "supports_public_http": True,
+            "ssrf_protection": True,
+        },
+        supported_resource_types=("web",),
+        availability="available",
+        description="Capture governed public web pages with snapshot refresh and page-level evidence.",
+        limitations=(
+            "Context-assisted only; web pages cannot be the production fact source for metrics by themselves.",
+            "Private networks and unsupported MIME types are blocked before capture.",
+        ),
+        resource_picker_type="url_import",
+        modeling_modes=("context_assisted",),
+        readiness_gates=PRODUCTION_READY_GATES,
+        entry_kind="embedded_flow",
+    ),
     ConnectorDefinition(
         id="feishu",
         category="documents",
@@ -181,6 +246,36 @@ CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
         resource_picker_type="oauth_drive_picker",
         modeling_modes=("context_assisted", "projection"),
         readiness_gates=PRODUCTION_READY_GATES,
+    ),
+    ConnectorDefinition(
+        id="sql_databases",
+        category="databases",
+        display_name="SQL databases",
+        icon="database",
+        auth_mode="connection_string",
+        capabilities=(
+            "schema_profile",
+            "sample_preview",
+            "read_only_query",
+            "semantic_model_handoff",
+        ),
+        config_schema={
+            "embedded_flow": "database_connection",
+            "providers": ["sqlite", "postgres", "mysql", "oracle", "sqlserver"],
+            "fields": [],
+        },
+        resource_picker_schema={"picker": "database_schema_picker"},
+        supported_resource_types=("sqlite", "postgres", "mysql", "oracle", "sqlserver"),
+        availability="available",
+        description="Connect common SQL databases through one relational Source contract.",
+        limitations=(
+            "Read-only semantic generation is supported for relational schemas with profile evidence.",
+            "Vendor-specific dialect variants stay planned until they pass the same Source readiness gates.",
+        ),
+        resource_picker_type="database_schema_picker",
+        modeling_modes=("relational",),
+        readiness_gates=PRODUCTION_READY_GATES,
+        entry_kind="embedded_flow",
     ),
     ConnectorDefinition(
         id="volcengine_tos",
@@ -229,6 +324,36 @@ CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
         resource_picker_type="object_storage_browser",
         modeling_modes=("projection", "context_assisted"),
         readiness_gates=PRODUCTION_READY_GATES,
+    ),
+    ConnectorDefinition(
+        id="databricks",
+        category="data_lake",
+        display_name="Databricks",
+        icon="databricks",
+        auth_mode="oauth",
+        capabilities=(
+            "oauth_authorization_code",
+            "warehouse_catalog_picker",
+            "schema_profile",
+            "semantic_model_handoff",
+        ),
+        config_schema={"embedded_flow": "databricks_oauth_catalog", "fields": []},
+        resource_picker_schema={
+            "supports_catalogs": True,
+            "supports_schemas": True,
+            "supports_multi_select": True,
+        },
+        supported_resource_types=("databricks",),
+        availability="available",
+        description="Wrap the existing Databricks OAuth and catalog picker as a warehouse Source.",
+        limitations=(
+            "Requires Databricks OAuth configuration before users can browse warehouses and catalogs.",
+            "Warehouse Sources produce profile evidence for semantic modeling; raw data remains in Databricks.",
+        ),
+        resource_picker_type="warehouse_catalog_picker",
+        modeling_modes=("warehouse",),
+        readiness_gates=PRODUCTION_READY_GATES,
+        entry_kind="embedded_flow",
     ),
     _planned(
         id="aliyun_oss",
@@ -455,6 +580,6 @@ def get_connector_definition(provider: str) -> ConnectorDefinition | None:
 def available_resource_types() -> set[str]:
     values: set[str] = set()
     for definition in CONNECTOR_CATALOG:
-        if definition.availability == "available":
+        if definition.availability == "available" and definition.entry_kind == "connector_backed":
             values.update(definition.supported_resource_types)
     return values

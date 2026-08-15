@@ -268,6 +268,8 @@ These can appear as planned catalog tiles, beta adapters, SDK examples, or marke
 
 Current implementation note:
 
+- The connector catalog now uses `entry_kind` to avoid overpromising. `connector_backed` means the Add Source option opens a connector authorization/picker/import panel; `embedded_flow` means the commercial Source contract is exposed through an existing first-party form; `roadmap` means the tile is request-access/read-only and cannot open a setup form.
+- The six commercial beta adapter groups are represented as available catalog entries: Files, Feishu/Lark, Web, SQL databases, TOS object storage, and Databricks warehouse. Files/Web/SQL/Databricks are `embedded_flow`; Feishu/Lark and TOS are `connector_backed`.
 - The unified Source upload endpoint is `/source-resources/files`; the legacy `/source-resources/pdf` endpoint remains compatible.
 - Supported commercial beta file uploads are PDF, CSV, Excel `.xlsx/.xlsm`, Docx, and PPTX. Legacy binary `.xls` and `.ppt` require a conversion/parser worker before they can be promoted from roadmap wording to available support.
 - PDF, Docx, and PPTX become immutable Source snapshots plus context evidence through the configured `KnowledgeProvider`.
