@@ -42,6 +42,21 @@ const typeLabel = (type?: string | null) => {
   return type.replace(/_/g, ' ')
 }
 
+const sourceFamilyLabel = (family: SourceOverviewItem['family']): string => {
+  switch (family) {
+    case 'documents':
+      return 'Business docs'
+    case 'warehouses':
+      return 'Warehouses'
+    case 'object_storage':
+      return 'Object storage'
+    case 'api':
+      return 'API / More'
+    default:
+      return family.replace(/_/g, ' ')
+  }
+}
+
 const formatDate = (value?: string | null) => {
   if (!value) return '-'
   return new Date(value).toLocaleString()
@@ -792,7 +807,7 @@ function OverviewSourceDetail({
               </div>
               <div>
                 <h1 className="text-2xl font-semibold tracking-normal">{source.name}</h1>
-                <p className="mt-1 text-sm capitalize text-gray-400">{typeLabel(source.resource_type || source.provider)} · {source.family.replace(/_/g, ' ')}</p>
+                <p className="mt-1 text-sm text-gray-400">{typeLabel(source.resource_type || source.provider)} · {sourceFamilyLabel(source.family)}</p>
               </div>
             </div>
           </div>

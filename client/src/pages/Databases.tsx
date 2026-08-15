@@ -51,6 +51,21 @@ const isDirectSourceResourceType = (value: DatasourceCreateType) => value === 'p
 const needsAttentionStates = new Set(['auth', 'permission', 'parse', 'index', 'stale', 'policy'])
 const connectorBackedProviders = new Set(['feishu', 'volcengine_tos'])
 
+const sourceFamilyLabel = (family: SourceOverviewItem['family']): string => {
+  switch (family) {
+    case 'documents':
+      return 'Business docs'
+    case 'warehouses':
+      return 'Warehouses'
+    case 'object_storage':
+      return 'Object storage'
+    case 'api':
+      return 'API / More'
+    default:
+      return family.replace(/_/g, ' ')
+  }
+}
+
 const directSourceProcessingSteps = [
   { id: 'capture', label: 'Capture' },
   { id: 'parse', label: 'Parse' },
@@ -466,7 +481,7 @@ export default function DatabasesPage() {
       case 'object_storage':
         return 'Object storage'
       default:
-        return source.family.replace(/_/g, ' ')
+        return sourceFamilyLabel(source.family)
     }
   }
 
@@ -1667,7 +1682,7 @@ export default function DatabasesPage() {
                                   <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
                                     <span>{sourceTypeLabel(source)}</span>
                                     <span>·</span>
-                                    <span>{source.family.replace(/_/g, ' ')}</span>
+                                    <span>{sourceFamilyLabel(source.family)}</span>
                                   </div>
                                 </div>
                               </td>

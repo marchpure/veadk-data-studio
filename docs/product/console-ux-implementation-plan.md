@@ -232,6 +232,7 @@ Current implementation:
 - Frontend API types and `useSourceOverview()` are available.
 - `client/src/pages/Databases.tsx` now renders the Sources inventory from `SourceOverviewItem` instead of the legacy datasource card list.
 - Desktop uses a scan-oriented table with Source, Status, Freshness, Parsed assets, Context, Semantic, Dashboards, Owner, and Actions columns.
+- The inventory uses product family labels rather than raw enum values, so `documents` displays as `Business docs` consistently with Add Source while the API contract remains stable for Data Modeling.
 - Narrow viewports keep a compact mobile card layout.
 - The inventory includes `All` and `Needs attention` tabs. Needs attention uses `attention_state` plus non-ready/non-processing product statuses.
 - Source mutations invalidate both legacy `datasources` queries and the `source-overview` facade so the table stays fresh after create, import, delete, and visibility changes.
