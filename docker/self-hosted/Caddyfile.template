@@ -1,0 +1,34 @@
+$DOMAIN {
+    root * /app/client/dist
+
+    encode gzip
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        Content-Security-Policy "default-src 'self' https: http: data: blob:; script-src 'self' 'unsafe-inline' https: http: data: blob:; style-src 'self' 'unsafe-inline' https: http: data: blob:; img-src 'self' https: http: data: blob:; connect-src 'self' https: http: ws: wss: data: blob:; font-src 'self' https: http: data:; frame-src 'self' https: http: data: blob:;"
+    }
+
+    handle /api/mcp/* {
+        reverse_proxy localhost:8000 {
+            flush_interval -1
+            transport http {
+                response_header_timeout 0
+                dial_timeout 0
+            }
+        }
+    }
+
+    handle /api/* {
+        reverse_proxy localhost:8000
+    }
+
+    handle {
+        try_files {path} /index.html
+        file_server
+    }
+
+    $TLS_CONFIG
+}

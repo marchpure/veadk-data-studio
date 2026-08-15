@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev", "--port", "8080"],
+      "port": 8080,
+      "autoPort": false,
+      "cwd": "web"
+    },
+    {
+      "name": "docker-client",
+      "runtimeExecutable": "echo",
+      "runtimeArgs": ["Docker client running"],
+      "port": 5173,
+      "autoPort": false
+    }
+  ]
+}

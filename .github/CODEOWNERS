@@ -1,0 +1,21 @@
+# Require maintainer review for CI/CD, dependency, and release-surface changes.
+/.github/ @hadijaveed
+/Dockerfile* @hadijaveed
+/docker-compose*.yml @hadijaveed
+/Makefile @hadijaveed
+/backend.spec @hadijaveed
+/pyproject.toml @hadijaveed
+/uv.lock @hadijaveed
+/client/package.json @hadijaveed
+/client/pnpm-lock.yaml @hadijaveed
+/client/src-tauri/tauri.conf.json @hadijaveed
+/client/src-tauri/entitlements.plist @hadijaveed
+/client/src-tauri/capabilities/** @hadijaveed
+/client/src-tauri/src/** @hadijaveed
+/client/src-tauri/Cargo.toml @hadijaveed
+/client/src-tauri/Cargo.lock @hadijaveed
+/web/package.json @hadijaveed
+/web/package-lock.json @hadijaveed
+/web/pnpm-lock.yaml @hadijaveed
+/web/scripts/** @hadijaveed
+/docs/self-hosted/** @hadijaveed

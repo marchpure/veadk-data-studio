@@ -1,0 +1,34 @@
+# Byaan
+
+> AI-powered data agent that learns your business, runs in your infrastructure, and gets more accurate over time.
+
+## What is Byaan?
+
+Byaan is a local-first data analysis tool that connects to databases and AI models while keeping data private. It runs as a desktop application on macOS.
+
+## Key Features
+
+- Multi-database support: PostgreSQL, MongoDB, MySQL, SQLite, MSSQL, CSV, Excel, Parquet, JSON
+- Bring Your Own AI Model: Claude, OpenAI, Azure OpenAI, AWS Bedrock, Groq, OpenRouter, xAI
+- AI-powered natural language queries and dashboard generation
+- Interactive dashboards with dynamic filters and charts
+- Scheduled reports with cron-based automation
+- MCP server for integration with Claude Code, Cursor, and other MCP clients
+- Custom skills system for reusable analysis patterns
+- Read-only by design — safe on production databases
+- Export as standalone HTML, shareable links, or PDFs
+
+## Privacy
+
+Data never leaves the user's machine. The desktop app runs entirely locally. Database credentials, queries, and results stay on the local computer. No cloud uploads, no external servers.
+
+## Pricing
+
+- Individual: Free forever (Mac desktop app with all features)
+- Teams: Custom cloud deployment with collaboration features (contact hello@byaan.ai)
+
+## Links
+
+- Website: https://www.byaan.ai
+- Documentation: https://www.byaan.ai/docs/
+- Contact: hello@byaan.ai

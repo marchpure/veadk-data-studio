@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Byaan needs access to your Desktop folder to analyze local repositories and data files you connect.</string>
+
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Byaan needs access to your Documents folder to analyze local repositories and data files you connect.</string>
+
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Byaan needs access to your Downloads folder to read data files you connect for analysis.</string>
+
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>Byaan needs access to removable volumes to read data files you connect for analysis.</string>
+
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>Byaan needs access to network volumes to read data files you connect for analysis.</string>
+</dict>
+</plist>

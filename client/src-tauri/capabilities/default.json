@@ -1,0 +1,47 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "enables the default permissions",
+  "platforms": [
+    "macOS"
+  ],
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "shell:allow-spawn",
+    "shell:allow-kill",
+    "shell:allow-execute",
+    {
+      "identifier": "shell:allow-open",
+      "allow": [
+        { "url": "https://**" }
+      ]
+    },
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "open",
+          "cmd": "/usr/bin/open",
+          "args": [
+            "-R",
+            {
+              "validator": ".*"
+            }
+          ]
+        }
+      ]
+    },
+    "fs:allow-write-file",
+    "fs:allow-read-dir",
+    "fs:scope-download",
+    "dialog:allow-save",
+    "dialog:allow-open",
+    "updater:default",
+    "process:allow-restart",
+    "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-read-text"
+  ]
+}
