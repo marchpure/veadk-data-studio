@@ -22,6 +22,7 @@ from server.models.user import User
 from server.schemas.source_overview import SourceOverviewItem
 
 SOURCE_OVERVIEW_RESOURCE_TYPES = (
+    "file",
     "pdf",
     "web",
     "feishu_doc",

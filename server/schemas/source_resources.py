@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 SourceResourceType = Literal[
+    "file",
     "pdf",
     "web",
     "feishu_doc",

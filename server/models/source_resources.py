@@ -21,6 +21,7 @@ def generate_uuid() -> UUID:
 
 
 SOURCE_RESOURCE_TYPES = (
+    "file",
     "pdf",
     "web",
     "feishu_doc",

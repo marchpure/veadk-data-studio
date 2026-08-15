@@ -59,7 +59,7 @@ async def create_pdf_source_resource(
 ):
     try:
         data = await file.read()
-        payload = await source_resource_service.create_pdf_resource_from_upload(
+        payload = await source_resource_service.create_file_resource_from_upload(
             session=session,
             tenant_id=auth.tenant_id,
             user_id=auth.user_id,
@@ -69,6 +69,30 @@ async def create_pdf_source_resource(
             visibility=visibility,
         )
         return success_response(data=payload, message="PDF source resource created")
+    except ValueError as error:
+        raise _bad_request_or_not_found(error)
+
+
+@router.post("/source-resources/files", response_model=StandardResponse[SourceResourceRead], status_code=status.HTTP_201_CREATED)
+async def create_file_source_resource(
+    file: UploadFile = File(...),
+    name: str | None = Form(None),
+    visibility: str = Form("workspace"),
+    auth: AuthContext = Depends(require_scope(Scope.DATASET_CREATE)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        data = await file.read()
+        payload = await source_resource_service.create_file_resource_from_upload(
+            session=session,
+            tenant_id=auth.tenant_id,
+            user_id=auth.user_id,
+            name=name or file.filename or "Uploaded source file",
+            filename=file.filename or "source-file",
+            data=data,
+            visibility=visibility,
+        )
+        return success_response(data=payload, message="File source resource created")
     except ValueError as error:
         raise _bad_request_or_not_found(error)
 

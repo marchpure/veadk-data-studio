@@ -32,6 +32,7 @@ SOURCE_RESOURCE_TYPES_OLD = (
     "database_table",
 )
 SOURCE_RESOURCE_TYPES_NEW = (
+    "file",
     "pdf",
     "web",
     "feishu_doc",

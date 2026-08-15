@@ -1369,6 +1369,8 @@ def parse_object_bytes(*, key: str, raw_bytes: bytes) -> tuple[str, str, str]:
         return html.unescape(re.sub(r"\s+", " ", text)).strip(), "tos-html-parser-v1", "html_section"
     if suffix == "docx":
         return _parse_docx_bytes(raw_bytes), "tos-docx-parser-v1", "docx_paragraph"
+    if suffix == "pptx":
+        return _parse_pptx_bytes(raw_bytes), "tos-pptx-parser-v1", "slide_text"
     if suffix == "pdf":
         return _parse_pdf_text_fallback(raw_bytes), "tos-pdf-basic-parser-v1", "page"
     raise ConnectorError(f"Unsupported TOS object format: .{suffix or 'unknown'}", code="unsupported_format", permanent=True)
@@ -1379,6 +1381,24 @@ def _parse_docx_bytes(raw_bytes: bytes) -> str:
         document_xml = archive.read("word/document.xml").decode("utf-8", errors="replace")
     texts = re.findall(r"<w:t[^>]*>(.*?)</w:t>", document_xml)
     return "\n".join(html.unescape(re.sub(r"<[^>]+>", "", text)) for text in texts if text)
+
+
+def _parse_pptx_bytes(raw_bytes: bytes) -> str:
+    with zipfile.ZipFile(io.BytesIO(raw_bytes)) as archive:
+        slide_names = sorted(
+            name for name in archive.namelist() if re.match(r"ppt/slides/slide\d+\.xml$", name)
+        )
+        parts: list[str] = []
+        for index, slide_name in enumerate(slide_names[:200], start=1):
+            slide_xml = archive.read(slide_name).decode("utf-8", errors="replace")
+            texts = [html.unescape(re.sub(r"<[^>]+>", "", text)) for text in re.findall(r"<a:t[^>]*>(.*?)</a:t>", slide_xml)]
+            text = "\n".join(item for item in texts if item).strip()
+            if text:
+                parts.append(f"## Slide {index}\n\n{text}")
+    extracted = "\n\n".join(parts).strip()
+    if not extracted:
+        raise ConnectorError("PPTX text extraction produced no text; configure a presentation parser worker", code="parser_no_text")
+    return extracted
 
 
 def _parse_pdf_text_fallback(raw_bytes: bytes) -> str:

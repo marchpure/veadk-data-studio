@@ -269,24 +269,26 @@ export function useCreateSourceResource() {
   })
 }
 
-export function useCreatePdfSourceResource() {
+export function useCreateFileSourceResource() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: async ({ file, name }: { file: File; name: string }): Promise<SourceResource> => {
-      return ApiService.createPdfSourceResource(file, name)
+      return ApiService.createFileSourceResource(file, name)
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['datasources'] })
       queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       queryClient.invalidateQueries({ queryKey: ['source-resources'] })
-      showToast.success(data.status === 'ready' ? 'PDF source resource indexed' : 'PDF source resource captured; parsing needs attention')
+      showToast.success(data.status === 'ready' ? 'File source indexed' : 'File source captured; parsing needs attention')
     },
     onError: (error: Error) => {
-      showToast.error(`Failed to create PDF source resource: ${error.message}`)
+      showToast.error(`Failed to create file source: ${error.message}`)
     },
   })
 }
+
+export const useCreatePdfSourceResource = useCreateFileSourceResource
 
 export function useConnectorDefinitions() {
   return useQuery({

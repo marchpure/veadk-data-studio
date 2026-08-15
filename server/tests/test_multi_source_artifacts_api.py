@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 from uuid import uuid4
 
 import pytest
@@ -375,7 +377,7 @@ async def test_pdf_upload_creates_snapshot_knowledge_and_preserves_raw_pdf(test_
     raw_pdf = b"%PDF-1.4\n1 0 obj\n<<>>\nstream\n(Channel revenue grew 12%) Tj\nendstream\nendobj\n%%EOF"
 
     response = await test_client.post(
-        "/api/source-resources/pdf",
+        "/api/source-resources/files",
         data={"name": "渠道复盘 PDF"},
         files={"file": ("channel-review.pdf", raw_pdf, "application/pdf")},
     )
@@ -394,6 +396,78 @@ async def test_pdf_upload_creates_snapshot_knowledge_and_preserves_raw_pdf(test_
     assert "Channel revenue" in search.json()["data"]["items"][0]["text"]
 
 
+async def test_legacy_pdf_upload_endpoint_still_creates_source_resource(test_client):
+    raw_pdf = b"%PDF-1.4\n1 0 obj\n<<>>\nstream\n(Legacy PDF endpoint still works) Tj\nendstream\nendobj\n%%EOF"
+
+    response = await test_client.post(
+        "/api/source-resources/pdf",
+        data={"name": "兼容 PDF"},
+        files={"file": ("legacy.pdf", raw_pdf, "application/pdf")},
+    )
+
+    assert response.status_code == 201
+    resource = response.json()["data"]
+    assert resource["resource_type"] == "pdf"
+    assert resource["status"] == "ready"
+
+
+async def test_csv_file_upload_creates_source_snapshot_context_and_projection(test_client):
+    raw_csv = b"region,revenue\nEast,120\nWest,80\n"
+
+    response = await test_client.post(
+        "/api/source-resources/files",
+        data={"name": "渠道收入 CSV"},
+        files={"file": ("channel-revenue.csv", raw_csv, "text/csv")},
+    )
+
+    assert response.status_code == 201
+    resource = response.json()["data"]
+    assert resource["resource_type"] == "file"
+    assert resource["status"] == "ready"
+    assert resource["latest_snapshot"]["metadata_json"]["provider"] == "local_file_upload"
+    assert resource["latest_snapshot"]["metadata_json"]["file_type"] == "csv"
+    assert resource["latest_snapshot"]["metadata_json"]["projected_dataset_id"]
+    assert resource["projected_dataset_id"] == resource["latest_snapshot"]["metadata_json"]["projected_dataset_id"]
+    assert resource["knowledge_resource"]["evidence_count"] == 1
+
+    search = await test_client.post("/api/knowledge/search", json={"query": "East", "limit": 5})
+    assert search.status_code == 200
+    assert "East" in search.json()["data"]["items"][0]["text"]
+
+
+async def test_docx_and_pptx_file_uploads_become_context_sources(test_client):
+    docx_bytes = _docx_bytes("Docx revenue policy")
+    pptx_bytes = _pptx_bytes("Slide retention risk")
+
+    docx_response = await test_client.post(
+        "/api/source-resources/files",
+        data={"name": "经营规则 Docx"},
+        files={"file": ("rules.docx", docx_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    pptx_response = await test_client.post(
+        "/api/source-resources/files",
+        data={"name": "复购风险 PPTX"},
+        files={"file": ("retention.pptx", pptx_bytes, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+    )
+
+    assert docx_response.status_code == 201
+    assert pptx_response.status_code == 201
+    docx_resource = docx_response.json()["data"]
+    pptx_resource = pptx_response.json()["data"]
+    assert docx_resource["resource_type"] == "file"
+    assert docx_resource["latest_snapshot"]["metadata_json"]["file_type"] == "docx"
+    assert docx_resource["projected_dataset_id"] is None
+    assert docx_resource["knowledge_resource"]["evidence_count"] == 1
+    assert pptx_resource["resource_type"] == "file"
+    assert pptx_resource["latest_snapshot"]["metadata_json"]["file_type"] == "pptx"
+    assert pptx_resource["projected_dataset_id"] is None
+    assert pptx_resource["knowledge_resource"]["evidence_count"] >= 1
+
+    search = await test_client.post("/api/knowledge/search", json={"query": "retention", "limit": 5})
+    assert search.status_code == 200
+    assert "retention risk" in search.json()["data"]["items"][0]["text"]
+
+
 async def test_pdf_upload_parse_failure_keeps_failed_snapshot(test_client):
     response = await test_client.post(
         "/api/source-resources/pdf",
@@ -409,6 +483,26 @@ async def test_pdf_upload_parse_failure_keeps_failed_snapshot(test_client):
     assert resource["latest_snapshot"]["error_json"]["code"] == "parser_no_text"
     assert resource["sync_config_json"]["last_error"]["code"] == "parser_no_text"
     assert resource["knowledge_resource"] is None
+
+
+def _docx_bytes(text: str) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "word/document.xml",
+            f"<w:document><w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body></w:document>",
+        )
+    return buffer.getvalue()
+
+
+def _pptx_bytes(text: str) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "ppt/slides/slide1.xml",
+            f"<p:sld><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>",
+        )
+    return buffer.getvalue()
 
 
 async def test_source_resource_without_connector_content_is_not_marked_ready(test_client):

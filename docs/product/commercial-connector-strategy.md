@@ -266,6 +266,14 @@ Do not put these into the v1 production commitment:
 
 These can appear as planned catalog tiles, beta adapters, SDK examples, or marketplace adapters when the UI makes support status explicit.
 
+Current implementation note:
+
+- The unified Source upload endpoint is `/source-resources/files`; the legacy `/source-resources/pdf` endpoint remains compatible.
+- Supported commercial beta file uploads are PDF, CSV, Excel `.xlsx/.xlsm`, Docx, and PPTX. Legacy binary `.xls` and `.ppt` require a conversion/parser worker before they can be promoted from roadmap wording to available support.
+- PDF, Docx, and PPTX become immutable Source snapshots plus context evidence through the configured `KnowledgeProvider`.
+- CSV and Excel `.xlsx/.xlsm` also create a projected dataset from the same Source snapshot, so Data Modeling can distinguish projection-ready sources from context-only sources.
+- Uploaded raw bytes are preserved through snapshot/raw artifact plumbing; the control plane records URIs, hashes, parser versions, metadata, projection manifests, and provider status rather than treating PostgreSQL as the commercial raw/chunk/vector store.
+
 Data Modeling must consume this same Source contract instead of silently filtering to SQL-only datasources. The handoff status should distinguish `supported`, `needs_projection`, `context_only`, `permission_required`, `reauthorization_required`, `source_unavailable`, `processing`, `failed`, `planned`, and `unsupported`. Only relational and warehouse sources with profile evidence can enter production semantic generation directly; files, object storage, Feishu Sheets/Base, and extracted tables require projection review; docs, Wiki, PDF, and web sources are context-assisted evidence unless a confirmed projection exists.
 
 ## V1.5 / V2 Connector Expansion

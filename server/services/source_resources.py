@@ -51,6 +51,7 @@ class SourceResourceService:
     sync_run_statuses = ("queued", "running", "succeeded", "failed", "partial", "cancelled")
 
     connector_ready_types = {
+        "file",
         "pdf",
         "web",
         "feishu_doc",
@@ -241,7 +242,7 @@ class SourceResourceService:
         await session.refresh(resource)
         return await self.resource_payload(session=session, resource=resource)
 
-    async def create_pdf_resource_from_upload(
+    async def create_file_resource_from_upload(
         self,
         *,
         session: AsyncSession,
@@ -254,22 +255,23 @@ class SourceResourceService:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not data:
-            raise ValueError("PDF file is empty")
+            raise ValueError("Source file is empty")
         if len(data) > self.pdf_max_upload_bytes:
-            raise ValueError("PDF file exceeds the 50 MB limit")
-        if not filename.lower().endswith(".pdf"):
-            raise ValueError("Only PDF files are supported by this endpoint")
+            raise ValueError("Source file exceeds the 50 MB limit")
+        file_type = self._upload_file_type_from_name(filename)
+        if file_type is None:
+            raise ValueError("Only PDF, CSV, Excel (.xlsx/.xlsm), Docx, and PPTX files are supported by this endpoint")
 
         resource = SourceResource(
             tenant_id=tenant_id,
-            resource_type="pdf",
-            name=name.strip() or Path(filename).stem or "PDF document",
+            resource_type="pdf" if file_type == "pdf" else "file",
+            name=name.strip() or Path(filename).stem or "Uploaded source file",
             external_id=None,
             source_url=None,
             owner_id=user_id,
             visibility=visibility,
             sync_mode="manual",
-            sync_config_json={"original_filename": filename, "upload_size": len(data)},
+            sync_config_json={"original_filename": filename, "upload_size": len(data), "file_type": file_type},
             status="pending",
         )
         session.add(resource)
@@ -283,16 +285,23 @@ class SourceResourceService:
                 external_revision="sha256:" + hashlib.sha256(data).hexdigest(),
                 metadata={
                     **(metadata or {}),
-                    "provider": "local_pdf_upload",
+                    "provider": "local_file_upload",
                     "original_filename": filename,
+                    "file_type": file_type,
                     "size": len(data),
                     "fragment_hint": fragment_hint,
                 },
                 provider=default_knowledge_provider_name(),
                 parser_version=parser_version,
-                raw_storage_uri="pending://local-pdf-upload",
+                raw_storage_uri="pending://local-file-upload",
             )
-            await self._capture_uploaded_file(session=session, resource=resource, captured=captured, filename=filename)
+            snapshot = await self._capture_uploaded_file(session=session, resource=resource, captured=captured, filename=filename)
+            await self._maybe_project_dataset(
+                session=session,
+                resource=resource,
+                snapshot=snapshot,
+                captured=captured,
+            )
             resource.status = "ready"
         except ConnectorError as exc:
             captured = CapturedSnapshot(
@@ -301,14 +310,15 @@ class SourceResourceService:
                 external_revision="sha256:" + hashlib.sha256(data).hexdigest(),
                 metadata={
                     **(metadata or {}),
-                    "provider": "local_pdf_upload",
+                    "provider": "local_file_upload",
                     "original_filename": filename,
+                    "file_type": file_type,
                     "size": len(data),
                     "parse_error": {"code": exc.code, "message": str(exc), "permanent": exc.permanent},
                 },
                 provider=default_knowledge_provider_name(),
-                parser_version="pdf-upload-parse-failed-v1",
-                raw_storage_uri="pending://local-pdf-upload",
+                parser_version="file-upload-parse-failed-v1",
+                raw_storage_uri="pending://local-file-upload",
             )
             await self._capture_uploaded_file(
                 session=session,
@@ -326,6 +336,29 @@ class SourceResourceService:
         await session.commit()
         await session.refresh(resource)
         return await self.resource_payload(session=session, resource=resource)
+
+    async def create_pdf_resource_from_upload(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        user_id: UUID | None,
+        name: str,
+        filename: str,
+        data: bytes,
+        visibility: str = "workspace",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await self.create_file_resource_from_upload(
+            session=session,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name=name,
+            filename=filename,
+            data=data,
+            visibility=visibility,
+            metadata=metadata,
+        )
 
     async def list_resources(
         self,
@@ -1451,6 +1484,8 @@ class SourceResourceService:
             return self._projection_files_from_feishu_base(resource=resource, captured=captured)
         if resource.resource_type == "tos_object":
             return self._projection_files_from_tos_object(resource=resource, captured=captured)
+        if resource.resource_type == "file":
+            return self._projection_files_from_local_file(resource=resource, captured=captured)
         return []
 
     def _captured_source_metadata(
@@ -1630,6 +1665,31 @@ class SourceResourceService:
             }
         ]
 
+    def _projection_files_from_local_file(
+        self,
+        *,
+        resource: SourceResource,
+        captured: CapturedSnapshot,
+    ) -> list[dict[str, Any]]:
+        filename = str((captured.metadata or {}).get("original_filename") or resource.name)
+        file_type = self._file_type_from_name(filename)
+        if file_type is None:
+            return []
+        return [
+            {
+                "filename": filename,
+                "file_type": file_type,
+                "data": captured.raw_bytes,
+                "source_locator": {
+                    "kind": "local_file_upload",
+                    "source_resource_id": str(resource.id),
+                    "filename": filename,
+                    "content_hash": "sha256:" + hashlib.sha256(captured.raw_bytes).hexdigest(),
+                },
+                "row_mappings": [],
+            }
+        ]
+
     async def _delete_projected_dataset(
         self,
         *,
@@ -1654,6 +1714,24 @@ class SourceResourceService:
             return "parquet"
         if suffix in {"json", "jsonl"}:
             return "json"
+        return None
+
+    def _upload_file_type_from_name(self, filename: str) -> str | None:
+        suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if suffix == "csv":
+            return "csv"
+        if suffix in {"xlsx", "xlsm"}:
+            return "excel"
+        return self._knowledge_file_type_from_name(filename)
+
+    def _knowledge_file_type_from_name(self, filename: str) -> str | None:
+        suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if suffix == "pdf":
+            return "pdf"
+        if suffix == "docx":
+            return "docx"
+        if suffix == "pptx":
+            return "pptx"
         return None
 
     def _json_from_bytes(self, raw_bytes: bytes) -> dict[str, Any]:

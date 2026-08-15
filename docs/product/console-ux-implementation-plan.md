@@ -301,6 +301,42 @@ Acceptance:
 - Upload, PDF, Excel/CSV, and web are visually distinct.
 - Power users can still pick the exact connector in one extra click.
 
+## P1 Slice: Files Source Upload Expansion
+
+Goal:
+
+- Move the first-run file path from PDF-only context ingestion to a unified Files Source path that can support context evidence and projection handoff.
+
+Files:
+
+- `server/routers/source_resources.py`
+- `server/services/source_resources.py`
+- `server/services/source_connectors.py`
+- `server/services/source_overview.py`
+- `server/schemas/source_resources.py`
+- `client/src/pages/Databases.tsx`
+- `client/src/services/api.ts`
+- `client/src/hooks/useDBConnections.ts`
+
+Current implementation:
+
+- `POST /source-resources/files` accepts PDF, CSV, Excel `.xlsx/.xlsm`, Docx, and PPTX uploads.
+- `POST /source-resources/pdf` remains a compatibility endpoint and delegates to the unified file upload path.
+- PDF uploads keep `resource_type = pdf` for existing consumers; CSV, Excel, Docx, and PPTX use `resource_type = file`.
+- All supported files create immutable Source snapshots with `provider = local_file_upload`, original filename, file type, parser version, content hash, raw artifact URI, and `KnowledgeProvider` metadata.
+- CSV and Excel `.xlsx/.xlsm` additionally create projected datasets and attach the projection manifest to both the source resource and snapshot metadata.
+- PDF, Docx, and PPTX enter the Source layer as context evidence only unless a reviewed projection is created later.
+- PPTX text extraction is supported for OpenXML presentations; legacy `.ppt` and binary `.xls` are not marked available until a conversion/parser worker exists.
+- The Sources overview facade includes `resource_type = file`, so file uploads appear in the unified inventory.
+- The Add Source Files option is labeled `Files as Source` and communicates that CSV/Excel can project to datasets while PDF/Docx/PPTX remain context-assisted.
+
+Acceptance:
+
+- Uploading CSV through `/source-resources/files` yields a Source snapshot, context evidence, and a projected dataset id.
+- Uploading Docx or PPTX yields context evidence without falsely claiming semantic-ready dataset projection.
+- Legacy `/source-resources/pdf` callers still work.
+- Unsupported old Office binary formats fail before users see a false available path.
+
 ## P1 Slice: Post-import Processing View
 
 Goal:

@@ -503,7 +503,7 @@ export interface ExecuteSavedQueryResponse {
 // Connections - Only database connections now, files are handled by datasets
 export type ConnectionType = 'pg' | 'mongo' | 'mysql' | 'sqlite' | 'mssql' | 'oracle' | 'dynamodb' | 'databricks'
 export type FileType = 'csv' | 'excel' | 'parquet' | 'json'
-export type SourceResourceType = 'pdf' | 'web' | 'feishu_doc' | 'feishu_wiki' | 'feishu_sheet' | 'feishu_base' | 'tos_bucket' | 'tos_prefix' | 'tos_object' | 'extracted_table'
+export type SourceResourceType = 'file' | 'pdf' | 'web' | 'feishu_doc' | 'feishu_wiki' | 'feishu_sheet' | 'feishu_base' | 'tos_bucket' | 'tos_prefix' | 'tos_object' | 'extracted_table'
 export type SourceResourcePickerType = SourceResourceType | 'feishu_folder'
 export type DatasourceType = ConnectionType | FileType | SourceResourceType | 'duckdb'
 
@@ -2245,12 +2245,16 @@ export class ApiService {
   }
 
   static async createPdfSourceResource(file: File, name: string): Promise<SourceResource> {
+    return this.createFileSourceResource(file, name)
+  }
+
+  static async createFileSourceResource(file: File, name: string): Promise<SourceResource> {
     try {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('name', name)
 
-      const response = await apiFetch(`${API_BASE_URL}/source-resources/pdf`, {
+      const response = await apiFetch(`${API_BASE_URL}/source-resources/files`, {
         method: 'POST',
         body: formData,
       })
@@ -2263,7 +2267,7 @@ export class ApiService {
       const responseData = await response.json()
       return extractData<SourceResource>(responseData)
     } catch (error) {
-      console.error('Error creating PDF source resource:', error)
+      console.error('Error creating file source resource:', error)
       throw error
     }
   }

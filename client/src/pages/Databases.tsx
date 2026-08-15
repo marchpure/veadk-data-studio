@@ -239,14 +239,14 @@ export default function DatabasesPage() {
       },
       {
         id: 'pdf',
-        label: 'PDF document',
+        label: 'Files as Source',
         family: 'files',
         icon: FileText,
         availability: 'available',
-        outputs: ['Context'],
-        description: 'Capture a PDF snapshot and index it as a knowledge source.',
-        limitations: ['Context-assisted only unless tables are projected and reviewed.'],
-        modelingModes: ['Context-assisted'],
+        outputs: ['Context', 'Dataset'],
+        description: 'Capture PDF, CSV, Excel, Docx and PPTX snapshots with evidence and optional dataset projection.',
+        limitations: ['CSV and .xlsx/.xlsm Excel files can be projected into datasets; PDF, Docx and PPTX remain context-assisted unless tables are reviewed.'],
+        modelingModes: ['Context-assisted', 'Projection'],
       },
       {
         id: 'url',
@@ -1339,15 +1339,15 @@ export default function DatabasesPage() {
       setPdfSourceFile(null)
       return
     }
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      alert('Please select a PDF file')
+    if (!/\.(pdf|csv|xlsx|xlsm|docx|pptx)$/i.test(file.name)) {
+      alert('Please select a PDF, CSV, Excel (.xlsx/.xlsm), Docx or PPTX file')
       event.target.value = ''
       setPdfSourceFile(null)
       return
     }
     setPdfSourceFile(file)
     if (!uploadConnectionName.trim()) {
-      setUploadConnectionName(file.name.replace(/\.pdf$/i, ''))
+      setUploadConnectionName(file.name.replace(/\.(pdf|csv|xlsx|xlsm|docx|pptx)$/i, ''))
     }
   }
 
@@ -1358,7 +1358,7 @@ export default function DatabasesPage() {
     }
     if (selectedType === 'pdf') {
       if (!pdfSourceFile) {
-        alert('Please select a PDF file')
+        alert('Please select a PDF, CSV, Excel (.xlsx/.xlsm), Docx or PPTX file')
         return
       }
       createPdfSourceResourceMutation.mutate(
@@ -2210,17 +2210,17 @@ export default function DatabasesPage() {
 	                            <div className="flex items-center gap-3">
 	                              <Loader2 className="w-5 h-5 text-brand-orange animate-spin flex-shrink-0" />
 	                              <div>
-	                                <p className="text-sm font-medium text-brand-orange">Capturing PDF snapshot...</p>
-	                                <p className="text-xs text-gray-400 mt-1">Byaan stores the raw PDF snapshot before parsing it into evidence.</p>
+	                                <p className="text-sm font-medium text-brand-orange">Capturing file snapshot...</p>
+	                                <p className="text-xs text-gray-400 mt-1">Byaan stores the raw file snapshot before parsing it into evidence and optional projections.</p>
 	                              </div>
 	                            </div>
 	                          </div>
 	                        )}
 	                        <div className="rounded-lg border border-[#444444] bg-[#1a1a1a] p-4">
-	                          <Label className="text-white">PDF file</Label>
+	                          <Label className="text-white">Source file</Label>
 	                          <input
 	                            type="file"
-	                            accept=".pdf,application/pdf"
+	                            accept=".pdf,.csv,.xlsx,.xlsm,.docx,.pptx,application/pdf,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
 	                            onChange={handlePdfSourceFileChange}
 	                            disabled={createPdfSourceResourceMutation.isPending}
 	                            className="mt-2 block w-full text-sm text-gray-300 file:mr-4 file:rounded file:border-0 file:bg-brand-orange file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-orange/90"
@@ -2243,7 +2243,7 @@ export default function DatabasesPage() {
 	                            </div>
 	                          )}
 	                          <p className="mt-3 text-xs text-gray-400">
-	                            PDFs enter Byaan as Knowledge Resources with immutable Source Snapshots. Table materialization remains a reviewed follow-up path.
+	                            PDF, Docx and PPTX enter as context evidence. CSV and .xlsx/.xlsm Excel files also create a reviewed dataset projection for semantic modeling handoff.
 	                          </p>
 	                        </div>
 	                      </div>
