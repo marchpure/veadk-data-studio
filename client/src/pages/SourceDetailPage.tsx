@@ -36,6 +36,17 @@ const sourceDetailSteps = [
   'Ready',
 ]
 
+const sourceDetailSections = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'snapshots', label: 'Snapshots' },
+  { id: 'parsed-content', label: 'Parsed content' },
+  { id: 'tables', label: 'Tables' },
+  { id: 'evidence', label: 'Evidence' },
+  { id: 'lineage', label: 'Lineage' },
+  { id: 'consumers', label: 'Consumers' },
+  { id: 'settings', label: 'Settings' },
+]
+
 type SourceProcessingStepDisplay = NonNullable<SourceResourceProcessing['steps']>[number]
 
 const typeLabel = (type?: string | null) => {
@@ -503,6 +514,8 @@ export default function SourceDetailPage() {
           <Metric label="Evidence" value={`${evidenceCount}`} tone={evidenceCount > 0 ? 'ready' : 'muted'} />
         </div>
 
+        <SourceDetailNav />
+
         <Section title="Processing" icon={<Clock className="h-4 w-4" />}>
           <div className="grid grid-cols-7 gap-2">
             {displaySteps.map(step => {
@@ -550,7 +563,7 @@ export default function SourceDetailPage() {
         </Section>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <Section title="Overview" icon={<ShieldAlert className="h-4 w-4" />}>
+          <Section id="overview" title="Overview" icon={<ShieldAlert className="h-4 w-4" />}>
             <KeyValue label="External ID" value={sourceResource.external_id || '-'} />
             <KeyValue label="Source URL" value={sourceResource.source_url || '-'} />
             <KeyValue label="Sync mode" value={sourceResource.sync_mode} />
@@ -558,7 +571,7 @@ export default function SourceDetailPage() {
             <KeyValue label="Updated" value={formatDate(sourceResource.updated_at)} />
           </Section>
 
-          <Section title="Lineage" icon={<Network className="h-4 w-4" />}>
+          <Section id="lineage" title="Lineage" icon={<Network className="h-4 w-4" />}>
             {lineageQuery.isLoading ? (
               <LoadingRow label="Loading lineage..." />
             ) : lineage && lineage.nodes.length > 0 ? (
@@ -570,7 +583,7 @@ export default function SourceDetailPage() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <Section title="Parsed content" icon={<FileText className="h-4 w-4" />}>
+          <Section id="parsed-content" title="Parsed content" icon={<FileText className="h-4 w-4" />}>
             <KeyValue label="Parser version" value={parsedAssets?.parser_version || latestSnapshot?.parser_version || '-'} />
             <KeyValue label="Parse status" value={parsedAssets?.parse_status || sourceResource.knowledge_resource?.parse_status || latestSnapshot?.status || 'pending'} />
             <KeyValue label="Content hash" value={parsedAssets?.metadata?.content_hash || latestSnapshot?.content_hash || '-'} />
@@ -598,7 +611,7 @@ export default function SourceDetailPage() {
             )}
           </Section>
 
-          <Section title="Tables" icon={<Database className="h-4 w-4" />}>
+          <Section id="tables" title="Tables" icon={<Database className="h-4 w-4" />}>
             {parsedAssetsQuery.isLoading ? (
               <LoadingRow label="Loading tables..." />
             ) : parsedAssets?.tables.length ? (
@@ -618,7 +631,7 @@ export default function SourceDetailPage() {
           </Section>
         </div>
 
-        <Section title="Snapshots" icon={<Database className="h-4 w-4" />}>
+        <Section id="snapshots" title="Snapshots" icon={<Database className="h-4 w-4" />}>
           {snapshotsQuery.isLoading ? (
             <LoadingRow label="Loading snapshots..." />
           ) : snapshots.length === 0 ? (
@@ -643,7 +656,7 @@ export default function SourceDetailPage() {
           )}
         </Section>
 
-        <Section title="Evidence" icon={<CheckCircle2 className="h-4 w-4" />}>
+        <Section id="evidence" title="Evidence" icon={<CheckCircle2 className="h-4 w-4" />}>
           <div className="mb-3 max-w-md">
             <Input
               value={evidenceQuery}
@@ -689,7 +702,7 @@ export default function SourceDetailPage() {
         </Section>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <Section title="Consumers" icon={<Network className="h-4 w-4" />}>
+          <Section id="consumers" title="Consumers" icon={<Network className="h-4 w-4" />}>
             {consumersQuery.isLoading ? (
               <LoadingRow label="Loading consumers..." />
             ) : consumers && consumers.items.length > 0 ? (
@@ -698,7 +711,7 @@ export default function SourceDetailPage() {
               <EmptyText>No semantic models, dashboards, notebooks, or artifacts currently consume this source.</EmptyText>
             )}
           </Section>
-          <Section title="Settings" icon={<ShieldAlert className="h-4 w-4" />}>
+          <Section id="settings" title="Settings" icon={<ShieldAlert className="h-4 w-4" />}>
             {canReconnectFeishu && (
               <div className="mb-4 rounded border border-amber-700/40 bg-amber-950/20 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -858,9 +871,25 @@ export default function SourceDetailPage() {
   )
 }
 
-function Section({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
+function SourceDetailNav() {
   return (
-    <Card className="border-gray-800 bg-[#1a1a1a] p-5">
+    <nav className="flex flex-wrap gap-2 rounded-md border border-[#333333] bg-[#151515] p-2" aria-label="Source detail sections">
+      {sourceDetailSections.map(section => (
+        <a
+          key={section.id}
+          href={`#${section.id}`}
+          className="rounded px-2.5 py-1 text-xs text-gray-300 transition-colors hover:bg-[#242424] hover:text-white"
+        >
+          {section.label}
+        </a>
+      ))}
+    </nav>
+  )
+}
+
+function Section({ id, title, icon, children }: { id?: string; title: string; icon: ReactNode; children: ReactNode }) {
+  return (
+    <Card id={id} className="scroll-mt-6 border-gray-800 bg-[#1a1a1a] p-5">
       <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-white">
         <span className="text-brand-orange">{icon}</span>
         {title}
@@ -968,6 +997,8 @@ function OverviewSourceDetail({
           <Metric label="Semantic models" value={`${source.consumer_counts.semantic_models}`} tone={source.consumer_counts.semantic_models > 0 ? 'ready' : 'muted'} />
         </div>
 
+        <SourceDetailNav />
+
         <Section title="Processing" icon={<Clock className="h-4 w-4" />}>
           <div className="grid grid-cols-7 gap-2">
             {sourceDetailSteps.map((step, index) => {
@@ -1003,7 +1034,7 @@ function OverviewSourceDetail({
         </Section>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <Section title="Overview" icon={<ShieldAlert className="h-4 w-4" />}>
+          <Section id="overview" title="Overview" icon={<ShieldAlert className="h-4 w-4" />}>
             <KeyValue label="Source kind" value={source.source_kind} />
             <KeyValue label="Provider" value={source.provider} />
             <KeyValue label="Resource type" value={source.resource_type || '-'} />
@@ -1014,7 +1045,7 @@ function OverviewSourceDetail({
             <KeyValue label="Updated" value={formatDate(source.updated_at)} />
           </Section>
 
-          <Section title="Lineage" icon={<Network className="h-4 w-4" />}>
+          <Section id="lineage" title="Lineage" icon={<Network className="h-4 w-4" />}>
             <LineageList
               nodes={[
                 { id: source.id, node_type: source.source_kind, label: source.name, status: source.status, metadata: {} },
@@ -1026,7 +1057,7 @@ function OverviewSourceDetail({
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <Section title="Parsed content" icon={<FileText className="h-4 w-4" />}>
+          <Section id="parsed-content" title="Parsed content" icon={<FileText className="h-4 w-4" />}>
             <KeyValue label="Parse status" value={source.parse_status} />
             <KeyValue label="Latest snapshot" value={source.latest_snapshot_id || '-'} />
             <KeyValue label="Raw artifact" value={source.raw_artifact_uri || '-'} />
@@ -1037,7 +1068,7 @@ function OverviewSourceDetail({
             <KeyValue label="Counts partial" value={source.counts_partial ? 'Yes' : 'No'} />
           </Section>
 
-          <Section title="Tables" icon={<Database className="h-4 w-4" />}>
+          <Section id="tables" title="Tables" icon={<Database className="h-4 w-4" />}>
             {schemaLoading ? (
               <LoadingRow label="Loading schema/profile..." />
             ) : schemaError ? (
@@ -1063,7 +1094,30 @@ function OverviewSourceDetail({
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <Section title="Consumers" icon={<Network className="h-4 w-4" />}>
+          <Section id="snapshots" title="Snapshots" icon={<Database className="h-4 w-4" />}>
+            <KeyValue label="Latest snapshot" value={source.latest_snapshot_id || '-'} />
+            <KeyValue label="Last synced" value={formatDate(source.last_synced_at)} />
+            <KeyValue label="Freshness" value={source.freshness_status} />
+            {source.latest_snapshot_id ? (
+              <EmptyText>Detailed snapshot history is available for captured source resources.</EmptyText>
+            ) : (
+              <EmptyText>No immutable Source snapshot is attached to this overview-backed source yet.</EmptyText>
+            )}
+          </Section>
+
+          <Section id="evidence" title="Evidence" icon={<CheckCircle2 className="h-4 w-4" />}>
+            <KeyValue label="Context status" value={source.context_index_status.replace(/_/g, ' ')} />
+            <KeyValue label="Evidence fragments" value={`${source.parsed_asset_counts.evidence}`} />
+            {source.context_index_status === 'indexed' ? (
+              <EmptyText>Open the captured source resource to inspect provider-neutral evidence fragments.</EmptyText>
+            ) : (
+              <EmptyText>No context evidence is available for this source overview item yet.</EmptyText>
+            )}
+          </Section>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Section id="consumers" title="Consumers" icon={<Network className="h-4 w-4" />}>
             <div className="flex flex-wrap gap-2">
               {Object.entries(source.consumer_counts).map(([type, count]) => (
                 <span key={type} className="rounded border border-[#444444] px-2 py-1 text-xs text-gray-300">
@@ -1074,7 +1128,7 @@ function OverviewSourceDetail({
             {source.counts_partial && <p className="mt-3 text-sm text-gray-500">Consumer counts are partial until dashboard and MCP references are fully indexed.</p>}
           </Section>
 
-          <Section title="Settings" icon={<ShieldAlert className="h-4 w-4" />}>
+          <Section id="settings" title="Settings" icon={<ShieldAlert className="h-4 w-4" />}>
             {onReconnectFeishu && (
               <div className="mb-4 rounded border border-amber-700/40 bg-amber-950/20 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">

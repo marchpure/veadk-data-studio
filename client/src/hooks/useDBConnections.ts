@@ -634,7 +634,7 @@ export function useKnowledgeSearch(resourceId?: string, query = '', enabled = tr
     queryKey: sourceConnectorKeys.knowledgeSearch(resourceId, query),
     queryFn: async (): Promise<KnowledgeSearchResponse> => {
       if (!resourceId) throw new Error('Missing source resource id')
-      return ApiService.searchKnowledge({ query: query.trim() || '*', resource_ids: [resourceId], limit: 8 })
+      return ApiService.searchKnowledge({ query: query.trim(), resource_ids: [resourceId], limit: 8 })
     },
     enabled: enabled && !!resourceId,
     staleTime: 15 * 1000,
