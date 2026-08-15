@@ -214,7 +214,7 @@ Backend source of truth for the first implementation:
 
 - Keep current `/datasources` for compatibility.
 - Build the overview facade from `Dataset`, `Connection`, `SourceResource`, `SourceSnapshot`, and `KnowledgeResource`.
-- For unavailable counts, return `0` plus `counts_partial: true` or omit the field instead of doing expensive ad hoc joins.
+- For unavailable or expensive counts, return `0` plus `counts_partial: true` or omit the field instead of doing ad hoc joins that can stall the inventory.
 - Do not expose OpenViking internals; expose `context_index_status`, `context_uri` only in admin/debug or Source detail metadata.
 - Use this facade for `Sources`, source picker next actions, and Overview health cards.
 
@@ -224,7 +224,7 @@ Current implementation:
 - `GET /datasources/overview` is implemented as a compatibility alias.
 - The backend service aggregates visible `Dataset`, `Connection`, `SourceResource`, `SourceSnapshot`, `KnowledgeResource`, and evidence counts into `SourceOverviewItem`.
 - Statuses are normalized to product labels such as `Ready`, `Needs confirmation`, `Authorization required`, `Permission lost`, `Source unavailable`, and `Failed`.
-- `consumer_counts.semantic_models` and notebook counts are populated from current model/notebook references where available; dashboard and MCP counts remain `0` with `counts_partial: true`.
+- `consumer_counts.semantic_models`, notebooks, dashboards, and analysis artifacts are populated from current model/notebook references where available. Dashboard inventory counts include both legacy HTML dashboards and AnalysisArtifact-backed dashboard apps created from consuming notebooks; MCP counts remain `0` with `counts_partial: true` until tool bindings become first-class records.
 - `next_actions` is populated for connection, dataset, and source-resource rows so the inventory can point users toward reauthorization, retry, evidence search, projection review, schema refresh, or semantic model generation without opening a detail page first.
 - Frontend API types and `useSourceOverview()` are available.
 - `client/src/pages/Databases.tsx` now renders the Sources inventory from `SourceOverviewItem` instead of the legacy datasource card list.

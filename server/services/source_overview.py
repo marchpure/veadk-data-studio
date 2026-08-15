@@ -10,6 +10,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from server.models.analysis_artifacts import AnalysisArtifact
+from server.models.dashboard import Dashboard
 from server.models.datasets import Dataset
 from server.models.knowledge_resources import EvidenceFragment, KnowledgeResource
 from server.models.notebook_assets import NotebookAsset
@@ -55,6 +57,8 @@ class _ConsumerIndex:
     semantic_by_id: dict[str, int] = field(default_factory=dict)
     notebooks_by_dataset_id: dict[str, set[str]] = field(default_factory=dict)
     notebooks_by_knowledge_id: dict[str, set[str]] = field(default_factory=dict)
+    dashboards_by_notebook_id: dict[str, set[str]] = field(default_factory=dict)
+    artifacts_by_notebook_id: dict[str, set[str]] = field(default_factory=dict)
 
 
 class SourceOverviewService:
@@ -227,6 +231,18 @@ class SourceOverviewService:
             elif asset_type == "knowledge_resource":
                 index.notebooks_by_knowledge_id.setdefault(str(asset_id), set()).add(str(notebook_id))
 
+        dashboard_result = await session.execute(
+            select(Dashboard.notebook_id, Dashboard.id).where(Dashboard.tenant_id == tenant_id)
+        )
+        for notebook_id, dashboard_id in dashboard_result.all():
+            index.dashboards_by_notebook_id.setdefault(str(notebook_id), set()).add(str(dashboard_id))
+
+        artifact_result = await session.execute(
+            select(AnalysisArtifact.notebook_id, AnalysisArtifact.id).where(AnalysisArtifact.tenant_id == tenant_id)
+        )
+        for notebook_id, artifact_id in artifact_result.all():
+            index.artifacts_by_notebook_id.setdefault(str(notebook_id), set()).add(str(artifact_id))
+
         return index
 
     def _dataset_item(
@@ -247,6 +263,11 @@ class SourceOverviewService:
             updated_at = dataset.connection.schema_updated_at or dataset.created_at
             semantic_keys = {str(dataset.id), connection_id}
             notebooks = set(consumer_index.notebooks_by_dataset_id.get(str(dataset.id), set()))
+            consumer_counts = self._consumer_counts(
+                consumer_index=consumer_index,
+                semantic_keys=semantic_keys,
+                notebook_ids=notebooks,
+            )
             return SourceOverviewItem(
                 id=str(dataset.id),
                 source_kind="connection",
@@ -262,18 +283,13 @@ class SourceOverviewService:
                 context_index_status="unavailable",
                 parse_status="parsed",
                 parsed_asset_counts={"tables": self._schema_table_count(dataset.connection.schema_cache)},
-                consumer_counts={
-                    "semantic_models": self._semantic_count(consumer_index, semantic_keys),
-                    "dashboards": 0,
-                    "notebooks": len(notebooks),
-                    "mcp_tools": 0,
-                },
+                consumer_counts=consumer_counts,
                 owner=self._owner_payload(dataset.connection.created_by),
                 visibility="public" if dataset.connection.is_public else "private",
                 next_actions=self._connection_next_actions(
                     provider=provider,
                     has_schema=bool(dataset.connection.schema_updated_at),
-                    semantic_count=self._semantic_count(consumer_index, semantic_keys),
+                    semantic_count=consumer_counts["semantic_models"],
                 ),
                 created_at=self._isoformat(dataset.created_at) or "",
                 updated_at=self._isoformat(updated_at),
@@ -284,6 +300,11 @@ class SourceOverviewService:
         file_type = dataset.files[0].type if dataset.files else None
         updated_at = dataset.schema_updated_at or dataset.created_at
         notebooks = set(consumer_index.notebooks_by_dataset_id.get(str(dataset.id), set()))
+        consumer_counts = self._consumer_counts(
+            consumer_index=consumer_index,
+            semantic_keys={str(dataset.id)},
+            notebook_ids=notebooks,
+        )
         return SourceOverviewItem(
             id=str(dataset.id),
             source_kind="dataset",
@@ -302,18 +323,13 @@ class SourceOverviewService:
                 "tables": self._schema_table_count(dataset.schema_cache),
                 "files": len(dataset.files or []),
             },
-            consumer_counts={
-                "semantic_models": self._semantic_count(consumer_index, {str(dataset.id)}),
-                "dashboards": 0,
-                "notebooks": len(notebooks),
-                "mcp_tools": 0,
-            },
+            consumer_counts=consumer_counts,
             owner=self._owner_payload(dataset.created_by),
             visibility="public" if dataset.is_public else "private",
             next_actions=self._dataset_next_actions(
                 has_files=bool(dataset.files),
                 has_schema=bool(dataset.schema_cache),
-                semantic_count=self._semantic_count(consumer_index, {str(dataset.id)}),
+                semantic_count=consumer_counts["semantic_models"],
             ),
             created_at=self._isoformat(dataset.created_at) or "",
             updated_at=self._isoformat(updated_at),
@@ -341,6 +357,11 @@ class SourceOverviewService:
         semantic_keys = {str(resource.id)}
         if projected_dataset_id:
             semantic_keys.add(str(projected_dataset_id))
+        consumer_counts = self._consumer_counts(
+            consumer_index=consumer_index,
+            semantic_keys=semantic_keys,
+            notebook_ids=notebooks,
+        )
 
         return SourceOverviewItem(
             id=str(resource.id),
@@ -364,12 +385,7 @@ class SourceOverviewService:
                 "files": int(projection.get("files_count") or len(projection.get("files") or [])),
                 "evidence": evidence_count,
             },
-            consumer_counts={
-                "semantic_models": self._semantic_count(consumer_index, semantic_keys),
-                "dashboards": 0,
-                "notebooks": len(notebooks),
-                "mcp_tools": 0,
-            },
+            consumer_counts=consumer_counts,
             owner=self._user_owner_payload(resource.owner) or self._owner_payload(resource.owner_id),
             visibility=self._visibility(resource.visibility),
             next_actions=self._source_resource_next_actions(
@@ -378,7 +394,7 @@ class SourceOverviewService:
                 has_snapshot=latest_snapshot is not None,
                 projected_dataset_id=str(projected_dataset_id) if projected_dataset_id else None,
                 knowledge_resource=knowledge_resource,
-                semantic_count=self._semantic_count(consumer_index, semantic_keys),
+                semantic_count=consumer_counts["semantic_models"],
             ),
             created_at=self._isoformat(resource.created_at) or "",
             updated_at=self._isoformat(resource.updated_at),
@@ -566,6 +582,25 @@ class SourceOverviewService:
 
     def _semantic_count(self, consumer_index: _ConsumerIndex, ids: set[str]) -> int:
         return sum(consumer_index.semantic_by_id.get(item_id, 0) for item_id in ids)
+
+    def _consumer_counts(
+        self,
+        *,
+        consumer_index: _ConsumerIndex,
+        semantic_keys: set[str],
+        notebook_ids: set[str],
+    ) -> dict[str, int]:
+        dashboards: set[str] = set()
+        artifacts: set[str] = set()
+        for notebook_id in notebook_ids:
+            dashboards.update(consumer_index.dashboards_by_notebook_id.get(notebook_id, set()))
+            artifacts.update(consumer_index.artifacts_by_notebook_id.get(notebook_id, set()))
+        return {
+            "semantic_models": self._semantic_count(consumer_index, semantic_keys),
+            "dashboards": len(dashboards) + len(artifacts),
+            "notebooks": len(notebook_ids),
+            "mcp_tools": 0,
+        }
 
     def _is_visible(self, *, created_by: UUID | None, is_public: bool, user_id: UUID) -> bool:
         if created_by is None:

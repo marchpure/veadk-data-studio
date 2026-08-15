@@ -5,7 +5,9 @@ from datetime import datetime
 
 from sqlalchemy import select
 
+from server.models.analysis_artifacts import AnalysisArtifact
 from server.models.connections import Connection
+from server.models.dashboard import Dashboard
 from server.models.datasets import Dataset
 from server.models.notebook_assets import NotebookAsset
 from server.models.notebooks import Notebook
@@ -390,6 +392,24 @@ async def test_sources_overview_counts_semantic_and_notebook_consumers(test_clie
         )
     )
     test_session.add(
+        Dashboard(
+            tenant_id=tenant.id,
+            notebook_id=notebook.id,
+            version_num=1,
+            html_content="<html>rules dashboard</html>",
+        )
+    )
+    test_session.add(
+        AnalysisArtifact(
+            tenant_id=tenant.id,
+            notebook_id=notebook.id,
+            name="Rules impact app",
+            objective="Track downstream rules impact",
+            definition_json={"source_resource_id": resource["id"]},
+            status="published",
+        )
+    )
+    test_session.add(
         SemanticModel(
             tenant_id=tenant.id,
             created_by=tenant.owner_id,
@@ -411,5 +431,5 @@ async def test_sources_overview_counts_semantic_and_notebook_consumers(test_clie
 
     assert item["consumer_counts"]["semantic_models"] == 1
     assert item["consumer_counts"]["notebooks"] == 1
-    assert item["consumer_counts"]["dashboards"] == 0
+    assert item["consumer_counts"]["dashboards"] == 2
     assert item["counts_partial"] is True
