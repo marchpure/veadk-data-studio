@@ -370,6 +370,8 @@ Evidence returned to users should be mapped back to Byaan locators:
 - page/range/block/table locator
 - content hash
 
+Source Detail should render those locators directly next to evidence previews. Customers need to see snapshot, URL/document token, block/page/table/row, revision, and hash context without opening provider internals.
+
 ## Interface Shape
 
 Keep two modules deep and separate.

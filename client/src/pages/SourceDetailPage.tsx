@@ -22,7 +22,7 @@ import {
   sourceConnectorKeys,
   sourceOverviewKeys,
 } from '../hooks/useDBConnections'
-import { ApiService, isMultiDatabaseSchema, type DatabaseSchemaResponse, type SourceConsumerItem, type SourceLineageEdge, type SourceLineageNode, type SourceOverviewItem, type SourceParsedAssetItem, type SourceResource, type SourceResourceProcessing, type SourceSnapshot } from '../services/api'
+import { ApiService, isMultiDatabaseSchema, type DatabaseSchemaResponse, type SourceConsumerItem, type SourceEvidence, type SourceLineageEdge, type SourceLineageNode, type SourceOverviewItem, type SourceParsedAssetItem, type SourceResource, type SourceResourceProcessing, type SourceSnapshot } from '../services/api'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 const sourceDetailSteps = [
@@ -127,6 +127,27 @@ const consumerImpactSummary = (counts?: Record<string, number>) => {
 
 const consumerImpactTotal = (counts?: Record<string, number>) =>
   Object.values(counts || {}).reduce((total, count) => total + count, 0)
+
+const evidenceLocatorChips = (item: SourceEvidence): Array<{ label: string; value: string }> => {
+  const locator = item.locator_json || {}
+  const fields: Array<[string, unknown]> = [
+    ['Snapshot', item.snapshot_id || locator.snapshot_id],
+    ['URL', locator.source_url || locator.original_url || locator.url],
+    ['Document', locator.document_token || locator.wiki_token || locator.file_token],
+    ['Block', locator.block_id],
+    ['Page', locator.page || locator.page_number],
+    ['Table', locator.table_name || locator.table],
+    ['Row', locator.row || locator.row_index],
+    ['Revision', locator.revision || locator.external_revision],
+    ['Hash', item.content_hash || locator.content_hash],
+  ]
+  return fields.flatMap(([label, value]) => {
+    if (value === undefined || value === null || value === '') return []
+    if (Array.isArray(value)) return [{ label, value: value.join(' / ') }]
+    if (typeof value === 'object') return [{ label, value: JSON.stringify(value) }]
+    return [{ label, value: String(value) }]
+  }).slice(0, 8)
+}
 
 export default function SourceDetailPage() {
   const { sourceId } = useParams()
@@ -599,6 +620,17 @@ export default function SourceDetailPage() {
                     <span>{item.confidence || 'confidence n/a'}</span>
                   </div>
                   <p className="mt-2 line-clamp-3 text-sm text-gray-200">{item.text}</p>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {evidenceLocatorChips(item).map(chip => (
+                      <span
+                        key={`${item.id}-${chip.label}`}
+                        className="max-w-full truncate rounded border border-[#444444] px-2 py-1 text-[11px] text-gray-400"
+                        title={chip.value}
+                      >
+                        {chip.label}: {chip.value}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
