@@ -236,7 +236,7 @@ Current implementation:
 - Narrow viewports keep a compact mobile card layout.
 - The inventory includes `All` and `Needs attention` tabs. Needs attention uses `attention_state` plus non-ready/non-processing product statuses.
 - Source mutations invalidate both legacy `datasources` queries and the `source-overview` facade so the table stays fresh after create, import, delete, and visibility changes.
-- Databricks connection-backed datasets are surfaced as `family = warehouses` with warehouse-specific next actions; TOS/object-storage source resources surface as `family = object_storage` with evidence/projection next actions.
+- Databricks connection-backed datasets are surfaced as `family = warehouses` with warehouse-specific next actions. The overview facade now checks safe OAuth metadata from the legacy connection object so missing OAuth blocks, missing refresh tokens, and expired access tokens show `Authorization required` or `Reauthorization required` instead of `Ready`; token values are not exposed. TOS/object-storage source resources surface as `family = object_storage` with evidence/projection next actions.
 
 Acceptance:
 

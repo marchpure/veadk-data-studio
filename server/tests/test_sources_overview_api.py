@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 
 from sqlalchemy import select
@@ -230,6 +231,13 @@ async def test_sources_overview_next_actions_cover_warehouse_and_object_storage_
             {
                 "server_hostname": "adb.example.databricks.com",
                 "http_path": "/sql/1.0/warehouses/wh_1",
+                "oauth": {
+                    "access_token": "databricks-access-token",
+                    "refresh_token": "databricks-refresh-token",
+                    "expires_at": int(time.time()) + 3600,
+                    "scope": "sql offline_access all-apis",
+                    "server_hostname": "adb.example.databricks.com",
+                },
             }
         ),
         schema_cache=json.dumps({"schema": {"gold.orders": {"columns": [{"name": "order_id", "type": "STRING"}]}}}),
@@ -285,6 +293,103 @@ async def test_sources_overview_next_actions_cover_warehouse_and_object_storage_
     assert tos_item["family"] == "object_storage"
     assert tos_item["provider"] == "volcengine_tos"
     assert tos_item["next_actions"] == ["Search evidence", "Review projection"]
+
+
+async def test_sources_overview_marks_databricks_missing_oauth_as_authorization_required(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    connection = Connection(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="databricks",
+        name="Databricks OAuth missing",
+        connection_obj_encrypted=json.dumps(
+            {
+                "server_hostname": "adb.example.databricks.com",
+                "http_path": "/sql/1.0/warehouses/wh_1",
+            }
+        ),
+        schema_cache=json.dumps({"schema": {"gold.orders": {"columns": [{"name": "order_id", "type": "STRING"}]}}}),
+        schema_updated_at=datetime.utcnow(),
+        is_public=True,
+    )
+    test_session.add(connection)
+    await test_session.flush()
+    dataset = Dataset(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="connection",
+        name="Databricks OAuth missing",
+        connection_id=connection.id,
+        is_public=True,
+    )
+    test_session.add(dataset)
+    await test_session.commit()
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["connection_id"] == str(connection.id))
+
+    assert item["provider"] == "databricks"
+    assert item["family"] == "warehouses"
+    assert item["status"] == "Authorization required"
+    assert item["attention_state"] == "auth"
+    assert item["freshness_status"] == "unknown"
+    assert item["parse_status"] == "pending"
+    assert item["next_actions"] == ["Sign in with Databricks"]
+
+
+async def test_sources_overview_marks_databricks_expired_token_as_reauthorization_required(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    connection = Connection(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="databricks",
+        name="Databricks OAuth expired",
+        connection_obj_encrypted=json.dumps(
+            {
+                "server_hostname": "adb.example.databricks.com",
+                "http_path": "/sql/1.0/warehouses/wh_1",
+                "oauth": {
+                    "access_token": "databricks-access-token",
+                    "refresh_token": "databricks-refresh-token",
+                    "expires_at": int(time.time()) - 30,
+                    "scope": "sql offline_access all-apis",
+                    "server_hostname": "adb.example.databricks.com",
+                },
+            }
+        ),
+        schema_cache=json.dumps({"schema": {"gold.orders": {"columns": [{"name": "order_id", "type": "STRING"}]}}}),
+        schema_updated_at=datetime.utcnow(),
+        is_public=True,
+    )
+    test_session.add(connection)
+    await test_session.flush()
+    dataset = Dataset(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="connection",
+        name="Databricks OAuth expired",
+        connection_id=connection.id,
+        is_public=True,
+    )
+    test_session.add(dataset)
+    await test_session.commit()
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["connection_id"] == str(connection.id))
+
+    assert item["provider"] == "databricks"
+    assert item["family"] == "warehouses"
+    assert item["status"] == "Reauthorization required"
+    assert item["attention_state"] == "auth"
+    assert item["freshness_status"] == "stale"
+    assert item["parse_status"] == "parsed"
+    assert item["next_actions"] == ["Reauthorize Databricks", "Refresh schema profile"]
 
 
 async def test_sources_overview_object_storage_confirmation_uses_large_object_action(test_client, test_session):

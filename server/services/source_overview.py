@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -61,6 +62,15 @@ class _ConsumerIndex:
     artifacts_by_notebook_id: dict[str, set[str]] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class _ConnectionHealth:
+    status: str = "ready"
+    attention_state: str = "none"
+    freshness_status: str | None = None
+    parse_status: str = "parsed"
+    next_actions: list[str] | None = None
+
+
 class SourceOverviewService:
     async def list_overview(
         self,
@@ -77,6 +87,7 @@ class SourceOverviewService:
             resources=resources,
         )
         consumer_index = await self._consumer_index(session=session, tenant_id=tenant_id)
+        connection_health = await self._connection_health_index(session=session, datasets=datasets)
 
         items: list[SourceOverviewItem] = []
         seen_connection_ids: set[str] = set()
@@ -85,6 +96,7 @@ class SourceOverviewService:
                 dataset=dataset,
                 seen_connection_ids=seen_connection_ids,
                 consumer_index=consumer_index,
+                connection_health=connection_health.get(str(dataset.connection_id)) if dataset.connection_id else None,
             )
             if item is not None:
                 items.append(item)
@@ -245,12 +257,34 @@ class SourceOverviewService:
 
         return index
 
+    async def _connection_health_index(
+        self,
+        *,
+        session: AsyncSession,
+        datasets: list[Dataset],
+    ) -> dict[str, _ConnectionHealth]:
+        health: dict[str, _ConnectionHealth] = {}
+        seen_connection_ids: set[str] = set()
+        for dataset in datasets:
+            connection = dataset.connection if dataset.type == "connection" else None
+            if connection is None:
+                continue
+            connection_id = str(connection.id)
+            if connection_id in seen_connection_ids:
+                continue
+            seen_connection_ids.add(connection_id)
+            if connection.type == "databricks":
+                connection_obj = await connection.get_decrypted_connection_obj(session)
+                health[connection_id] = self._databricks_connection_health(connection_obj=connection_obj)
+        return health
+
     def _dataset_item(
         self,
         *,
         dataset: Dataset,
         seen_connection_ids: set[str],
         consumer_index: _ConsumerIndex,
+        connection_health: _ConnectionHealth | None = None,
     ) -> SourceOverviewItem | None:
         if dataset.type == "connection":
             if dataset.connection is None:
@@ -268,6 +302,9 @@ class SourceOverviewService:
                 semantic_keys=semantic_keys,
                 notebook_ids=notebooks,
             )
+            health = connection_health or _ConnectionHealth()
+            status = health.status
+            has_schema = bool(dataset.connection.schema_updated_at)
             return SourceOverviewItem(
                 id=str(dataset.id),
                 source_kind="connection",
@@ -276,19 +313,21 @@ class SourceOverviewService:
                 provider=provider,
                 resource_type=provider,
                 name=dataset.connection.name or "Database Connection",
-                status="Ready",
-                attention_state="none",
-                freshness_status="fresh" if dataset.connection.schema_updated_at else "unknown",
+                status=SOURCE_STATUS_LABELS.get(status, status.replace("_", " ").capitalize()),
+                attention_state=health.attention_state,
+                freshness_status=health.freshness_status or ("fresh" if has_schema else "unknown"),
                 last_synced_at=self._isoformat(dataset.connection.schema_updated_at),
                 context_index_status="unavailable",
-                parse_status="parsed",
+                parse_status=health.parse_status,
                 parsed_asset_counts={"tables": self._schema_table_count(dataset.connection.schema_cache)},
                 consumer_counts=consumer_counts,
                 owner=self._owner_payload(dataset.connection.created_by),
                 visibility="public" if dataset.connection.is_public else "private",
-                next_actions=self._connection_next_actions(
+                next_actions=health.next_actions
+                or self._connection_next_actions(
                     provider=provider,
-                    has_schema=bool(dataset.connection.schema_updated_at),
+                    status=status,
+                    has_schema=has_schema,
                     semantic_count=consumer_counts["semantic_models"],
                 ),
                 created_at=self._isoformat(dataset.created_at) or "",
@@ -499,7 +538,65 @@ class SourceOverviewService:
             return "failed"
         return "parsed"
 
-    def _connection_next_actions(self, *, provider: str, has_schema: bool, semantic_count: int) -> list[str]:
+    def _databricks_connection_health(self, *, connection_obj: dict[str, Any] | None) -> _ConnectionHealth:
+        if not isinstance(connection_obj, dict):
+            return _ConnectionHealth(
+                status="authorization_required",
+                attention_state="auth",
+                freshness_status="unknown",
+                parse_status="pending",
+                next_actions=["Reconnect Databricks"],
+            )
+
+        oauth = connection_obj.get("oauth")
+        if not isinstance(oauth, dict) or not oauth.get("access_token"):
+            return _ConnectionHealth(
+                status="authorization_required",
+                attention_state="auth",
+                freshness_status="unknown",
+                parse_status="pending",
+                next_actions=["Sign in with Databricks"],
+            )
+        if not oauth.get("refresh_token"):
+            return _ConnectionHealth(
+                status="reauthorization_required",
+                attention_state="auth",
+                freshness_status="stale",
+                next_actions=["Reauthorize Databricks"],
+            )
+
+        expires_at = self._coerce_epoch_seconds(oauth.get("expires_at"))
+        if expires_at is None:
+            return _ConnectionHealth(
+                status="reauthorization_required",
+                attention_state="auth",
+                freshness_status="stale",
+                next_actions=["Reauthorize Databricks"],
+            )
+        if time.time() >= expires_at:
+            return _ConnectionHealth(
+                status="reauthorization_required",
+                attention_state="auth",
+                freshness_status="stale",
+                next_actions=["Reauthorize Databricks", "Refresh schema profile"],
+            )
+        return _ConnectionHealth()
+
+    def _coerce_epoch_seconds(self, value: Any) -> float | None:
+        if isinstance(value, datetime):
+            return value.timestamp()
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _connection_next_actions(self, *, provider: str, status: str, has_schema: bool, semantic_count: int) -> list[str]:
+        if status in {"authorization_required", "reauthorization_required", "disconnected"}:
+            if provider == "databricks":
+                return ["Reauthorize Databricks"]
+            return ["Reauthorize source"]
+        if status == "source_unavailable":
+            return ["Retry sync", "Check upstream source"]
         if not has_schema:
             return ["Refresh schema profile"]
         if provider == "databricks":

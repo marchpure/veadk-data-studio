@@ -450,6 +450,8 @@ Source Detail destructive actions should also show consumer impact before confir
 
 Connector-backed Source Detail should also show a redacted source-owned authorization summary from the backing `SourceConnection`: provider, auth mode, external account, connection status, token expiry, granted scopes, and non-secret capabilities. This makes OAuth, scope, reauthorization, and permission recovery auditable without exposing encrypted credentials or OpenViking connector internals.
 
+Connection-backed warehouse Sources must expose the same product health semantics even while they still use the legacy `connections` table. The Databricks Source wrapper should inspect only safe OAuth metadata from the decrypted connection object and surface `Authorization required` or `Reauthorization required` when the OAuth block, refresh token, or token expiry is missing or stale. Token values must never be returned through `SourceOverview`; the user-facing contract is status, attention state, freshness, and next action.
+
 Keep API family enums stable for integrations and modeling adapters, but translate them into product labels in the UI. For example, `documents` remains the SourceOverview/Data Modeling enum while the inventory and Source Detail display `Business docs`, matching the Add Source family.
 
 ## Sellable Scope By Milestone
