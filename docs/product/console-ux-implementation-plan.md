@@ -286,7 +286,8 @@ Current implementation:
 - Databricks appears under `Warehouses` and reuses the existing OAuth/catalog/schema wizard.
 - Connector catalog entries are mapped into families from `ConnectorDefinition.category`; `documents` maps to `Business docs`, `object_storage` maps to `Object storage`, `data_lake` maps to `Warehouses`, and database catalog entries map to `Databases`.
 - Each source option shows availability (`available`, `beta`, `planned`) and output chips (`Context`, `Dataset`, `Semantic-ready`, `Dashboard-ready`) where applicable.
-- Connector catalog payloads now expose `provider`, `family`, `limitations`, `required_scopes`, `resource_picker_type`, `status`, and `modeling_modes`, so the UI can show readiness constraints without hardcoding them into the Add Source dialog.
+- Connector catalog payloads now expose `provider`, `family`, `limitations`, `required_scopes`, `resource_picker_type`, `status`, `modeling_modes`, and structured `readiness_gates`, so the UI can show readiness constraints without hardcoding them into the Add Source dialog.
+- Available Feishu and TOS entries report all commercial readiness gates as passed; planned entries report the same gate list as missing. The Add Source picker and planned connector fallback show the readiness gate summary and the first missing gates.
 - Feishu/Lark advertises an OAuth drive picker and `context_assisted` / `projection` modeling modes; TOS advertises an object-storage browser and `projection` / `context_assisted` modes.
 - Planned entries use `planned:<connector_id>` and never set `selectedType`, so they cannot open a working setup form by accident.
 - Selecting a planned entry shows a read-only commercial readiness message sourced from the catalog limitations, including roadmap-only picker status and commercial readiness gates.

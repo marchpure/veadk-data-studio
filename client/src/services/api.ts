@@ -1060,8 +1060,16 @@ export interface SourceResourceSyncRequest {
 }
 
 export type ConnectorAvailability = 'available' | 'beta' | 'planned'
+export type ConnectorReadinessGateStatus = 'passed' | 'partial' | 'missing' | 'not_applicable'
 export type SourceConnectionProvider = 'feishu' | 'volcengine_tos'
 export type SourceConnectionAuthMode = 'oauth' | 'access_key' | 'sts' | 'none'
+
+export interface ConnectorReadinessGate {
+  key: string
+  label: string
+  status: ConnectorReadinessGateStatus
+  detail: string
+}
 
 export interface ConnectorDefinition {
   id: string
@@ -1080,6 +1088,7 @@ export interface ConnectorDefinition {
   supported_resource_types: SourceResourceType[]
   availability: ConnectorAvailability
   status: ConnectorAvailability
+  readiness_gates: ConnectorReadinessGate[]
   modeling_modes: string[]
   description?: string
 }

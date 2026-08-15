@@ -27,6 +27,7 @@ class ConnectorDefinitionRead(BaseModel):
     supported_resource_types: list[str]
     availability: str
     status: str
+    readiness_gates: list[dict[str, str]] = Field(default_factory=list)
     modeling_modes: list[str] = Field(default_factory=list)
     description: str = ""
 

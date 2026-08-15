@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 ConnectorAvailability = Literal["available", "beta", "planned"]
 ConnectorAuthMode = Literal["oauth", "access_key", "connection_string", "none"]
+ConnectorReadinessGateStatus = Literal["passed", "partial", "missing", "not_applicable"]
 ConnectorResourcePickerType = Literal[
     "none",
     "file_import",
@@ -15,6 +16,43 @@ ConnectorResourcePickerType = Literal[
     "warehouse_catalog_picker",
     "roadmap_only",
 ]
+
+COMMERCIAL_READINESS_GATES: tuple[tuple[str, str], ...] = (
+    ("tenant_isolated_auth", "Tenant-isolated authorization and encrypted credentials"),
+    ("resource_picker", "Resource picker or explicit import contract"),
+    ("already_added_state", "Already-added state"),
+    ("immutable_snapshot", "Immutable snapshot with external revision and content hash"),
+    ("raw_artifact_uri", "Raw artifact URI outside the control database"),
+    ("parser_warnings", "Parser version and parser warnings"),
+    ("context_index_status", "Context indexing status through KnowledgeProvider"),
+    ("recoverable_errors", "Permission, reauthorization, source unavailable, and retryable failure states"),
+    ("source_detail", "Source detail with snapshots, parsed assets, evidence, lineage, and consumers"),
+    ("lifecycle_actions", "Clear delete, revoke, and reindex behavior"),
+)
+
+
+def _readiness_gates(
+    *,
+    status: ConnectorReadinessGateStatus,
+    detail: str,
+    overrides: dict[str, tuple[ConnectorReadinessGateStatus, str]] | None = None,
+) -> tuple[dict[str, str], ...]:
+    overrides = overrides or {}
+    gates: list[dict[str, str]] = []
+    for key, label in COMMERCIAL_READINESS_GATES:
+        gate_status, gate_detail = overrides.get(key, (status, detail))
+        gates.append({"key": key, "label": label, "status": gate_status, "detail": gate_detail})
+    return tuple(gates)
+
+
+PRODUCTION_READY_GATES = _readiness_gates(
+    status="passed",
+    detail="Certified for the commercial beta Source control plane.",
+)
+PLANNED_GATES = _readiness_gates(
+    status="missing",
+    detail="Required before this roadmap entry can become a supported connector.",
+)
 
 
 @dataclass(frozen=True)
@@ -34,6 +72,7 @@ class ConnectorDefinition:
     required_scopes: tuple[str, ...] = ()
     resource_picker_type: ConnectorResourcePickerType = "none"
     modeling_modes: tuple[str, ...] = ()
+    readiness_gates: tuple[dict[str, str], ...] = ()
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -53,6 +92,7 @@ class ConnectorDefinition:
             "supported_resource_types": list(self.supported_resource_types),
             "availability": self.availability,
             "status": self.availability,
+            "readiness_gates": list(self.readiness_gates),
             "modeling_modes": list(self.modeling_modes),
             "description": self.description,
         }
@@ -98,6 +138,7 @@ def _planned(
         ),
         resource_picker_type="roadmap_only",
         modeling_modes=(),
+        readiness_gates=PLANNED_GATES,
     )
 
 
@@ -139,6 +180,7 @@ CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
         ),
         resource_picker_type="oauth_drive_picker",
         modeling_modes=("context_assisted", "projection"),
+        readiness_gates=PRODUCTION_READY_GATES,
     ),
     ConnectorDefinition(
         id="volcengine_tos",
@@ -186,6 +228,7 @@ CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
         required_scopes=("tos:ListBucket", "tos:GetObject"),
         resource_picker_type="object_storage_browser",
         modeling_modes=("projection", "context_assisted"),
+        readiness_gates=PRODUCTION_READY_GATES,
     ),
     _planned(
         id="aliyun_oss",

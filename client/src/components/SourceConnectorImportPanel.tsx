@@ -62,6 +62,15 @@ const tosTypes: Array<{ value: string; label: string }> = [
   { value: 'tos_object', label: 'Objects' },
 ]
 
+const readinessGateSummary = (definition?: ConnectorDefinition): string | null => {
+  if (!definition?.readiness_gates?.length) return null
+  const passed = definition.readiness_gates.filter(gate => gate.status === 'passed').length
+  return `${passed}/${definition.readiness_gates.length} gates`
+}
+
+const missingReadinessGates = (definition?: ConnectorDefinition) =>
+  definition?.readiness_gates?.filter(gate => gate.status !== 'passed') || []
+
 const isSelectable = (item: SourceResourcePickerItem) =>
   item.already_added ? false : item.resource_type !== 'feishu_folder'
 
@@ -468,7 +477,20 @@ export function SourceConnectorImportPanel({
         <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-400">
           <span className="rounded border border-[#444444] px-2 py-1">Status: {definition.status}</span>
           <span className="rounded border border-[#444444] px-2 py-1">Picker: {definition.resource_picker_type}</span>
+          {readinessGateSummary(definition) && (
+            <span className="rounded border border-[#444444] px-2 py-1">Readiness: {readinessGateSummary(definition)}</span>
+          )}
         </div>
+        {missingReadinessGates(definition).length > 0 && (
+          <div className="mt-4">
+            <div className="text-xs uppercase text-gray-500">Missing readiness gates</div>
+            <ul className="mt-2 space-y-1 text-xs text-gray-400">
+              {missingReadinessGates(definition).slice(0, 5).map(gate => (
+                <li key={gate.key}>{gate.label}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
     )
   }

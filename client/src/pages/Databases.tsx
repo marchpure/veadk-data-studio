@@ -86,6 +86,15 @@ const connectorModeLabel = (mode: string): string => {
   }
 }
 
+const readinessGateSummary = (connector?: ConnectorDefinition): string | null => {
+  if (!connector?.readiness_gates?.length) return null
+  const passed = connector.readiness_gates.filter(gate => gate.status === 'passed').length
+  return `${passed}/${connector.readiness_gates.length} gates`
+}
+
+const missingReadinessGates = (connector?: ConnectorDefinition) =>
+  connector?.readiness_gates?.filter(gate => gate.status !== 'passed') || []
+
 export default function DatabasesPage() {
   const queryClient = useQueryClient()
   const openSidebar = useStore(state => state.openSidebar)
@@ -1841,6 +1850,11 @@ export default function DatabasesPage() {
                                   {option.limitations[0]}
                                 </span>
                               )}
+                              {option.connector && readinessGateSummary(option.connector) && (
+                                <span className="mt-1 block text-[11px] text-gray-500">
+                                  Readiness: {readinessGateSummary(option.connector)}
+                                </span>
+                              )}
                             </span>
                             <span className={`mt-0.5 text-[10px] uppercase ${
                               option.availability === 'available'
@@ -1885,6 +1899,21 @@ export default function DatabasesPage() {
                                 <span className="rounded border border-amber-700/40 px-2 py-1">
                                   Status: {selectedPlannedOption.connector.status}
                                 </span>
+                                {readinessGateSummary(selectedPlannedOption.connector) && (
+                                  <span className="rounded border border-amber-700/40 px-2 py-1">
+                                    Readiness: {readinessGateSummary(selectedPlannedOption.connector)}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            {missingReadinessGates(selectedPlannedOption.connector).length > 0 && (
+                              <div className="pt-2">
+                                <div className="text-[11px] uppercase text-amber-100/50">Missing readiness gates</div>
+                                <ul className="mt-1 space-y-1 text-xs text-amber-100/70">
+                                  {missingReadinessGates(selectedPlannedOption.connector).slice(0, 5).map(gate => (
+                                    <li key={gate.key}>{gate.label}</li>
+                                  ))}
+                                </ul>
                               </div>
                             )}
                           </div>
