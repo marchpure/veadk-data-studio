@@ -284,7 +284,7 @@ Current implementation note:
 
 Data Modeling must consume this same Source contract instead of silently filtering to SQL-only datasources. The handoff status should distinguish `supported`, `needs_projection`, `context_only`, `permission_required`, `reauthorization_required`, `source_unavailable`, `processing`, `failed`, `planned`, and `unsupported`. Only relational and warehouse sources with profile evidence can enter production semantic generation directly. Sources with `projected_dataset_id`, parsed table assets, CSV/Excel projections, Feishu Sheets/Base, and extracted tables require projection review; docs, Wiki, PDF, Docx/PPTX, web pages, and object-storage objects that only have indexed evidence are context-assisted evidence unless a confirmed projection exists.
 
-Current implementation now exposes this handoff directly on `SourceOverviewItem` through `modeling_status`, `modeling_mode`, `modeling_reason`, `modeling_next_action`, `modeling_evidence_summary`, and `modeling_can_load_profile`. The Data Modeling picker reads these backend fields first, so a connector publishes one Source contract instead of relying on separate page-level family heuristics.
+Current implementation now exposes this handoff directly on `SourceOverviewItem` through `modeling_status`, `modeling_mode`, `modeling_reason`, `modeling_next_action`, `modeling_evidence_summary`, and `modeling_can_load_profile`. The Data Modeling picker and Source Detail page read these backend fields first, so a connector publishes one Source contract instead of relying on separate page-level family heuristics.
 
 ## V1.5 / V2 Connector Expansion
 

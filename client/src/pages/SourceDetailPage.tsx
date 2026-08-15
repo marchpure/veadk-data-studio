@@ -192,6 +192,63 @@ const contextReadinessLabel = (knowledgeResource?: SourceResource['knowledge_res
   return productStatusLabel(status)
 }
 
+const modelingStatusLabel = (status?: SourceOverviewItem['modeling_status'] | null) => {
+  switch (status) {
+    case 'supported':
+      return 'Supported'
+    case 'needs_projection':
+      return 'Needs projection'
+    case 'context_only':
+      return 'Context-assisted'
+    case 'permission_required':
+      return 'Permission required'
+    case 'reauthorization_required':
+      return 'Reauthorization required'
+    case 'source_unavailable':
+      return 'Source unavailable'
+    case 'processing':
+      return 'Processing'
+    case 'failed':
+      return 'Failed'
+    case 'planned':
+      return 'Planned'
+    case 'unsupported':
+      return 'Unsupported'
+    default:
+      return 'Unsupported'
+  }
+}
+
+const modelingModeLabel = (mode?: SourceOverviewItem['modeling_mode'] | null) => {
+  switch (mode) {
+    case 'relational':
+      return 'Relational'
+    case 'warehouse':
+      return 'Warehouse'
+    case 'projection':
+      return 'Projection review'
+    case 'context_assisted':
+      return 'Context-assisted'
+    case 'business_object':
+      return 'Business object'
+    case 'event':
+      return 'Event'
+    case 'semantic_import':
+      return 'Semantic import'
+    default:
+      return 'Not available'
+  }
+}
+
+const modelingStatusTone = (status?: SourceOverviewItem['modeling_status'] | null) => {
+  if (status === 'supported') return 'border-green-700/50 bg-green-900/20 text-green-200'
+  if (status === 'failed' || status === 'permission_required' || status === 'reauthorization_required' || status === 'source_unavailable' || status === 'unsupported') {
+    return 'border-red-700/50 bg-red-900/20 text-red-200'
+  }
+  if (status === 'context_only') return 'border-blue-700/50 bg-blue-950/30 text-blue-200'
+  return 'border-amber-700/50 bg-amber-900/20 text-amber-200'
+}
+
 export default function SourceDetailPage() {
   const { sourceId } = useParams()
   const navigate = useNavigate()
@@ -561,6 +618,8 @@ export default function SourceDetailPage() {
             </div>
           )}
         </Section>
+
+        <ModelingHandoffPanel source={overview} />
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Section id="overview" title="Overview" icon={<ShieldAlert className="h-4 w-4" />}>
@@ -1033,6 +1092,8 @@ function OverviewSourceDetail({
           )}
         </Section>
 
+        <ModelingHandoffPanel source={source} />
+
         <div className="grid gap-6 lg:grid-cols-2">
           <Section id="overview" title="Overview" icon={<ShieldAlert className="h-4 w-4" />}>
             <KeyValue label="Source kind" value={source.source_kind} />
@@ -1183,6 +1244,48 @@ function OverviewSourceDetail({
   )
 }
 
+function ModelingHandoffPanel({ source }: { source: SourceOverviewItem }) {
+  const status = source.modeling_status || 'unsupported'
+  const mode = source.modeling_mode || null
+  const reason = source.modeling_reason || overviewReadinessMessage(source)
+  const nextAction = source.modeling_next_action || source.next_actions[0] || 'Open source detail'
+  const evidenceSummary = source.modeling_evidence_summary || overviewEvidenceSummary(source)
+  return (
+    <Section title="Modeling handoff" icon={<Database className="h-4 w-4" />}>
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="rounded border border-[#333333] bg-[#151515] p-3">
+          <div className="text-xs uppercase text-gray-500">Status</div>
+          <span className={`mt-2 inline-flex rounded border px-2 py-1 text-xs ${modelingStatusTone(status)}`}>
+            {modelingStatusLabel(status)}
+          </span>
+        </div>
+        <div className="rounded border border-[#333333] bg-[#151515] p-3">
+          <div className="text-xs uppercase text-gray-500">Mode</div>
+          <div className="mt-2 text-sm font-medium text-gray-200">{modelingModeLabel(mode)}</div>
+        </div>
+        <div className="rounded border border-[#333333] bg-[#151515] p-3">
+          <div className="text-xs uppercase text-gray-500">Profile loading</div>
+          <div className={`mt-2 text-sm font-medium ${source.modeling_can_load_profile ? 'text-green-300' : 'text-gray-400'}`}>
+            {source.modeling_can_load_profile ? 'Allowed' : 'Blocked'}
+          </div>
+        </div>
+        <div className="rounded border border-[#333333] bg-[#151515] p-3">
+          <div className="text-xs uppercase text-gray-500">Next action</div>
+          <div className="mt-2 text-sm font-medium text-gray-200">{nextAction}</div>
+        </div>
+      </div>
+      <div className="mt-4 rounded border border-[#333333] bg-[#151515] p-3">
+        <div className="text-xs uppercase text-gray-500">Reason</div>
+        <p className="mt-2 text-sm leading-6 text-gray-300">{reason}</p>
+      </div>
+      <div className="mt-3 rounded border border-[#333333] bg-[#101010] p-3">
+        <div className="text-xs uppercase text-gray-500">Evidence summary</div>
+        <p className="mt-2 text-sm text-gray-300">{evidenceSummary}</p>
+      </div>
+    </Section>
+  )
+}
+
 function overviewStatusTone(source: SourceOverviewItem): string {
   const status = source.status.toLowerCase()
   if (status === 'ready') return 'border-green-700/50 bg-green-900/20 text-green-200'
@@ -1217,6 +1320,15 @@ function overviewReadinessMessage(source: SourceOverviewItem): string {
     return 'Context is indexed for evidence and policy support. Use a governed fact source for production metrics.'
   }
   return 'Source is connected, but a projection or context index is still needed before deeper modeling.'
+}
+
+function overviewEvidenceSummary(source: SourceOverviewItem): string {
+  const parts = [
+    source.parsed_asset_counts.tables ? `${source.parsed_asset_counts.tables} tables` : '',
+    source.parsed_asset_counts.files ? `${source.parsed_asset_counts.files} files` : '',
+    source.parsed_asset_counts.evidence ? `${source.parsed_asset_counts.evidence} evidence fragments` : '',
+  ].filter(Boolean)
+  return `${parts.join('; ') || 'No profile or evidence yet'}; parse ${source.parse_status}; context ${source.context_index_status}`
 }
 
 function sourceSchemaTables(schema?: DatabaseSchemaResponse): Array<{ name: string; columns: number; rows: number | null }> {
