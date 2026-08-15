@@ -103,6 +103,16 @@ const hasLocalUploadRawArtifact = (resource?: SourceResource | null) => {
   return Boolean(rawUri && rawUri.startsWith(`file://source-resources/${resource.id}/raw/`))
 }
 
+const consumerImpactSummary = (counts?: Record<string, number>) => {
+  if (!counts) return 'No downstream consumers found.'
+  const entries = Object.entries(counts).filter(([, count]) => count > 0)
+  if (!entries.length) return 'No downstream consumers found.'
+  return entries.map(([type, count]) => `${count} ${typeLabel(type)}`).join(' · ')
+}
+
+const consumerImpactTotal = (counts?: Record<string, number>) =>
+  Object.values(counts || {}).reduce((total, count) => total + count, 0)
+
 export default function SourceDetailPage() {
   const { sourceId } = useParams()
   const navigate = useNavigate()
@@ -258,6 +268,8 @@ export default function SourceDetailPage() {
   const fragmentHint = typeof parsedAssets?.metadata?.fragment_hint === 'string' ? parsedAssets.metadata.fragment_hint : null
   const evidenceCount = parsedAssets?.evidence_count ?? resource?.knowledge_resource?.evidence_count ?? processing?.evidence_count ?? 0
   const displaySteps = processingStepsForDisplay(resource, processing)
+  const impactSummary = consumerImpactSummary(consumers?.counts)
+  const impactedConsumerCount = consumerImpactTotal(consumers?.counts)
 
   if (overviewQuery.isLoading || (isSourceResource && resourceQuery.isLoading)) {
     return (
@@ -646,6 +658,9 @@ export default function SourceDetailPage() {
                     <p className="mt-1 text-xs text-amber-100/70">
                       This revokes the saved connector credentials for this source connection. Existing resources stay in inventory with stale snapshots, but fresh browsing, sync, and modeling handoff require reauthorization.
                     </p>
+                    <p className="mt-2 text-xs text-amber-100/80">
+                      Current impact: {impactSummary}
+                    </p>
                     <Input
                       value={disconnectConfirmation}
                       onChange={event => setDisconnectConfirmation(event.target.value)}
@@ -672,6 +687,11 @@ export default function SourceDetailPage() {
                   <div className="text-sm font-medium text-red-100">Remove source from inventory</div>
                   <p className="mt-1 text-xs text-red-100/70">
                     This writes a deletion marker, preserves lineage evidence, and removes the source from the active Sources inventory.
+                  </p>
+                  <p className="mt-2 text-xs text-red-100/80">
+                    {impactedConsumerCount > 0
+                      ? `Review ${impactSummary} before removal; downstream work keeps historical references but loses fresh sync and modeling handoff.`
+                      : 'No downstream consumers are currently attached to this source.'}
                   </p>
                   <Input
                     value={removeConfirmation}
