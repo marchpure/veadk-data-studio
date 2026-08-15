@@ -1,0 +1,12 @@
+#!/bin/sh
+# Pre-commit hook: sync .claude/skills -> .agents/skills and ~/.codex/skills
+# Keeps Claude Code source of truth mirrored for Codex/Gemini consumers
+
+if [ -d ".claude/skills" ]; then
+    rsync -a --delete .claude/skills/ .agents/skills/
+    git add .agents/skills/
+
+    if [ -d "$HOME/.codex/skills" ]; then
+        rsync -a --delete .claude/skills/ "$HOME/.codex/skills/"
+    fi
+fi

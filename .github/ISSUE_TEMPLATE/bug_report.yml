@@ -1,0 +1,83 @@
+name: Bug report
+description: Report a reproducible Byaan bug
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include secrets, credentials, API keys, private schemas, or sensitive query results.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reliable reproduction.
+      placeholder: |
+        1. Start Byaan with ...
+        2. Connect ...
+        3. Ask/run ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment mode
+      options:
+        - Desktop app
+        - Community Docker/local
+        - Self-hosted teams
+        - Hosted
+        - Development checkout
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.1.0 or commit SHA
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15, Ubuntu 24.04, etc.
+  - type: dropdown
+    id: database
+    attributes:
+      label: Database or data source
+      options:
+        - PostgreSQL
+        - MongoDB
+        - MySQL
+        - SQLite
+        - MSSQL
+        - DuckDB/file upload
+        - DynamoDB
+        - MCP
+        - Auth/user management
+        - Other/not applicable
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant logs with secrets removed.
+      render: shell

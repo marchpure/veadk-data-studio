@@ -1,0 +1,182 @@
+# =============================================================================
+# ROOT-LEVEL IGNORES
+# =============================================================================
+
+# Environment files
+.env
+.env.*
+!.env.self-hosted.example
+!.env.example
+# Claude files
+# .claude
+.claude/settings.local.json
+go-live/
+
+# Cursor skill symlinks (if dev creates one locally)
+.cursor/skills
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Editor and IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+logs/
+
+# Process ID files
+.pids
+*.pid
+.pids/client.pid
+
+*.egg-info/
+
+# Git
+.git/
+_private_git_history_backup/
+
+# =============================================================================
+# SERVER (Python/FastAPI) IGNORES
+# =============================================================================
+
+# Python cache and compiled files
+server/__pycache__/
+server/**/__pycache__/
+server/*.py[oc]
+server/*.pyc
+server/*.pyo
+server/*.pyd
+
+# Python virtual environment
+server/.venv/
+
+# Python build artifacts
+server/build/
+server/dist/
+server/wheels/
+server/*.egg-info/
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec.bak
+server/backend.tar.gz
+
+# Python testing and coverage
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+server/.tox/
+server/.coverage
+server/.coverage.*
+server/.cache/
+server/.pytest_cache/
+server/.mypy_cache/
+server/.dmypy.json
+server/dmypy.json
+server/nosetests.xml
+server/coverage.xml
+server/*.cover
+
+# Python logs and temp files
+server/pip-log.txt
+server/pip-delete-this-directory.txt
+
+# Server data and database files
+server/.data/
+server/.data
+server/*.db
+server/*.sqlite
+server/*.sqlite3
+
+# =============================================================================
+# CLIENT (React/TypeScript) IGNORES
+# =============================================================================
+
+# Node.js dependencies
+client/node_modules/
+
+# Build outputs
+client/dist/
+client/dist-ssr/
+client/build/
+client/*.local
+
+# Local verification artifacts
+client/tmp-data-modeling-production-*/
+client/tmp-data-models-diagnostic.png
+client/tmp-login-diagnostic.png
+
+# Tauri build artifacts
+client/src-tauri/target/
+client/src-tauri/binaries/
+client/src-tauri/resources/
+client/src-tauri/Cargo.lock
+
+# Package manager logs
+client/npm-debug.log*
+client/yarn-debug.log*
+client/yarn-error.log*
+client/pnpm-debug.log*
+client/lerna-debug.log*
+
+# =============================================================================
+# INFRA / BUILD IGNORES
+# =============================================================================
+
+# Local build configuration (contains API keys)
+infra/
+infra/local-release/build.env
+infra/local-release/dmg/
+infra/local-release/
+
+# Internal launch/review notes
+docs/EE_PR_REVIEW.md
+docs/filter-prd.md
+docs/superpowers/
+
+# =============================================================================
+# GENERAL IGNORES
+# =============================================================================
+
+# API keys and secrets
+secrets.json
+config.json
+credentials.json
+
+# Database files (anywhere)
+*.db
+*.sqlite
+*.sqlite3
+
+# Projects folder
+projects/
+
+# Go-live launch strategy (private)
+go-live/
+
+# Waitlist worker (moved to separate repo: byaan-ai/byaan-workers)
+waitlist-worker/
+
+
+project_x.egg-info
+project_x.egg-info/*
+__pycache__/
+**/__pycache__/
