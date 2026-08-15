@@ -32,6 +32,8 @@ type AddSourceOption = {
   availability: 'available' | 'beta' | 'planned'
   outputs: Array<'Context' | 'Dataset' | 'Semantic-ready' | 'Dashboard-ready'>
   description: string
+  limitations?: string[]
+  modelingModes?: string[]
   connector?: ConnectorDefinition
 }
 
@@ -63,6 +65,25 @@ const connectorCategoryFamily = (category: string): AddSourceFamilyId => {
   if (category === 'data_lake') return 'warehouses'
   if (category === 'databases') return 'databases'
   return 'api'
+}
+
+const connectorModeLabel = (mode: string): string => {
+  switch (mode) {
+    case 'context_assisted':
+      return 'Context-assisted'
+    case 'projection':
+      return 'Projection'
+    case 'relational':
+      return 'Relational'
+    case 'warehouse':
+      return 'Warehouse'
+    case 'business_object':
+      return 'Business object'
+    case 'event':
+      return 'Event'
+    default:
+      return mode.replace(/_/g, ' ')
+  }
 }
 
 export default function DatabasesPage() {
@@ -205,6 +226,7 @@ export default function DatabasesPage() {
         availability: 'available',
         outputs: ['Dataset', 'Semantic-ready'],
         description: 'CSV, Excel, Parquet and JSON files become normalized datasets.',
+        modelingModes: ['Projection'],
       },
       {
         id: 'pdf',
@@ -214,6 +236,8 @@ export default function DatabasesPage() {
         availability: 'available',
         outputs: ['Context'],
         description: 'Capture a PDF snapshot and index it as a knowledge source.',
+        limitations: ['Context-assisted only unless tables are projected and reviewed.'],
+        modelingModes: ['Context-assisted'],
       },
       {
         id: 'url',
@@ -223,6 +247,7 @@ export default function DatabasesPage() {
         availability: 'available',
         outputs: ['Dataset'],
         description: 'Download supported data files from public URLs.',
+        modelingModes: ['Projection'],
       },
       {
         id: 'web',
@@ -232,14 +257,16 @@ export default function DatabasesPage() {
         availability: 'available',
         outputs: ['Context'],
         description: 'Capture a public web page with SSRF and redirect protections.',
+        limitations: ['Context-assisted only; cannot become a production metric fact source by itself.'],
+        modelingModes: ['Context-assisted'],
       },
-      { id: 'pg', label: 'PostgreSQL', family: 'databases', icon: Cylinder, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect a PostgreSQL database for schema, sample and profile.' },
-      { id: 'mysql', label: 'MySQL', family: 'databases', icon: Database, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect MySQL-compatible operational data.' },
-      { id: 'mssql', label: 'SQL Server', family: 'databases', icon: Server, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect SQL Server data for semantic modeling.' },
-      { id: 'oracle', label: 'Oracle', family: 'databases', icon: Database, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect Oracle schemas with service name or SID.' },
-      { id: 'sqlite', label: 'SQLite', family: 'databases', icon: HardDrive, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Use a local SQLite file for repeatable demos and local data.' },
-      { id: 'mongo', label: 'MongoDB', family: 'databases', icon: Leaf, availability: 'beta', outputs: ['Dataset'], description: 'MongoDB remains a beta structured-source connector.' },
-      { id: 'dynamodb', label: 'DynamoDB', family: 'databases', icon: Cloud, availability: 'beta', outputs: ['Dataset'], description: 'DynamoDB remains a beta NoSQL connector path.' },
+      { id: 'pg', label: 'PostgreSQL', family: 'databases', icon: Cylinder, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect a PostgreSQL database for schema, sample and profile.', modelingModes: ['Relational'] },
+      { id: 'mysql', label: 'MySQL', family: 'databases', icon: Database, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect MySQL-compatible operational data.', modelingModes: ['Relational'] },
+      { id: 'mssql', label: 'SQL Server', family: 'databases', icon: Server, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect SQL Server data for semantic modeling.', modelingModes: ['Relational'] },
+      { id: 'oracle', label: 'Oracle', family: 'databases', icon: Database, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect Oracle schemas with service name or SID.', modelingModes: ['Relational'] },
+      { id: 'sqlite', label: 'SQLite', family: 'databases', icon: HardDrive, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Use a local SQLite file for repeatable demos and local data.', modelingModes: ['Relational'] },
+      { id: 'mongo', label: 'MongoDB', family: 'databases', icon: Leaf, availability: 'beta', outputs: ['Dataset'], description: 'MongoDB remains a beta structured-source connector.', limitations: ['No production semantic publish gate yet.'], modelingModes: ['Business object'] },
+      { id: 'dynamodb', label: 'DynamoDB', family: 'databases', icon: Cloud, availability: 'beta', outputs: ['Dataset'], description: 'DynamoDB remains a beta NoSQL connector path.', limitations: ['No production semantic publish gate yet.'], modelingModes: ['Business object'] },
     ]
     if (databricksTileVisible) {
       baseOptions.push({
@@ -250,6 +277,7 @@ export default function DatabasesPage() {
         availability: 'available',
         outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'],
         description: 'Wrap the existing Databricks OAuth and catalog picker as a Source.',
+        modelingModes: ['Warehouse'],
       })
     }
 
@@ -268,6 +296,8 @@ export default function DatabasesPage() {
             ? ['Context', 'Dataset']
             : [],
         description: item.description || 'Connector is listed in the commercial catalog.',
+        limitations: item.limitations,
+        modelingModes: item.modeling_modes.map(connectorModeLabel),
         connector: item,
       }
     })
@@ -1817,6 +1847,20 @@ export default function DatabasesPage() {
                                   ))}
                                 </span>
                               )}
+                              {option.modelingModes && option.modelingModes.length > 0 && (
+                                <span className="mt-1.5 flex flex-wrap gap-1">
+                                  {option.modelingModes.map(mode => (
+                                    <span key={mode} className="rounded border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 text-[10px] leading-none text-blue-200">
+                                      {mode}
+                                    </span>
+                                  ))}
+                                </span>
+                              )}
+                              {option.limitations && option.limitations.length > 0 && (
+                                <span className="mt-1 block line-clamp-1 text-[11px] text-amber-200/70">
+                                  {option.limitations[0]}
+                                </span>
+                              )}
                             </span>
                             <span className={`mt-0.5 text-[10px] uppercase ${
                               option.availability === 'available'
@@ -1851,8 +1895,18 @@ export default function DatabasesPage() {
                               </p>
                             </div>
                             <p className="text-xs text-amber-100/60">
-                              Planned connectors cannot open a setup form until they pass the commercial readiness gates: tenant-isolated authorization, resource picker or import contract, immutable snapshots, parser artifacts, context indexing status, source detail, and clear delete/revoke/reindex behavior.
+                              {selectedPlannedOption.limitations?.[0] || 'Planned connectors cannot open a setup form until they pass the commercial readiness gates: tenant-isolated authorization, resource picker or import contract, immutable snapshots, parser artifacts, context indexing status, source detail, and clear delete/revoke/reindex behavior.'}
                             </p>
+                            {selectedPlannedOption.connector?.resource_picker_type && (
+                              <div className="flex flex-wrap gap-2 pt-1 text-[11px] text-amber-100/70">
+                                <span className="rounded border border-amber-700/40 px-2 py-1">
+                                  Picker: {selectedPlannedOption.connector.resource_picker_type}
+                                </span>
+                                <span className="rounded border border-amber-700/40 px-2 py-1">
+                                  Status: {selectedPlannedOption.connector.status}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>

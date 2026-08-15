@@ -12,15 +12,22 @@ SourceAuthMode = Literal["oauth", "access_key", "sts", "none"]
 
 class ConnectorDefinitionRead(BaseModel):
     id: str
+    provider: str
     category: str
+    family: str
     display_name: str
     icon: str
     auth_mode: str
     capabilities: list[str]
+    limitations: list[str] = Field(default_factory=list)
+    required_scopes: list[str] = Field(default_factory=list)
     config_schema: dict[str, Any]
     resource_picker_schema: dict[str, Any]
+    resource_picker_type: str = "none"
     supported_resource_types: list[str]
     availability: str
+    status: str
+    modeling_modes: list[str] = Field(default_factory=list)
     description: str = ""
 
 

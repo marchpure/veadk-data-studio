@@ -338,8 +338,24 @@ async def test_connector_catalog_marks_only_real_connectors_available(test_clien
     items = response.json()["data"]["items"]
     by_id = {item["id"]: item for item in items}
     assert by_id["feishu"]["availability"] == "available"
+    assert by_id["feishu"]["provider"] == "feishu"
+    assert by_id["feishu"]["family"] == "business_docs"
+    assert by_id["feishu"]["resource_picker_type"] == "oauth_drive_picker"
+    assert by_id["feishu"]["modeling_modes"] == ["context_assisted", "projection"]
+    assert "docx:document:readonly" in by_id["feishu"]["required_scopes"]
+    assert by_id["feishu"]["limitations"]
     assert by_id["volcengine_tos"]["availability"] == "available"
+    assert by_id["volcengine_tos"]["status"] == "available"
+    assert by_id["volcengine_tos"]["family"] == "object_storage"
+    assert by_id["volcengine_tos"]["resource_picker_type"] == "object_storage_browser"
+    assert by_id["volcengine_tos"]["modeling_modes"] == ["projection", "context_assisted"]
+    assert "tos:GetObject" in by_id["volcengine_tos"]["required_scopes"]
     assert by_id["aliyun_oss"]["availability"] == "planned"
+    assert by_id["aliyun_oss"]["status"] == "planned"
+    assert by_id["aliyun_oss"]["resource_picker_type"] == "roadmap_only"
+    assert by_id["aliyun_oss"]["supported_resource_types"] == []
+    assert by_id["aliyun_oss"]["modeling_modes"] == []
+    assert "Roadmap entry only" in by_id["aliyun_oss"]["limitations"][0]
     assert "snapshot_sync" in by_id["volcengine_tos"]["capabilities"]
 
 

@@ -1057,15 +1057,22 @@ export type SourceConnectionAuthMode = 'oauth' | 'access_key' | 'sts' | 'none'
 
 export interface ConnectorDefinition {
   id: string
+  provider: string
   category: string
+  family: string
   display_name: string
   icon: string
   auth_mode: string
   capabilities: string[]
+  limitations: string[]
+  required_scopes: string[]
   config_schema: Record<string, any>
   resource_picker_schema: Record<string, any>
+  resource_picker_type: string
   supported_resource_types: SourceResourceType[]
   availability: ConnectorAvailability
+  status: ConnectorAvailability
+  modeling_modes: string[]
   description?: string
 }
 

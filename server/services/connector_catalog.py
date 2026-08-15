@@ -5,6 +5,16 @@ from typing import Any, Literal
 
 ConnectorAvailability = Literal["available", "beta", "planned"]
 ConnectorAuthMode = Literal["oauth", "access_key", "connection_string", "none"]
+ConnectorResourcePickerType = Literal[
+    "none",
+    "file_import",
+    "url_import",
+    "oauth_drive_picker",
+    "object_storage_browser",
+    "database_schema_picker",
+    "warehouse_catalog_picker",
+    "roadmap_only",
+]
 
 
 @dataclass(frozen=True)
@@ -20,25 +30,46 @@ class ConnectorDefinition:
     supported_resource_types: tuple[str, ...]
     availability: ConnectorAvailability
     description: str = ""
+    limitations: tuple[str, ...] = ()
+    required_scopes: tuple[str, ...] = ()
+    resource_picker_type: ConnectorResourcePickerType = "none"
+    modeling_modes: tuple[str, ...] = ()
 
     def to_payload(self) -> dict[str, Any]:
         return {
             "id": self.id,
+            "provider": self.id,
             "category": self.category,
+            "family": _family_for_category(self.category),
             "display_name": self.display_name,
             "icon": self.icon,
             "auth_mode": self.auth_mode,
             "capabilities": list(self.capabilities),
+            "limitations": list(self.limitations),
+            "required_scopes": list(self.required_scopes),
             "config_schema": self.config_schema,
             "resource_picker_schema": self.resource_picker_schema,
+            "resource_picker_type": self.resource_picker_type,
             "supported_resource_types": list(self.supported_resource_types),
             "availability": self.availability,
+            "status": self.availability,
+            "modeling_modes": list(self.modeling_modes),
             "description": self.description,
         }
 
 
 def _field(name: str, field_type: str, *, required: bool = True, secret: bool = False) -> dict[str, Any]:
     return {"name": name, "type": field_type, "required": required, "secret": secret}
+
+
+def _family_for_category(category: str) -> str:
+    if category == "documents":
+        return "business_docs"
+    if category == "data_lake":
+        return "warehouses"
+    if category in {"messages", "search"}:
+        return "api"
+    return category
 
 
 def _planned(
@@ -62,6 +93,11 @@ def _planned(
         resource_picker_schema={"planned_adapter": planned_adapter} if planned_adapter else {},
         supported_resource_types=(),
         availability="planned",
+        limitations=(
+            "Roadmap entry only; no tenant-isolated authorization, picker, snapshot, parser, indexing, and delete/revoke contract has been certified yet.",
+        ),
+        resource_picker_type="roadmap_only",
+        modeling_modes=(),
     )
 
 
@@ -91,6 +127,18 @@ CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
         supported_resource_types=("feishu_doc", "feishu_wiki", "feishu_sheet", "feishu_base"),
         availability="available",
         description="一次 OAuth 授权后重复浏览、选择和同步飞书资源。",
+        limitations=(
+            "Docs and Wiki are context-assisted sources unless their content is projected into a confirmed dataset.",
+            "Sheets and Base require projection review before production semantic modeling.",
+            "Permission loss and token expiry must be resolved by reauthorization before fresh sync.",
+        ),
+        required_scopes=(
+            "space:document:retrieve",
+            "docx:document:readonly",
+            "wiki:wiki:readonly",
+        ),
+        resource_picker_type="oauth_drive_picker",
+        modeling_modes=("context_assisted", "projection"),
     ),
     ConnectorDefinition(
         id="volcengine_tos",
@@ -130,6 +178,14 @@ CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
         supported_resource_types=("tos_bucket", "tos_prefix", "tos_object"),
         availability="available",
         description="连接火山引擎 TOS 后浏览 Bucket/Prefix/Object 并同步对象内容。",
+        limitations=(
+            "Only imported objects with supported parsers become searchable evidence or projected datasets.",
+            "Prefixes require manifest review before incremental sync is treated as production-ready.",
+            "Credentials must remain tenant-isolated and encrypted; raw artifacts stay outside the control database.",
+        ),
+        required_scopes=("tos:ListBucket", "tos:GetObject"),
+        resource_picker_type="object_storage_browser",
+        modeling_modes=("projection", "context_assisted"),
     ),
     _planned(
         id="aliyun_oss",

@@ -286,8 +286,10 @@ Current implementation:
 - Databricks appears under `Warehouses` and reuses the existing OAuth/catalog/schema wizard.
 - Connector catalog entries are mapped into families from `ConnectorDefinition.category`; `documents` maps to `Business docs`, `object_storage` maps to `Object storage`, `data_lake` maps to `Warehouses`, and database catalog entries map to `Databases`.
 - Each source option shows availability (`available`, `beta`, `planned`) and output chips (`Context`, `Dataset`, `Semantic-ready`, `Dashboard-ready`) where applicable.
+- Connector catalog payloads now expose `provider`, `family`, `limitations`, `required_scopes`, `resource_picker_type`, `status`, and `modeling_modes`, so the UI can show readiness constraints without hardcoding them into the Add Source dialog.
+- Feishu/Lark advertises an OAuth drive picker and `context_assisted` / `projection` modeling modes; TOS advertises an object-storage browser and `projection` / `context_assisted` modes.
 - Planned entries use `planned:<connector_id>` and never set `selectedType`, so they cannot open a working setup form by accident.
-- Selecting a planned entry shows a read-only commercial readiness message covering tenant-isolated authorization, resource picker/import contract, immutable snapshots, parser artifacts, context indexing status, source detail, and delete/revoke/reindex behavior.
+- Selecting a planned entry shows a read-only commercial readiness message sourced from the catalog limitations, including roadmap-only picker status and commercial readiness gates.
 - If a family only has planned entries, the dialog automatically selects the first planned entry instead of keeping the previous family's setup form visible.
 - The `AddSourceDialog` component extraction is intentionally deferred until post-import processing and source detail work define the reusable boundaries; this keeps this slice focused on behavior without moving a large mixed form tree.
 

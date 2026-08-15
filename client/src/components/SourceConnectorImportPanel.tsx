@@ -457,7 +457,18 @@ export function SourceConnectorImportPanel({
     return (
       <div className="rounded-lg border border-[#444444] bg-[#1a1a1a] p-5">
         <p className="text-sm font-medium text-white">{definition.display_name}</p>
-        <p className="mt-2 text-sm text-gray-400">This connector is listed in the catalog as Planned. It is not exposed as a working connector until an adapter and contract tests exist.</p>
+        <p className="mt-2 text-sm text-gray-400">
+          This connector is listed in the catalog as Planned. It is not exposed as a working connector until an adapter and contract tests exist.
+        </p>
+        {definition.limitations?.length > 0 && (
+          <p className="mt-3 rounded border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-100/75">
+            {definition.limitations[0]}
+          </p>
+        )}
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-400">
+          <span className="rounded border border-[#444444] px-2 py-1">Status: {definition.status}</span>
+          <span className="rounded border border-[#444444] px-2 py-1">Picker: {definition.resource_picker_type}</span>
+        </div>
       </div>
     )
   }
