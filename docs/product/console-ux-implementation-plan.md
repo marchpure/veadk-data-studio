@@ -348,6 +348,7 @@ Current implementation:
 - PPTX text extraction is supported for OpenXML presentations; legacy `.ppt` and binary `.xls` are not marked available until a conversion/parser worker exists.
 - The Sources overview facade includes `resource_type = file`, so file uploads appear in the unified inventory.
 - The Add Source Files option is labeled `Files as Source` and communicates that CSV/Excel can project to datasets while PDF/Docx/PPTX remain context-assisted.
+- Legacy CSV/Excel/Parquet/JSON dataset upload and URL import remain available as beta `Dataset upload (legacy)` / `Dataset URL import (legacy)` entries under Files. They are explicitly labeled as dataset-only flows and do not claim governed Source snapshots, context evidence, or Source Detail lineage.
 
 Acceptance:
 

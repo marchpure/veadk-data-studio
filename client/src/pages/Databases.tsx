@@ -345,12 +345,13 @@ export default function DatabasesPage() {
     const baseOptions: AddSourceOption[] = [
       {
         id: 'upload',
-        label: 'Upload files',
+        label: 'Dataset upload (legacy)',
         family: 'files',
         icon: Upload,
-        availability: 'available',
-        outputs: ['Dataset', 'Semantic-ready'],
-        description: 'CSV, Excel, Parquet and JSON files become normalized datasets.',
+        availability: 'beta',
+        outputs: ['Dataset'],
+        description: 'Legacy CSV, Excel, Parquet and JSON import. Use Files as Source for governed snapshots, evidence, and projection handoff.',
+        limitations: ['Legacy dataset import does not create Source snapshots, context evidence, or Source Detail lineage.'],
         modelingModes: ['Projection'],
       },
       {
@@ -367,12 +368,13 @@ export default function DatabasesPage() {
       },
       {
         id: 'url',
-        label: 'Import file URL',
+        label: 'Dataset URL import (legacy)',
         family: 'files',
         icon: LinkIcon,
-        availability: 'available',
+        availability: 'beta',
         outputs: ['Dataset'],
-        description: 'Download supported data files from public URLs.',
+        description: 'Legacy public URL import for CSV, Excel, Parquet and JSON datasets. Use Web page or Files as Source for governed Sources.',
+        limitations: ['Legacy URL import does not create Source snapshots, context evidence, or Source Detail lineage.'],
         modelingModes: ['Projection'],
       },
       {
@@ -2128,6 +2130,10 @@ export default function DatabasesPage() {
                     {/* Upload Files Form */}
                     {hasActiveSetupForm && selectedType === 'upload' && (
                       <>
+                        <div className="rounded-md border border-amber-700/40 bg-amber-950/20 p-3 text-sm text-amber-100/80">
+                          Legacy dataset import keeps CSV, Excel, Parquet and JSON workflows available, but it does not create governed Source snapshots, context evidence, or Source Detail lineage. Use Files as Source for commercial Source ingestion.
+                        </div>
+
                         {/* Progress Indicator */}
                         {uploadMultipleFilesMutation.isPending && (
                           <div className="bg-orange-900/20 border border-brand-orange rounded-lg p-4">
@@ -2287,6 +2293,10 @@ export default function DatabasesPage() {
                     {/* Import from URL Form */}
 	                    {hasActiveSetupForm && selectedType === 'url' && (
                       <>
+                        <div className="rounded-md border border-amber-700/40 bg-amber-950/20 p-3 text-sm text-amber-100/80">
+                          Legacy URL import creates datasets only. It does not capture immutable Source snapshots or context evidence; use Web page or Files as Source for governed Sources.
+                        </div>
+
                         {/* Progress Indicator */}
                         {uploadFromURLMutation.isPending && (
                           <div className="bg-orange-900/20 border border-brand-orange rounded-lg p-4">
