@@ -224,6 +224,42 @@ class SourceResourceService:
             await session.refresh(resource)
             return await self.resource_payload(session=session, resource=resource)
         if not payload.content or not payload.content.strip():
+            if resource.resource_type in {"file", "pdf"}:
+                previous_snapshot_id = resource.latest_snapshot_id
+                sync_run = self._start_sync_run(resource=resource, trigger="manual")
+                resource.status = "syncing"
+                await session.flush()
+                try:
+                    snapshot, captured = await self._sync_uploaded_file_from_raw_artifact(
+                        session=session,
+                        resource=resource,
+                        metadata=payload.metadata,
+                    )
+                    await self._maybe_project_dataset(
+                        session=session,
+                        resource=resource,
+                        snapshot=snapshot,
+                        captured=captured,
+                    )
+                    resource.status = "ready"
+                    self._clear_last_error(resource)
+                    self._finish_sync_run(resource=resource, sync_run=sync_run, status="succeeded", snapshot=snapshot)
+                except ConnectorError as exc:
+                    resource.latest_snapshot_id = previous_snapshot_id
+                    resource.status = self._status_for_connector_error(exc)
+                    self._finish_sync_run(
+                        resource=resource,
+                        sync_run=sync_run,
+                        status=self._sync_run_status_for_connector_error(exc),
+                        error=exc,
+                    )
+                    resource.sync_config_json = {
+                        **(resource.sync_config_json or {}),
+                        "last_error": {"code": exc.code, "message": str(exc), "permanent": exc.permanent},
+                    }
+                await session.commit()
+                await session.refresh(resource)
+                return await self.resource_payload(session=session, resource=resource)
             resource.status = "needs_confirmation"
             await session.commit()
             await session.refresh(resource)
@@ -1287,7 +1323,7 @@ class SourceResourceService:
             .order_by(SourceSnapshot.captured_at.desc())
             .limit(1)
         )
-        if existing_snapshot:
+        if existing_snapshot and not (error is None and existing_snapshot.status == "failed"):
             resource.latest_snapshot_id = existing_snapshot.id
             resource.status = self._status_for_connector_error(error) if error else "ready"
             await session.flush()
@@ -1333,6 +1369,126 @@ class SourceResourceService:
         snapshot.status = "indexed" if ingest_result.index_status == "indexed" else "parsed"
         await session.flush()
         return snapshot
+
+    async def _sync_uploaded_file_from_raw_artifact(
+        self,
+        *,
+        session: AsyncSession,
+        resource: SourceResource,
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[SourceSnapshot, CapturedSnapshot]:
+        captured = await self._captured_uploaded_file_from_raw_artifact(
+            session=session,
+            resource=resource,
+            metadata=metadata,
+        )
+        filename = captured.metadata.get("original_filename") or (resource.sync_config_json or {}).get("original_filename") or resource.name
+        snapshot = await self._capture_uploaded_file(
+            session=session,
+            resource=resource,
+            captured=captured,
+            filename=str(filename),
+        )
+        return snapshot, captured
+
+    async def _captured_uploaded_file_from_raw_artifact(
+        self,
+        *,
+        session: AsyncSession,
+        resource: SourceResource,
+        metadata: dict[str, Any] | None = None,
+    ) -> CapturedSnapshot:
+        latest_snapshot = await session.get(SourceSnapshot, resource.latest_snapshot_id) if resource.latest_snapshot_id else None
+        if latest_snapshot is None:
+            raise ConnectorError(
+                "Uploaded source cannot be reindexed because it has no captured raw artifact. Re-upload the file.",
+                code="source_unavailable",
+                permanent=True,
+            )
+
+        raw_uri = latest_snapshot.raw_storage_uri or ""
+        expected_prefix = f"file://source-resources/{resource.id}/raw/"
+        if not raw_uri.startswith(expected_prefix):
+            raise ConnectorError(
+                "Uploaded source raw artifact is not available for this resource. Re-upload the file.",
+                code="source_unavailable",
+                permanent=True,
+            )
+
+        raw_name = raw_uri[len(expected_prefix) :]
+        if not raw_name or "/" in raw_name or "\\" in raw_name or raw_name in {".", ".."}:
+            raise ConnectorError(
+                "Uploaded source raw artifact URI is invalid. Re-upload the file.",
+                code="source_unavailable",
+                permanent=True,
+            )
+
+        raw_dir = source_resource_directory(str(resource.id)) / "raw"
+        raw_path = raw_dir / raw_name
+        try:
+            raw_path.resolve().relative_to(raw_dir.resolve())
+        except ValueError as exc:
+            raise ConnectorError(
+                "Uploaded source raw artifact URI is outside the source resource directory.",
+                code="source_unavailable",
+                permanent=True,
+            ) from exc
+        if not raw_path.is_file():
+            raise ConnectorError(
+                "Uploaded source raw artifact is missing from local storage. Re-upload the file.",
+                code="source_unavailable",
+                permanent=True,
+            )
+
+        async with aiofiles.open(raw_path, "rb") as infile:
+            raw_bytes = await infile.read()
+
+        snapshot_metadata = latest_snapshot.metadata_json if isinstance(latest_snapshot.metadata_json, dict) else {}
+        original_filename = (
+            snapshot_metadata.get("original_filename")
+            or (resource.sync_config_json or {}).get("original_filename")
+            or raw_name
+        )
+        file_type = snapshot_metadata.get("file_type") or (resource.sync_config_json or {}).get("file_type")
+        if not file_type:
+            file_type = self._upload_file_type_from_name(str(original_filename))
+        if not file_type:
+            raise ConnectorError(
+                "Uploaded source file type is no longer supported for reindexing.",
+                code="unsupported_file_type",
+                permanent=True,
+            )
+
+        content_text, parser_version, fragment_hint = parse_object_bytes(key=str(original_filename), raw_bytes=raw_bytes)
+        generated_metadata_keys = {
+            "content_preview_hash",
+            "content_size",
+            "knowledge_provider",
+            "parse_error",
+            "projected_dataset",
+            "projected_dataset_id",
+            "projection_manifest",
+            "raw_size",
+        }
+        retained_metadata = {key: value for key, value in snapshot_metadata.items() if key not in generated_metadata_keys}
+        return CapturedSnapshot(
+            raw_bytes=raw_bytes,
+            content_text=content_text,
+            external_revision="sha256:" + hashlib.sha256(raw_bytes).hexdigest(),
+            metadata={
+                **retained_metadata,
+                **(metadata or {}),
+                "provider": "local_file_upload",
+                "original_filename": str(original_filename),
+                "file_type": file_type,
+                "size": len(raw_bytes),
+                "fragment_hint": fragment_hint,
+                "reindexed_from_snapshot_id": str(latest_snapshot.id),
+            },
+            provider=default_knowledge_provider_name(),
+            parser_version=parser_version,
+            raw_storage_uri=raw_uri,
+        )
 
     async def _maybe_project_dataset(
         self,
@@ -1904,6 +2060,14 @@ class SourceResourceService:
         else:
             runs = [sync_run]
         config["sync_runs"] = runs[-10:]
+        resource.sync_config_json = config
+        flag_modified(resource, "sync_config_json")
+
+    def _clear_last_error(self, resource: SourceResource) -> None:
+        config = dict(resource.sync_config_json or {})
+        if "last_error" not in config:
+            return
+        config.pop("last_error", None)
         resource.sync_config_json = config
         flag_modified(resource, "sync_config_json")
 

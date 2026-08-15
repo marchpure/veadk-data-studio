@@ -435,6 +435,39 @@ async def test_csv_file_upload_creates_source_snapshot_context_and_projection(te
     assert "East" in search.json()["data"]["items"][0]["text"]
 
 
+async def test_csv_file_upload_can_reindex_from_raw_artifact(test_client, test_session):
+    raw_csv = b"region,revenue\nEast,120\nWest,80\n"
+
+    created = await test_client.post(
+        "/api/source-resources/files",
+        data={"name": "渠道收入 CSV"},
+        files={"file": ("channel-revenue.csv", raw_csv, "text/csv")},
+    )
+    assert created.status_code == 201
+    original = created.json()["data"]
+    original_snapshot_id = original["latest_snapshot_id"]
+    original_projected_dataset_id = original["projected_dataset_id"]
+
+    synced = await test_client.post(
+        f"/api/source-resources/{original['id']}/sync",
+        json={"metadata": {"trigger": "test_reindex"}},
+    )
+
+    assert synced.status_code == 200
+    resource = synced.json()["data"]
+    assert resource["status"] == "ready"
+    assert resource["latest_snapshot_id"] == original_snapshot_id
+    assert resource["projected_dataset_id"] == original_projected_dataset_id
+    assert resource["sync_config_json"]["latest_sync_run"]["status"] == "succeeded"
+    assert resource["sync_config_json"]["latest_sync_run"]["checkpoint"]["snapshot_id"] == original_snapshot_id
+    assert "last_error" not in resource["sync_config_json"]
+
+    snapshots = (await test_session.execute(select(SourceSnapshot))).scalars().all()
+    evidence = (await test_session.execute(select(EvidenceFragment))).scalars().all()
+    assert len(snapshots) == 1
+    assert len(evidence) == 1
+
+
 async def test_docx_and_pptx_file_uploads_become_context_sources(test_client):
     docx_bytes = _docx_bytes("Docx revenue policy")
     pptx_bytes = _pptx_bytes("Slide retention risk")
@@ -483,6 +516,34 @@ async def test_pdf_upload_parse_failure_keeps_failed_snapshot(test_client):
     assert resource["latest_snapshot"]["error_json"]["code"] == "parser_no_text"
     assert resource["sync_config_json"]["last_error"]["code"] == "parser_no_text"
     assert resource["knowledge_resource"] is None
+
+
+async def test_failed_pdf_upload_retry_reparses_raw_artifact_and_preserves_failed_snapshot(test_client, test_session):
+    created = await test_client.post(
+        "/api/source-resources/pdf",
+        data={"name": "扫描件 PDF"},
+        files={"file": ("scan.pdf", b"%PDF-1.7\n", "application/pdf")},
+    )
+    assert created.status_code == 201
+    original = created.json()["data"]
+
+    synced = await test_client.post(f"/api/source-resources/{original['id']}/sync", json={})
+
+    assert synced.status_code == 200
+    resource = synced.json()["data"]
+    assert resource["status"] == "failed"
+    assert resource["latest_snapshot_id"] == original["latest_snapshot_id"]
+    assert resource["latest_snapshot"]["status"] == "failed"
+    assert resource["sync_config_json"]["last_error"]["code"] == "parser_no_text"
+    sync_run = resource["sync_config_json"]["latest_sync_run"]
+    assert sync_run["status"] == "failed"
+    assert sync_run["error"]["code"] == "parser_no_text"
+    assert sync_run["checkpoint"] is None
+
+    snapshots = (await test_session.execute(select(SourceSnapshot))).scalars().all()
+    knowledge = (await test_session.execute(select(KnowledgeResource))).scalars().all()
+    assert len(snapshots) == 1
+    assert knowledge == []
 
 
 def _docx_bytes(text: str) -> bytes:

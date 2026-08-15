@@ -77,6 +77,12 @@ const processingIndex = (resource?: SourceResource, processing?: SourceResourceP
 const needsFeishuReauthorization = (source?: SourceOverviewItem) =>
   source?.provider === 'feishu' && source.next_actions.some(action => action.toLowerCase().includes('reauthorize'))
 
+const hasLocalUploadRawArtifact = (resource?: SourceResource | null) => {
+  if (!resource || !['file', 'pdf'].includes(resource.resource_type)) return false
+  const rawUri = resource.latest_snapshot?.raw_storage_uri
+  return Boolean(rawUri && rawUri.startsWith(`file://source-resources/${resource.id}/raw/`))
+}
+
 export default function SourceDetailPage() {
   const { sourceId } = useParams()
   const navigate = useNavigate()
@@ -302,7 +308,11 @@ export default function SourceDetailPage() {
       </div>
     )
   }
-  const canRetrySync = Boolean(sourceResource.source_connection_id || (sourceResource.resource_type === 'web' && sourceResource.source_url))
+  const canRetrySync = Boolean(
+    sourceResource.source_connection_id
+    || (sourceResource.resource_type === 'web' && sourceResource.source_url)
+    || hasLocalUploadRawArtifact(sourceResource),
+  )
   const retrySyncLabel = sourceResource.status === 'ready' ? 'Reindex source' : 'Retry sync'
   const canRemoveSource = removeConfirmation.trim() === sourceResource.name.trim()
   const canDisconnectConnection = Boolean(sourceResource.source_connection_id) && disconnectConfirmation.trim() === sourceResource.name.trim()
@@ -362,7 +372,7 @@ export default function SourceDetailPage() {
               variant="brand-primary"
               disabled={!canRetrySync || syncResourceMutation.isPending}
               onClick={handleRetrySync}
-              title={canRetrySync ? retrySyncLabel : 'This source needs a connector or URL before it can be synced again.'}
+              title={canRetrySync ? retrySyncLabel : 'This source needs a connector, URL, or uploaded raw artifact before it can be synced again.'}
             >
               {syncResourceMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               {syncResourceMutation.isPending ? 'Syncing...' : retrySyncLabel}
@@ -581,7 +591,7 @@ export default function SourceDetailPage() {
                   <p className="mt-1 text-xs text-gray-500">
                     {canRetrySync
                       ? 'Capture a fresh snapshot and refresh parse, projection, context, lineage, and consumer state.'
-                      : 'This source does not have a connector-backed resource or URL to retry. Re-upload or reselect the resource from Add Source.'}
+                      : 'This source does not have a connector-backed resource, URL, or uploaded raw artifact to retry. Re-upload or reselect the resource from Add Source.'}
                   </p>
                 </div>
                 <Button
@@ -655,7 +665,7 @@ export default function SourceDetailPage() {
                 </Button>
               </div>
             </div>
-            <KeyValue label="Reindex behavior" value="Retry sync from the source connector to generate a new snapshot and context state." />
+            <KeyValue label="Reindex behavior" value={hasLocalUploadRawArtifact(sourceResource) ? 'Retry sync from the uploaded raw artifact to refresh parse, projection, and context state.' : 'Retry sync from the source connector to generate a new snapshot and context state.'} />
             {sourceResource.knowledge_resource?.provider_error && (
               <div className="mt-4 rounded border border-red-900/40 bg-red-950/20 p-3 text-sm text-red-100">
                 {JSON.stringify(sourceResource.knowledge_resource.provider_error)}

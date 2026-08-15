@@ -275,6 +275,7 @@ Current implementation note:
 - PDF, Docx, and PPTX become immutable Source snapshots plus context evidence through the configured `KnowledgeProvider`.
 - CSV and Excel `.xlsx/.xlsm` also create a projected dataset from the same Source snapshot, so Data Modeling can distinguish projection-ready sources from context-only sources.
 - Uploaded raw bytes are preserved through snapshot/raw artifact plumbing; the control plane records URIs, hashes, parser versions, metadata, projection manifests, and provider status rather than treating PostgreSQL as the commercial raw/chunk/vector store.
+- Uploaded Files/PDF Sources can reindex from their own immutable raw artifact URI (`file://source-resources/{resource_id}/raw/...`) without requiring a new upload. The reindex path only reads the current resource's raw artifact, re-runs parsing/context/projection, and records a sync run; it does not introduce raw/chunk/vector storage in PostgreSQL.
 - TOS/object-storage large objects now surface as `needs_confirmation` with a sync-run terminal state and actions to review object size and confirm large-object sync, instead of being collapsed into an unrecoverable parser failure.
 - Sources inventory now propagates downstream impact counts for semantic models, notebooks, legacy dashboards, and AnalysisArtifact dashboard apps from the same source/knowledge/projected-dataset relationships used by Source Detail.
 
