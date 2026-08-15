@@ -30,7 +30,7 @@ from server.models.source_snapshots import SourceSnapshot
 from server.schemas.source_resources import SourceResourceCreate, SourceResourceImportRequest, SourceResourceSyncRequest
 from server.services.dataset_storage import DatasetStorageService
 from server.services.file_operations import DataFrameFileService
-from server.services.knowledge_provider import get_knowledge_provider, stable_hash
+from server.services.knowledge_provider import KnowledgeEvidence, get_knowledge_provider, stable_hash
 from server.services.source_connectors import (
     CapturedSnapshot,
     ConnectorError,
@@ -763,14 +763,15 @@ class SourceResourceService:
         query: str,
         resource_ids: list[UUID],
         limit: int,
-    ) -> list[EvidenceFragment]:
+    ) -> list[dict[str, Any]]:
         provider = get_knowledge_provider()
         from server.services.knowledge_provider import KnowledgeSearchInput
 
-        return await provider.search(
+        evidence = await provider.search(
             session=session,
             input=KnowledgeSearchInput(tenant_id=tenant_id, query=query, resource_ids=tuple(resource_ids), limit=limit),
         )
+        return [self._evidence_payload(item) for item in evidence]
 
     async def read_evidence(
         self,
@@ -2103,7 +2104,7 @@ class SourceResourceService:
             "evidence_count": int(evidence_count or 0),
         }
 
-    def _evidence_payload(self, evidence: EvidenceFragment) -> dict[str, Any]:
+    def _evidence_payload(self, evidence: EvidenceFragment | KnowledgeEvidence) -> dict[str, Any]:
         return {
             "id": evidence.id,
             "knowledge_resource_id": evidence.knowledge_resource_id,

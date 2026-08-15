@@ -17,7 +17,7 @@ from server.models.semantic_models import SemanticModel
 from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
 from server.models.tenant import Tenant
-from server.services.knowledge_provider import KnowledgeSearchInput, get_knowledge_provider
+from server.services.knowledge_provider import KnowledgeEvidence, KnowledgeSearchInput, get_knowledge_provider
 
 pytestmark = __import__("pytest").mark.asyncio
 
@@ -108,6 +108,32 @@ async def test_openviking_provider_factory_is_explicit_boundary(test_session):
             session=test_session,
             input=KnowledgeSearchInput(tenant_id=uuid4(), query="收入", limit=1),
         )
+
+
+async def test_native_provider_search_returns_provider_neutral_evidence(test_client, test_session):
+    tenant = await _tenant(test_session)
+    created = await test_client.post(
+        "/api/source-resources",
+        json={
+            "resource_type": "feishu_doc",
+            "name": "经营规则说明",
+            "external_id": "docx_provider_payload",
+            "content": "收入定义：已支付订单的净额。",
+            "external_revision": "rev-provider-payload",
+        },
+    )
+    assert created.status_code == 201
+
+    provider = get_knowledge_provider("byaan-native")
+    results = await provider.search(
+        session=test_session,
+        input=KnowledgeSearchInput(tenant_id=tenant.id, query="收入", limit=5),
+    )
+
+    assert results
+    assert isinstance(results[0], KnowledgeEvidence)
+    assert not isinstance(results[0], EvidenceFragment)
+    assert results[0].text == "收入定义：已支付订单的净额。"
 
 
 async def test_read_evidence_returns_source_snapshot_and_resource_context(test_client):

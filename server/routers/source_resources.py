@@ -261,21 +261,7 @@ async def search_knowledge(
         limit=payload.limit,
     )
     data = {
-        "items": [
-            {
-                "id": item.id,
-                "knowledge_resource_id": item.knowledge_resource_id,
-                "snapshot_id": item.snapshot_id,
-                "fragment_type": item.fragment_type,
-                "title_path": item.title_path,
-                "text": item.text,
-                "locator_json": item.locator_json,
-                "confidence": item.confidence,
-                "content_hash": item.content_hash,
-                "created_at": item.created_at,
-            }
-            for item in items
-        ],
+        "items": items,
         "total": len(items),
     }
     return success_response(data=data, message="Knowledge search completed")

@@ -37,6 +37,42 @@ class KnowledgeSearchInput:
     limit: int = 10
 
 
+@dataclass(frozen=True)
+class KnowledgeEvidence:
+    """Provider-neutral evidence payload returned by KnowledgeProvider reads.
+
+    Native local/dev storage still materializes rows in the control database, but
+    callers should consume this shape so external providers such as OpenViking can
+    return equivalent evidence without exposing ORM rows as their API contract.
+    """
+
+    id: UUID
+    knowledge_resource_id: UUID
+    snapshot_id: UUID
+    fragment_type: str
+    title_path: list[Any] | None
+    text: str
+    locator_json: dict[str, Any]
+    confidence: str | None
+    content_hash: str | None
+    created_at: datetime
+
+
+def evidence_to_provider_payload(evidence: EvidenceFragment) -> KnowledgeEvidence:
+    return KnowledgeEvidence(
+        id=evidence.id,
+        knowledge_resource_id=evidence.knowledge_resource_id,
+        snapshot_id=evidence.snapshot_id,
+        fragment_type=evidence.fragment_type,
+        title_path=evidence.title_path,
+        text=evidence.text,
+        locator_json=evidence.locator_json,
+        confidence=evidence.confidence,
+        content_hash=evidence.content_hash,
+        created_at=evidence.created_at,
+    )
+
+
 class KnowledgeProvider(Protocol):
     provider: str
 
@@ -55,7 +91,7 @@ class KnowledgeProvider(Protocol):
         *,
         session: AsyncSession,
         input: KnowledgeSearchInput,
-    ) -> list[EvidenceFragment]:
+    ) -> list[KnowledgeEvidence]:
         ...
 
     async def read(
@@ -64,7 +100,7 @@ class KnowledgeProvider(Protocol):
         session: AsyncSession,
         tenant_id: UUID,
         evidence_id: UUID,
-    ) -> EvidenceFragment | None:
+    ) -> KnowledgeEvidence | None:
         ...
 
     async def refresh(
@@ -180,7 +216,7 @@ class NativeKnowledgeProvider:
         *,
         session: AsyncSession,
         input: KnowledgeSearchInput,
-    ) -> list[EvidenceFragment]:
+    ) -> list[KnowledgeEvidence]:
         query = input.query.strip()
         stmt = (
             select(EvidenceFragment)
@@ -196,7 +232,7 @@ class NativeKnowledgeProvider:
             if terms:
                 stmt = stmt.where(or_(*[EvidenceFragment.text.ilike(f"%{term}%") for term in terms]))
         result = await session.execute(stmt)
-        return list(result.scalars().all())
+        return [evidence_to_provider_payload(item) for item in result.scalars().all()]
 
     async def read(
         self,
@@ -204,10 +240,11 @@ class NativeKnowledgeProvider:
         session: AsyncSession,
         tenant_id: UUID,
         evidence_id: UUID,
-    ) -> EvidenceFragment | None:
-        return await session.scalar(
+    ) -> KnowledgeEvidence | None:
+        evidence = await session.scalar(
             select(EvidenceFragment).where(EvidenceFragment.tenant_id == tenant_id, EvidenceFragment.id == evidence_id)
         )
+        return evidence_to_provider_payload(evidence) if evidence is not None else None
 
     async def refresh(
         self,
@@ -402,7 +439,7 @@ class OpenVikingKnowledgeProvider:
         *,
         session: AsyncSession,
         input: KnowledgeSearchInput,
-    ) -> list[EvidenceFragment]:
+    ) -> list[KnowledgeEvidence]:
         raise self._not_configured()
 
     async def read(
@@ -411,7 +448,7 @@ class OpenVikingKnowledgeProvider:
         session: AsyncSession,
         tenant_id: UUID,
         evidence_id: UUID,
-    ) -> EvidenceFragment | None:
+    ) -> KnowledgeEvidence | None:
         raise self._not_configured()
 
     async def refresh(

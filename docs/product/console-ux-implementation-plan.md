@@ -578,6 +578,7 @@ Current implementation:
 - `KnowledgeResource` now has provider metadata fields for `context_uri`, `provider_status`, `last_indexed_at`, `provider_error`, `retrieval_debug_uri`, and `provider_metadata_json`.
 - `add_knowledge_provider_metadata` adds those columns idempotently for existing deployments.
 - `KnowledgeResourceRead`, `ApiService` types, and `SourceResourceService._knowledge_resource_payload()` return the metadata to Source Detail.
+- `KnowledgeProvider.search()` and `KnowledgeProvider.read()` now return provider-neutral evidence payloads instead of ORM `EvidenceFragment` rows. The native provider still materializes local/dev fallback evidence rows, but API callers consume the provider payload shape so an external provider can return equivalent evidence without leaking storage internals.
 - `NativeKnowledgeProvider` remains the default local/dev fallback and writes `byaan-native://...` context/debug URIs plus metadata that explicitly marks control-plane text storage as local fallback behavior.
 - `OpenVikingKnowledgeProvider` exists as a provider boundary selected by `KNOWLEDGE_PROVIDER=openviking`, but it fails fast until a real OpenViking client is configured. This keeps OpenViking behind `KnowledgeProvider` and prevents accidental use of OpenViking connectors as the Add Source layer.
 - No Add Source family or connector entry exposes OpenViking to ordinary users.
