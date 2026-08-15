@@ -34,8 +34,8 @@ export default function IntegrationsPage() {
             status={sourceStatus}
             loading={feishuStatus.isLoading}
             scopes={feishuStatus.data?.source_authorization?.scopes || feishuStatus.data?.admin_config.required_scopes || []}
-            actionLabel={feishuStatus.data?.connected ? '已连接，可在 Datasources 管理资源' : '前往 Datasources 授权'}
-            href="/databases"
+            actionLabel={feishuStatus.data?.connected ? '已连接，可在 Sources 管理资源' : '前往 Sources 授权'}
+            href="/sources"
           />
           <IntegrationCard
             icon={<Bot className="h-5 w-5 text-brand-orange" />}

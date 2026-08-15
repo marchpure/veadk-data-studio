@@ -106,10 +106,10 @@ export default function HomePage() {
               {hasNoDatasources && canCreateDatasource && (
                 <SetupPromptCard
                   icon={<Database className="w-5 h-5" />}
-                  title="No datasources configured"
-                  description="Add a database or upload files to get started"
-                  actionLabel="Add Datasource"
-                  href="/databases"
+                  title="No sources configured"
+                  description="Add files, business docs, databases, warehouses, or object storage to get started"
+                  actionLabel="Add Source"
+                  href="/sources"
                 />
               )}
               {hasNoGitHub && (

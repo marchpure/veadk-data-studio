@@ -226,6 +226,33 @@ export default function DatabasesPage() {
     }
   }
 
+  const formatSourceStatus = (status?: string): string => {
+    switch (status) {
+      case 'ready':
+        return 'Ready'
+      case 'pending':
+        return 'Pending'
+      case 'syncing':
+        return 'Syncing'
+      case 'understanding':
+        return 'Analyzing'
+      case 'authorization_required':
+        return 'Authorization required'
+      case 'reauthorization_required':
+        return 'Reauthorization required'
+      case 'permission_lost':
+        return 'Permission lost'
+      case 'source_unavailable':
+        return 'Source unavailable'
+      case 'needs_confirmation':
+        return 'Needs confirmation'
+      case 'failed':
+        return 'Failed'
+      default:
+        return status ? status.replace(/_/g, ' ') : 'Pending'
+    }
+  }
+
   // Filter and sort datasources
   const displayDatasources = (datasourcesResponse?.items || [])
     .filter(datasource => {
@@ -678,10 +705,10 @@ export default function DatabasesPage() {
         queryClient.invalidateQueries({ queryKey: ['datasources'] })
         // Invalidate notebook connections so it refetch
         queryClient.invalidateQueries({ queryKey: ['notebook-connections'] })
-        showToast.success('File datasource deleted successfully')
+        showToast.success('File source deleted successfully')
       } catch (error: any) {
         console.error('Error deleting dataset:', error)
-        showToast.error(`Failed to delete datasource: ${error.message}`)
+        showToast.error(`Failed to delete source: ${error.message}`)
       }
     }
   }
@@ -714,7 +741,7 @@ export default function DatabasesPage() {
     try {
       await ApiService.updateDatasourceVisibility(datasource.id, newIsPublic)
       queryClient.invalidateQueries({ queryKey: ['datasources'] })
-      showToast.success(newIsPublic ? 'Datasource shared with team' : 'Datasource set to private')
+      showToast.success(newIsPublic ? 'Source shared with team' : 'Source set to private')
     } catch (error: any) {
       console.error('Error toggling visibility:', error)
       showToast.error(`Failed to update visibility: ${error.message}`)
@@ -946,7 +973,7 @@ export default function DatabasesPage() {
 
   const handleCreateDialogSubmit = async () => {
     if (!uploadConnectionName.trim()) {
-      alert('Please provide a datasource name')
+      alert('Please provide a source name')
       return
     }
 
@@ -1089,7 +1116,7 @@ export default function DatabasesPage() {
 
   const handleCreateSourceResourceSubmit = async () => {
     if (!uploadConnectionName.trim()) {
-      alert('Please provide a datasource name')
+      alert('Please provide a source name')
       return
     }
     if (selectedType === 'pdf') {
@@ -1136,7 +1163,7 @@ export default function DatabasesPage() {
         <div className="max-w-[850px] mx-auto">
           {/* Title and Buttons */}
           <div className="flex flex-wrap items-center justify-between gap-3 mb-8">
-            <h1 className="text-2xl font-bold text-white tracking-tight">Datasources</h1>
+            <h1 className="text-2xl font-bold text-white tracking-tight">Sources</h1>
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 asChild
@@ -1155,7 +1182,7 @@ export default function DatabasesPage() {
                   disabled={createMutation.isPending}
                   className="font-medium px-5 py-2.5 rounded-md text-sm"
                 >
-                  + New datasource
+                  + Add source
                 </Button>
               )}
             </div>
@@ -1166,7 +1193,7 @@ export default function DatabasesPage() {
             <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500" />
             <Input
               type="text"
-              placeholder="Search datasources..."
+              placeholder="Search sources..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-12 pr-4 py-6 bg-transparent border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:border-brand-orange focus:ring-1 focus:ring-brand-orange/50"
@@ -1184,7 +1211,7 @@ export default function DatabasesPage() {
               <Card className="p-10 text-center bg-[#1a1a1a] border-red-500/40">
                 <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold text-white mb-2">Workspace could not be loaded</h3>
-                <p className="text-gray-400 mb-6">{error.message || 'An error occurred while loading datasources.'}</p>
+                <p className="text-gray-400 mb-6">{error.message || 'An error occurred while loading sources.'}</p>
                 <Button
                   variant="brand-primary"
                   onClick={() => queryClient.invalidateQueries({ queryKey: ['datasources'] })}
@@ -1196,7 +1223,7 @@ export default function DatabasesPage() {
           ) : loading ? (
             <div className="text-center py-12">
               <div className="animate-spin w-8 h-8 border-2 border-brand-orange border-t-transparent rounded-full mx-auto mb-4"></div>
-              <p className="text-gray-400">Loading database connections...</p>
+              <p className="text-gray-400">Loading sources...</p>
             </div>
           ) : (
             <>
@@ -1208,9 +1235,9 @@ export default function DatabasesPage() {
                       <div className="w-16 h-16 bg-brand-orange/10 rounded-full flex items-center justify-center mx-auto mb-4">
                         <Database className="w-8 h-8 text-brand-orange" />
                       </div>
-                      <h3 className="text-xl font-semibold text-white mb-2">No Database Connections</h3>
+                      <h3 className="text-xl font-semibold text-white mb-2">No Sources</h3>
                       <p className="text-gray-400 mb-6">
-                        Get started by adding your first database connection. Connect to Oracle, PostgreSQL, MySQL, MongoDB, SQL Server, SQLite, or upload data files (CSV, Excel, Parquet, JSON).
+                        Get started by adding files, business docs, web pages, databases, warehouses, or object storage.
                       </p>
                     </div>
                   </Card>
@@ -1248,7 +1275,7 @@ export default function DatabasesPage() {
                                       ? 'bg-green-500/20 text-green-400'
                                       : 'bg-amber-500/20 text-amber-300'
                                   }`}>
-                                    {datasource.status === 'ready' ? 'Indexed' : 'Connector required'}
+                                    {formatSourceStatus(datasource.status)}
                                   </span>
                                 )}
                                 {datasource.source_type === 'source_resource' && datasource.projected_dataset_id && (
@@ -1275,7 +1302,7 @@ export default function DatabasesPage() {
                                   ? datasource.projected_dataset_id
                                     ? `${formatDbType(datasource.type)} resource with Knowledge/Evidence and a DuckDB dataset projection`
                                     : `${formatDbType(datasource.type)} knowledge resource for retrieval and evidence`
-                                  : `${datasource.source_type === 'dataset' ? 'File datasource' : 'Database connection'} for ${formatDbType(datasource.type)}`}
+                                  : `${datasource.source_type === 'dataset' ? 'File source' : 'Database connection'} for ${formatDbType(datasource.type)}`}
                               </p>
 
                               {/* Timestamp */}
@@ -1310,7 +1337,7 @@ export default function DatabasesPage() {
                                   variant="ghost"
                                   onClick={() => handleEditClick(datasource)}
                                   className="text-gray-400 hover:text-white hover:bg-gray-800"
-                                  title="Edit datasource"
+                                  title="Edit source"
                                 >
                                   <Pencil className="w-4 h-4" />
                                 </Button>
@@ -1360,7 +1387,7 @@ export default function DatabasesPage() {
         }}>
           <DialogContent className="max-w-4xl bg-[#2a2a2a] border-[#444444] p-0 gap-0">
             <DialogHeader className="px-6 pt-6 pb-4 border-b border-[#444444]">
-              <DialogTitle className="text-white text-xl">Add Datasource</DialogTitle>
+              <DialogTitle className="text-white text-xl">Add Source</DialogTitle>
             </DialogHeader>
 
             <div className="flex h-[600px]">
@@ -1588,11 +1615,11 @@ export default function DatabasesPage() {
               <div className="flex-1 flex flex-col overflow-hidden">
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
                   <div className="space-y-4">
-                    {/* Connection/Datasource Name - hidden for OAuth/picker connectors and Databricks wizard */}
+                    {/* Connection/Source Name - hidden for OAuth/picker connectors and Databricks wizard */}
                     {selectedType !== 'databricks' && !isSourceConnectorType(selectedType) && (
                       <div>
                         <Label htmlFor="connection-name" className="text-white">
-                          {selectedType === 'upload' || selectedType === 'url' || isDirectSourceResourceType(selectedType) ? 'Datasource Name' : 'Connection Name'} <span className="text-red-400">*</span>
+                          {selectedType === 'upload' || selectedType === 'url' || isDirectSourceResourceType(selectedType) ? 'Source Name' : 'Connection Name'} <span className="text-red-400">*</span>
                         </Label>
                         <Input
                           id="connection-name"
@@ -1604,7 +1631,7 @@ export default function DatabasesPage() {
                               setConnectionConfig(prev => ({ ...prev, name: e.target.value }))
                             }
                           }}
-                          placeholder={selectedType === 'upload' || selectedType === 'url' || isDirectSourceResourceType(selectedType) ? 'My Datasource' : 'My Database Connection'}
+                          placeholder={selectedType === 'upload' || selectedType === 'url' || isDirectSourceResourceType(selectedType) ? 'My Source' : 'My Database Connection'}
                           disabled={isCreatingAnyDatasource}
                           className="mt-1 bg-[#1a1a1a] border-[#555555] text-white placeholder-[#888888]"
                         />
@@ -2615,7 +2642,7 @@ export default function DatabasesPage() {
                     {isCreatingAnyDatasource && (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     )}
-                    {isCreatingAnyDatasource ? 'Creating...' : 'Create Datasource'}
+                    {isCreatingAnyDatasource ? 'Creating...' : 'Create Source'}
                   </Button>
                   </>
                   )}
@@ -2632,7 +2659,7 @@ export default function DatabasesPage() {
         }}>
           <DialogContent className="max-w-md bg-[#2a2a2a] border-[#444444]">
             <DialogHeader>
-              <DialogTitle className="text-white">Delete Datasource?</DialogTitle>
+              <DialogTitle className="text-white">Delete Source?</DialogTitle>
             </DialogHeader>
             
             <div className="space-y-4">
@@ -2711,13 +2738,13 @@ export default function DatabasesPage() {
               {/* Connection Name */}
               <div>
                 <Label htmlFor="upload-connection-name" className="text-white">
-                  Datasource Name <span className="text-red-400">*</span>
+                  Source Name <span className="text-red-400">*</span>
                 </Label>
                 <Input
                   id="upload-connection-name"
                   value={uploadConnectionName}
                   onChange={(e) => setUploadConnectionName(e.target.value)}
-                  placeholder="My File Datasource"
+                  placeholder="My File Source"
                   disabled={uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending}
                   className="mt-1 bg-[#1a1a1a] border-[#555555] text-white placeholder-[#888888]"
                 />
@@ -2975,7 +3002,7 @@ export default function DatabasesPage() {
                   {(uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending) && (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   )}
-                  {uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending ? 'Creating...' : 'Create Datasource'}
+                  {uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending ? 'Creating...' : 'Create Source'}
                 </Button>
               </div>
             </div>

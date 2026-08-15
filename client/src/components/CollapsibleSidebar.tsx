@@ -56,7 +56,7 @@ export default function CollapsibleSidebar() {
       return location.pathname === '/'
     }
     if (path === '/databases') {
-      return location.pathname === '/databases'
+      return location.pathname === '/databases' || location.pathname === '/sources'
     }
     if (path === '/data-models') {
       return location.pathname === '/data-models' || location.pathname.startsWith('/data-models/')
@@ -194,7 +194,7 @@ export default function CollapsibleSidebar() {
                 </button>
               )}
 
-              <Link to="/databases" onClick={(e) => !isExpanded && e.stopPropagation()}>
+              <Link to="/sources" onClick={(e) => !isExpanded && e.stopPropagation()}>
                 <div
                   className={`flex items-center rounded-lg transition-all duration-300 cursor-pointer ${
                     isExpanded ? 'gap-3 px-3 py-1.5' : 'p-2 justify-center'
@@ -203,10 +203,10 @@ export default function CollapsibleSidebar() {
                       ? 'bg-brand-orange/10 text-brand-orange border-l-3 border-brand-orange'
                       : 'text-gray-300 hover:text-white hover:bg-[#2a2a2a]'
                   }`}
-                  title={!isExpanded ? "Databases" : undefined}
+                  title={!isExpanded ? "Sources" : undefined}
                 >
                   <Database className="h-4 w-4 flex-shrink-0" />
-                  {isExpanded && <span className="text-sm whitespace-nowrap transition-opacity duration-300">Datasources</span>}
+                  {isExpanded && <span className="text-sm whitespace-nowrap transition-opacity duration-300">Sources</span>}
                 </div>
               </Link>
 

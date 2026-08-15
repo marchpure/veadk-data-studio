@@ -1,0 +1,1069 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Byaan Commercial Data Studio Console Prototype</title>
+  <style>
+    :root {
+      --bg: #0d0f10;
+      --surface: #15191c;
+      --surface-2: #101315;
+      --surface-3: #1b2024;
+      --border: #2b3338;
+      --border-strong: #3a444b;
+      --text: #f4f7f7;
+      --muted: #a1adb5;
+      --subtle: #77848d;
+      --orange: #f97316;
+      --orange-soft: rgba(249, 115, 22, 0.12);
+      --green: #34d399;
+      --green-soft: rgba(52, 211, 153, 0.12);
+      --amber: #fbbf24;
+      --amber-soft: rgba(251, 191, 36, 0.12);
+      --cyan: #22d3ee;
+      --cyan-soft: rgba(34, 211, 238, 0.12);
+      --red: #fb7185;
+      --red-soft: rgba(251, 113, 133, 0.12);
+      --radius: 8px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 1180px;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    button, input, select {
+      font: inherit;
+      letter-spacing: 0;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      border-right: 1px solid var(--border);
+      background: #111416;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 36px;
+      padding: 0 6px;
+      font-weight: 700;
+      font-size: 17px;
+    }
+
+    .mark {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: var(--orange);
+      color: #111;
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+    }
+
+    .nav-section {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .nav-title {
+      padding: 8px 8px 4px;
+      color: var(--subtle);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .nav-item {
+      border: 0;
+      width: 100%;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-radius: 6px;
+      padding: 0 10px;
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .nav-item.active {
+      background: var(--orange-soft);
+      color: var(--text);
+      box-shadow: inset 3px 0 0 var(--orange);
+    }
+
+    .nav-item:hover {
+      background: #1d2327;
+      color: var(--text);
+    }
+
+    .nav-icon {
+      width: 18px;
+      text-align: center;
+      color: currentColor;
+      font-weight: 700;
+    }
+
+    .sidebar-footer {
+      margin-top: auto;
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+      color: var(--subtle);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+    }
+
+    .topbar {
+      height: 58px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 22px;
+      background: #111416;
+    }
+
+    .search {
+      width: 360px;
+      height: 34px;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      background: var(--surface-2);
+      color: var(--text);
+      padding: 0 12px;
+      outline: none;
+    }
+
+    .content {
+      padding: 20px 22px 28px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .page-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: end;
+    }
+
+    h1, h2, h3, p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .lede {
+      margin-top: 6px;
+      color: var(--muted);
+      line-height: 1.55;
+      max-width: 860px;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn {
+      border: 1px solid var(--border-strong);
+      min-height: 34px;
+      border-radius: 6px;
+      padding: 0 12px;
+      background: var(--surface-2);
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+
+    .btn.primary {
+      border-color: var(--orange);
+      background: var(--orange);
+      color: #111;
+      font-weight: 700;
+    }
+
+    .btn.ghost {
+      background: transparent;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .metric {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 12px;
+      min-height: 78px;
+    }
+
+    .metric-label {
+      color: var(--subtle);
+      font-size: 12px;
+    }
+
+    .metric-value {
+      margin-top: 8px;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .metric-note {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 380px;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .panel {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: var(--radius);
+      min-width: 0;
+    }
+
+    .panel-head {
+      height: 48px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .panel-title {
+      font-weight: 700;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 6px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .tab {
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--muted);
+      border-radius: 6px;
+      height: 30px;
+      padding: 0 10px;
+      white-space: nowrap;
+    }
+
+    .tab.active {
+      color: var(--text);
+      border-color: var(--orange);
+      background: var(--orange-soft);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 11px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      color: var(--subtle);
+      font-weight: 600;
+      font-size: 12px;
+      background: #121619;
+    }
+
+    td {
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .name {
+      color: var(--text);
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .sub {
+      margin-top: 3px;
+      color: var(--subtle);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      padding: 3px 8px;
+      font-size: 12px;
+      color: var(--muted);
+      background: var(--surface-2);
+      white-space: nowrap;
+    }
+
+    .pill.ready {
+      border-color: rgba(52, 211, 153, 0.35);
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .pill.warn {
+      border-color: rgba(251, 191, 36, 0.35);
+      color: var(--amber);
+      background: var(--amber-soft);
+    }
+
+    .pill.info {
+      border-color: rgba(34, 211, 238, 0.35);
+      color: var(--cyan);
+      background: var(--cyan-soft);
+    }
+
+    .pill.bad {
+      border-color: rgba(251, 113, 133, 0.35);
+      color: var(--red);
+      background: var(--red-soft);
+    }
+
+    .connector-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      border-radius: 6px;
+      padding: 10px;
+    }
+
+    .connector-stack {
+      display: grid;
+      gap: 8px;
+    }
+
+    .family-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .family {
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 108px;
+    }
+
+    .family.active {
+      border-color: var(--orange);
+      background: var(--orange-soft);
+    }
+
+    .family h3 {
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    .family p {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .source-detail {
+      display: grid;
+      gap: 12px;
+      padding: 12px;
+    }
+
+    .stepper {
+      display: grid;
+      gap: 8px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 22px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 9px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      border-radius: 6px;
+    }
+
+    .dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid var(--border-strong);
+    }
+
+    .dot.done {
+      border-color: var(--green);
+      background: var(--green);
+    }
+
+    .dot.running {
+      border-color: var(--orange);
+      background: var(--orange-soft);
+    }
+
+    .step-title {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .mini {
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      border-radius: 6px;
+      padding: 10px;
+    }
+
+    .mini .label {
+      color: var(--subtle);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .dashboard {
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 160px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .chart {
+      height: 70px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background:
+        linear-gradient(90deg, transparent 0 12%, rgba(34, 211, 238, 0.25) 12% 18%, transparent 18% 32%, rgba(52, 211, 153, 0.25) 32% 42%, transparent 42% 58%, rgba(249, 115, 22, 0.3) 58% 70%, transparent 70%),
+        #0f1315;
+    }
+
+    .health-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .health-item {
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      border-radius: 6px;
+      padding: 10px;
+      min-height: 96px;
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .model-table th:nth-child(1),
+    .model-table td:nth-child(1) {
+      width: 27%;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="mark">B</div>
+        <span>Byaan</span>
+      </div>
+      <div class="nav-section">
+        <div class="nav-title">Workspace</div>
+        <button class="nav-item"><span class="nav-icon">O</span>Overview</button>
+        <button class="nav-item active"><span class="nav-icon">S</span>Sources</button>
+        <button class="nav-item"><span class="nav-icon">M</span>Semantic Models</button>
+        <button class="nav-item"><span class="nav-icon">D</span>Dashboards</button>
+        <button class="nav-item"><span class="nav-icon">A</span>Automation</button>
+      </div>
+      <div class="nav-section">
+        <div class="nav-title">Admin</div>
+        <button class="nav-item"><span class="nav-icon">I</span>Integrations</button>
+        <button class="nav-item"><span class="nav-icon">P</span>Policies</button>
+        <button class="nav-item"><span class="nav-icon">U</span>Users</button>
+      </div>
+      <div class="sidebar-footer">
+        <div>Commercial console prototype</div>
+        <div class="mono">Sources -> Models -> Dashboards</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <input class="search" value="Search sources, models, dashboards" aria-label="Search" />
+        <div class="actions">
+          <button class="btn ghost">Command</button>
+          <button class="btn primary">Add source</button>
+        </div>
+      </header>
+
+      <section class="content">
+        <div class="page-head">
+          <div>
+            <h1>Sources</h1>
+            <p class="lede">Business data, documents, files, and warehouses available to agents, semantic models, dashboards, and MCP tools.</p>
+          </div>
+          <div class="actions">
+            <button class="btn">Connector health</button>
+            <button class="btn primary">Add source</button>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric">
+            <div class="metric-label">Connected sources</div>
+            <div class="metric-value">28</div>
+            <div class="metric-note">8 connector families</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Needs attention</div>
+            <div class="metric-value" style="color: var(--amber)">4</div>
+            <div class="metric-note">permissions or stale data</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Processing</div>
+            <div class="metric-value" style="color: var(--cyan)">3</div>
+            <div class="metric-note">capture, parse, index</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Semantic models</div>
+            <div class="metric-value">11</div>
+            <div class="metric-note">7 published</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Dashboards</div>
+            <div class="metric-value">16</div>
+            <div class="metric-note">2 stale snapshots</div>
+          </div>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Overview health board</div>
+            <div class="actions">
+              <button class="btn">Review queue</button>
+              <button class="btn primary">Create dashboard</button>
+            </div>
+          </div>
+          <div class="health-grid">
+            <div class="health-item">
+              <div class="actions">
+                <span class="pill warn">4 sources</span>
+                <span class="pill">Needs attention</span>
+              </div>
+              <div class="name">Permissions and stale snapshots</div>
+              <div class="sub">Reauth Feishu docs, retry PDF OCR, review telemetry drift.</div>
+            </div>
+            <div class="health-item">
+              <div class="actions">
+                <span class="pill info">3 models</span>
+                <span class="pill">Review</span>
+              </div>
+              <div class="name">Semantic publish gate</div>
+              <div class="sub">Metric changes show downstream dashboards before publish.</div>
+            </div>
+            <div class="health-item">
+              <div class="actions">
+                <span class="pill bad">1 failed</span>
+                <span class="pill warn">2 stale</span>
+              </div>
+              <div class="name">Dashboard refresh</div>
+              <div class="sub">Keep latest successful snapshot visible while failed runs are fixed.</div>
+            </div>
+          </div>
+        </section>
+
+        <div class="workspace-grid">
+          <section class="panel">
+            <div class="panel-head">
+              <div class="panel-title">Source inventory</div>
+              <div class="actions">
+                <button class="btn">Sync selected</button>
+                <button class="btn">Generate model</button>
+              </div>
+            </div>
+            <div class="tabs">
+              <button class="tab active">All</button>
+              <button class="tab">Files</button>
+              <button class="tab">Documents</button>
+              <button class="tab">SaaS apps</button>
+              <button class="tab">Databases</button>
+              <button class="tab">Warehouses</button>
+              <button class="tab">Needs attention</button>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 28%">Source</th>
+                  <th style="width: 14%">Status</th>
+                  <th style="width: 13%">Freshness</th>
+                  <th style="width: 14%">Context</th>
+                  <th style="width: 16%">Consumers</th>
+                  <th style="width: 15%">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div class="name">FY26 revenue forecast pack</div>
+                    <div class="sub">Feishu Wiki + Sheet · 4 resources</div>
+                  </td>
+                  <td><span class="pill ready">Ready</span></td>
+                  <td>18 min ago</td>
+                  <td><span class="pill info">Indexed</span></td>
+                  <td>2 models · 3 dashboards</td>
+                  <td><button class="btn">Open</button></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="name">Self-hosted product telemetry</div>
+                    <div class="sub">Databricks · prod.analytics</div>
+                  </td>
+                  <td><span class="pill warn">Drift</span></td>
+                  <td>3 h ago</td>
+                  <td><span class="pill ready">Schema profiled</span></td>
+                  <td>1 model · 5 dashboards</td>
+                  <td><button class="btn">Review</button></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="name">Customer onboarding PDFs</div>
+                    <div class="sub">PDF folder · 37 files</div>
+                  </td>
+                  <td><span class="pill info">Processing</span></td>
+                  <td>Now</td>
+                  <td><span class="pill warn">OCR needed</span></td>
+                  <td>0 models · 0 dashboards</td>
+                  <td><button class="btn">Progress</button></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="name">Ops incident docs</div>
+                    <div class="sub">Feishu Doc · user OAuth</div>
+                  </td>
+                  <td><span class="pill bad">Reauth</span></td>
+                  <td>2 d ago</td>
+                  <td><span class="pill warn">Partial</span></td>
+                  <td>1 model · 1 dashboard</td>
+                  <td><button class="btn">Reconnect</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <aside class="panel">
+            <div class="panel-head">
+              <div class="panel-title">Add source</div>
+              <span class="pill info">Family first</span>
+            </div>
+            <div class="family-grid">
+              <div class="family">
+                <h3>Files</h3>
+                <p>PDF, Excel, CSV, Docx, PPT. Upload, parse, and cite.</p>
+              </div>
+              <div class="family active">
+                <h3>Business docs</h3>
+                <p>Feishu/Lark, Google Drive, Microsoft 365, Notion, Confluence.</p>
+              </div>
+              <div class="family">
+                <h3>Databases</h3>
+                <p>PostgreSQL, MySQL, Oracle, SQL Server, SQLite, ClickHouse.</p>
+              </div>
+              <div class="family">
+                <h3>Warehouses</h3>
+                <p>Databricks, Snowflake, BigQuery, Redshift.</p>
+              </div>
+            </div>
+            <div class="source-detail">
+              <div class="mini">
+                <div class="label">Selected connector</div>
+                <div class="name">Feishu / Lark</div>
+                <div class="sub">OAuth · docs, wiki, sheets, base · context + dataset</div>
+              </div>
+              <div class="connector-stack">
+                <div class="connector-row">
+                  <div>
+                    <div class="name">Feishu / Lark</div>
+                    <div class="sub">Production adapter · SourceConnectorAdapter</div>
+                  </div>
+                  <span class="pill ready">Available</span>
+                </div>
+                <div class="connector-row">
+                  <div>
+                    <div class="name">Google Workspace</div>
+                    <div class="sub">Same resource picker contract, not yet a supported adapter</div>
+                  </div>
+                  <span class="pill warn">Beta</span>
+                </div>
+                <div class="connector-row">
+                  <div>
+                    <div class="name">Confluence / Jira</div>
+                    <div class="sub">Catalog tile only; request access before promising support</div>
+                  </div>
+                  <span class="pill">Planned</span>
+                </div>
+              </div>
+              <div class="mini">
+                <div class="label">Workflow</div>
+                <div class="stepper">
+                  <div class="step">
+                    <div class="dot done"></div>
+                    <div>
+                      <div class="step-title">Authorize</div>
+                      <div class="sub">User OAuth connected</div>
+                    </div>
+                    <span class="pill ready">Done</span>
+                  </div>
+                  <div class="step">
+                    <div class="dot running"></div>
+                    <div>
+                      <div class="step-title">Browse and select</div>
+                      <div class="sub">4 resources selected</div>
+                    </div>
+                    <span class="pill info">Active</span>
+                  </div>
+                  <div class="step">
+                    <div class="dot"></div>
+                    <div>
+                      <div class="step-title">Preview and policy</div>
+                      <div class="sub">Sync mode, parser, retention</div>
+                    </div>
+                    <span class="pill">Next</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Semantic Models</div>
+            <div class="actions">
+              <button class="btn">Validate drift</button>
+              <button class="btn primary">Publish version</button>
+            </div>
+          </div>
+          <table class="model-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Status</th>
+                <th>Sources</th>
+                <th>Validation</th>
+                <th>Consumers</th>
+                <th>Publish action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <div class="name">Finance Semantic Model</div>
+                  <div class="sub">entities, relationships, revenue metrics</div>
+                </td>
+                <td><span class="pill warn">Review required</span></td>
+                <td>FY26 revenue pack · ready</td>
+                <td>2 metric diffs</td>
+                <td>3 dashboards · 1 MCP tool</td>
+                <td><button class="btn">Review impact</button></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="name">Product Telemetry Model</div>
+                  <div class="sub">activation, retention, workspace events</div>
+                </td>
+                <td><span class="pill ready">Published</span></td>
+                <td>Databricks · drift</td>
+                <td>source changed</td>
+                <td>5 dashboards</td>
+                <td><button class="btn">Validate</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <div class="workspace-grid">
+          <section class="panel">
+            <div class="panel-head">
+              <div class="panel-title">Source detail: FY26 revenue forecast pack</div>
+              <div class="actions">
+                <button class="btn">Sync now</button>
+                <button class="btn primary">Generate model</button>
+              </div>
+            </div>
+            <div class="tabs">
+              <button class="tab active">Overview</button>
+              <button class="tab">Snapshots</button>
+              <button class="tab">Tables</button>
+              <button class="tab">Evidence</button>
+              <button class="tab">Lineage</button>
+              <button class="tab">Consumers</button>
+            </div>
+            <div class="source-detail">
+              <div class="two-col">
+                <div class="mini">
+                  <div class="label">Latest snapshot</div>
+                  <div class="name">sha256:59bd...18c2</div>
+                  <div class="sub">Captured 18 min ago · parser feishu-v2</div>
+                </div>
+                <div class="mini">
+                  <div class="label">Context</div>
+                  <div class="name">Ready</div>
+                  <div class="sub">Provider-backed index · 122 evidence locators · backend URI hidden from normal users</div>
+                </div>
+              </div>
+              <div class="stepper">
+                <div class="step">
+                  <div class="dot done"></div>
+                  <div>
+                    <div class="step-title">Capture</div>
+                    <div class="sub">4 Feishu resources captured</div>
+                  </div>
+                  <span class="pill ready">Done</span>
+                </div>
+                <div class="step">
+                  <div class="dot done"></div>
+                  <div>
+                    <div class="step-title">Parse and detect tables</div>
+                    <div class="sub">11 blocks, 6 tables, 2 quality warnings</div>
+                  </div>
+                  <span class="pill ready">Done</span>
+                </div>
+                <div class="step">
+                  <div class="dot done"></div>
+                  <div>
+                    <div class="step-title">Normalize dataset</div>
+                    <div class="sub">DuckDB dataset projection ready</div>
+                  </div>
+                  <span class="pill ready">Done</span>
+                </div>
+                <div class="step">
+                  <div class="dot done"></div>
+                  <div>
+                    <div class="step-title">Index context</div>
+                    <div class="sub">Asynchronous provider-backed context index ready</div>
+                  </div>
+                  <span class="pill ready">Done</span>
+                </div>
+                <div class="step">
+                  <div class="dot running"></div>
+                  <div>
+                    <div class="step-title">Generate semantic suggestions</div>
+                    <div class="sub">Metric and relationship candidates waiting for review</div>
+                  </div>
+                  <span class="pill info">Active</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="panel">
+            <div class="panel-head">
+              <div class="panel-title">Lineage</div>
+            </div>
+            <div class="source-detail">
+              <div class="mini">
+                <div class="label">Upstream</div>
+                <div>Feishu OAuth -> Wiki -> Sheet -> Snapshot</div>
+              </div>
+              <div class="mini">
+                <div class="label">Downstream</div>
+                <div>Finance Semantic Model -> Board Dashboard -> Weekly Digest MCP</div>
+              </div>
+              <div class="mini">
+                <div class="label">Risk</div>
+                <div class="pill warn">Metric forecast_base changed</div>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Dashboards</div>
+            <div class="actions">
+              <button class="btn">Refresh stale</button>
+              <button class="btn primary">Create dashboard</button>
+            </div>
+          </div>
+          <div class="dashboard-grid">
+            <div class="dashboard">
+              <div>
+                <div class="name">Board revenue health</div>
+                <div class="sub">AnalysisArtifact · Finance model v7</div>
+              </div>
+              <div class="chart"></div>
+              <div class="actions">
+                <span class="pill ready">Fresh</span>
+                <span class="pill info">Live latest</span>
+              </div>
+            </div>
+            <div class="dashboard">
+              <div>
+                <div class="name">Self-hosted activation</div>
+                <div class="sub">HTML artifact · Notebook v12</div>
+              </div>
+              <div class="chart"></div>
+              <div class="actions">
+                <span class="pill warn">Stale</span>
+                <span class="pill">Shared</span>
+              </div>
+            </div>
+            <div class="dashboard">
+              <div>
+                <div class="name">Support risk monitor</div>
+                <div class="sub">AnalysisArtifact · Ops model v3</div>
+              </div>
+              <div class="chart"></div>
+              <div class="actions">
+                <span class="pill bad">Failed refresh</span>
+                <span class="pill">Snapshot</span>
+              </div>
+            </div>
+            <div class="dashboard">
+              <div>
+                <div class="name">PDF onboarding exploration</div>
+                <div class="sub">Direct source draft · not shared</div>
+              </div>
+              <div class="chart"></div>
+              <div class="actions">
+                <span class="pill warn">Exploratory</span>
+                <span class="pill">Bind model</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Integrations and policies</div>
+            <div class="actions">
+              <button class="btn">Audit log</button>
+              <button class="btn">Connector catalog</button>
+            </div>
+          </div>
+          <div class="health-grid">
+            <div class="health-item">
+              <div class="actions">
+                <span class="pill ready">Configured</span>
+                <span class="pill">Admin</span>
+              </div>
+              <div class="name">Feishu app credentials</div>
+              <div class="sub">Admin owns app ID, callback, scopes, and tenant policy.</div>
+            </div>
+            <div class="health-item">
+              <div class="actions">
+                <span class="pill warn">Policy</span>
+                <span class="pill">Workspace</span>
+              </div>
+              <div class="name">Allowed connector families</div>
+              <div class="sub">Users add sources only from enabled families; planned tiles require request access.</div>
+            </div>
+            <div class="health-item">
+              <div class="actions">
+                <span class="pill info">Provider</span>
+                <span class="pill">Context</span>
+              </div>
+              <div class="name">Context backend</div>
+              <div class="sub">OpenViking or compatible provider selected without changing the Add Source journey.</div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

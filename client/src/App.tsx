@@ -218,6 +218,18 @@ function App() {
             }
           />
           <Route
+            path="/sources"
+            element={
+              <AuthGuard>
+                <ViewerRedirect>
+                  <Layout>
+                    <DatabasesPage />
+                  </Layout>
+                </ViewerRedirect>
+              </AuthGuard>
+            }
+          />
+          <Route
             path="/data-models"
             element={
               <AuthGuard>
@@ -344,6 +356,7 @@ function App() {
             <Route path="/skill-review" element={<SkillReviewPage />} />
             <Route path="/llm-connections" element={<LLMConnectionsPage />} />
             <Route path="/databases" element={<DatabasesPage />} />
+            <Route path="/sources" element={<DatabasesPage />} />
             <Route path="/data-models" element={<DataModelsHomePage />} />
             <Route path="/data-models/:modelId" element={<DataModelBuilderPage />} />
             <Route path="/github" element={<GitHubIntegrations />} />
@@ -388,6 +401,7 @@ function App() {
             <Route path="/skill-review" element={<SkillReviewPage />} />
             <Route path="/llm-connections" element={<LLMConnectionsPage />} />
             <Route path="/databases" element={<DatabasesPage />} />
+            <Route path="/sources" element={<DatabasesPage />} />
             <Route path="/data-models" element={<DataModelsHomePage />} />
             <Route path="/data-models/:modelId" element={<DataModelBuilderPage />} />
             <Route path="/github" element={<GitHubIntegrations />} />
