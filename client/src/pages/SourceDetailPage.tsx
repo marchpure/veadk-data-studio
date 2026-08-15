@@ -5,6 +5,7 @@ import { Button } from '../components/ui/button'
 import { Card } from '../components/ui/card'
 import { Input } from '../components/ui/input'
 import {
+  useDeleteSourceConnection,
   useDeleteSourceResource,
   useFeishuOAuthResult,
   useKnowledgeSearch,
@@ -82,6 +83,7 @@ export default function SourceDetailPage() {
   const queryClient = useQueryClient()
   const [evidenceQuery, setEvidenceQuery] = useState('')
   const [removeConfirmation, setRemoveConfirmation] = useState('')
+  const [disconnectConfirmation, setDisconnectConfirmation] = useState('')
   const [feishuAuthState, setFeishuAuthState] = useState<string | null>(null)
   const [feishuAuthUrl, setFeishuAuthUrl] = useState<string | null>(null)
   const [feishuAuthMessage, setFeishuAuthMessage] = useState<string | null>(null)
@@ -89,6 +91,7 @@ export default function SourceDetailPage() {
   const overviewQuery = useSourceOverviewItem(sourceId)
   const syncResourceMutation = useSyncSourceResource()
   const deleteResourceMutation = useDeleteSourceResource()
+  const deleteSourceConnectionMutation = useDeleteSourceConnection()
   const startFeishuOAuth = useStartFeishuOAuth()
   const pollFeishuOAuth = useFeishuOAuthResult()
   const refreshConnectionSchemaMutation = useRefreshSourceOverviewConnectionSchema()
@@ -126,6 +129,27 @@ export default function SourceDetailPage() {
       queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.snapshots(sourceId) })
     }
   }, [queryClient, sourceId])
+
+  const refreshAfterConnectionDisconnect = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.all })
+    queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.feishuStatus() })
+    queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
+    if (sourceId) {
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.sourceResource(sourceId) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.processing(sourceId) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.snapshots(sourceId) })
+    }
+  }, [queryClient, sourceId])
+
+  const disconnectSourceConnection = (connectionId?: string | null) => {
+    if (!connectionId) return
+    deleteSourceConnectionMutation.mutate(connectionId, {
+      onSuccess: () => {
+        setDisconnectConfirmation('')
+        refreshAfterConnectionDisconnect()
+      },
+    })
+  }
 
   const beginFeishuReconnect = async () => {
     const result = await startFeishuOAuth.mutateAsync()
@@ -281,6 +305,7 @@ export default function SourceDetailPage() {
   const canRetrySync = Boolean(sourceResource.source_connection_id || (sourceResource.resource_type === 'web' && sourceResource.source_url))
   const retrySyncLabel = sourceResource.status === 'ready' ? 'Reindex source' : 'Retry sync'
   const canRemoveSource = removeConfirmation.trim() === sourceResource.name.trim()
+  const canDisconnectConnection = Boolean(sourceResource.source_connection_id) && disconnectConfirmation.trim() === sourceResource.name.trim()
   const canReconnectFeishu = needsFeishuReauthorization(overview)
   const feishuReconnectLabel = waitingForFeishuOAuth || startFeishuOAuth.isPending ? 'Authorizing...' : 'Reconnect Feishu'
   const handleRetrySync = () => {
@@ -298,6 +323,7 @@ export default function SourceDetailPage() {
       onSuccess: () => navigate('/sources'),
     })
   }
+  const handleDisconnectConnection = () => disconnectSourceConnection(sourceResource.source_connection_id)
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] p-8 text-white">
@@ -575,6 +601,34 @@ export default function SourceDetailPage() {
             <KeyValue label="Provider status" value={sourceResource.knowledge_resource?.provider_status || sourceResource.knowledge_resource?.index_status || 'Unavailable'} />
             <KeyValue label="Last indexed" value={formatDate(sourceResource.knowledge_resource?.last_indexed_at)} />
             <KeyValue label="Retrieval debug URI" value={sourceResource.knowledge_resource?.retrieval_debug_uri || '-'} />
+            {sourceResource.source_connection_id && (
+              <div className="mt-4 rounded border border-amber-800/40 bg-amber-950/10 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-amber-100">Disconnect connector authorization</div>
+                    <p className="mt-1 text-xs text-amber-100/70">
+                      This revokes the saved connector credentials for this source connection. Existing resources stay in inventory with stale snapshots, but fresh browsing, sync, and modeling handoff require reauthorization.
+                    </p>
+                    <Input
+                      value={disconnectConfirmation}
+                      onChange={event => setDisconnectConfirmation(event.target.value)}
+                      placeholder={`Type ${sourceResource.name} to confirm`}
+                      className="mt-3 border-amber-800/50 bg-[#1a1a1a] text-white placeholder-amber-100/35"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={!canDisconnectConnection || deleteSourceConnectionMutation.isPending}
+                    onClick={handleDisconnectConnection}
+                  >
+                    {deleteSourceConnectionMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
+                    {deleteSourceConnectionMutation.isPending ? 'Disconnecting...' : 'Disconnect connector'}
+                  </Button>
+                </div>
+              </div>
+            )}
             <div className="mt-4 rounded border border-red-900/40 bg-red-950/10 p-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
