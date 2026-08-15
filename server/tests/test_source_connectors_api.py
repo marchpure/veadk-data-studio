@@ -1380,6 +1380,73 @@ async def test_sync_failure_keeps_previous_successful_snapshot(test_session):
     assert len(files) == 1
 
 
+async def test_source_resource_processing_inherits_disconnected_connection_health(test_session):
+    tenant = await _tenant(test_session)
+    connection_service = SourceConnectionService()
+    resource_service = SourceResourceService()
+    adapter = FakeConnectorAdapter()
+    connection = await connection_service.create_connection(
+        session=test_session,
+        tenant_id=tenant.id,
+        user_id=tenant.owner_id,
+        payload=SourceConnectionCreate(
+            provider="volcengine_tos",
+            auth_mode="access_key",
+            display_name="经营分析 TOS",
+            credentials={
+                "endpoint": "https://tos-cn-beijing.volces.com",
+                "region": "cn-beijing",
+                "access_key_id": "tos-ak",
+                "secret_access_key": "tos-secret",
+            },
+        ),
+        adapter=adapter,
+    )
+    imported = await resource_service.import_resources(
+        session=test_session,
+        tenant_id=tenant.id,
+        user_id=tenant.owner_id,
+        payload=SourceResourceImportRequest(
+            connection_id=connection.id,
+            selections=[
+                {
+                    "external_id": "sales-bucket/reports/revenue.csv",
+                    "resource_type": "tos_object",
+                    "name": "revenue.csv",
+                    "selection_config": {"format": "csv"},
+                }
+            ],
+        ),
+        adapter=adapter,
+    )
+    ready_resource = imported["results"][0]["resource"]
+    previous_snapshot_id = ready_resource["latest_snapshot_id"]
+
+    connection.status = "disconnected"
+    await test_session.commit()
+    resource_row = await test_session.get(SourceResource, ready_resource["id"])
+    assert resource_row is not None
+
+    stale_payload = await resource_service.resource_payload(session=test_session, resource=resource_row)
+    assert stale_payload["status"] == "authorization_required"
+    assert stale_payload["latest_snapshot_id"] == previous_snapshot_id
+    assert stale_payload["sync_config_json"]["connection_status"] == "disconnected"
+    assert stale_payload["sync_config_json"]["last_error"]["code"] == "authorization_required"
+
+    processing = await resource_service.processing_payload(
+        session=test_session,
+        tenant_id=tenant.id,
+        resource_id=str(resource_row.id),
+    )
+    assert processing["status"] == "authorization_required"
+    assert processing["stage"] == "failed"
+    assert processing["message"] == "Source authorization is not connected or has expired."
+    assert processing["next_actions"] == ["Reauthorize source", "Retry sync"]
+    assert processing["latest_snapshot_id"] == previous_snapshot_id
+    assert processing["steps"][0]["status"] == "succeeded"
+    assert processing["steps"][-1]["status"] == "failed"
+
+
 async def test_tos_large_object_import_surfaces_confirmation_state(test_session):
     tenant = await _tenant(test_session)
     connection_service = SourceConnectionService()

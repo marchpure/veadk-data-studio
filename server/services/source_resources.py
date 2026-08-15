@@ -467,16 +467,9 @@ class SourceResourceService:
             )
             if connection is not None:
                 source_connection_payload = self._source_connection_payload(connection)
-                if connection.status in {
-                    "reauthorization_required",
-                    "authorization_required",
-                    "disconnected",
-                }:
-                    status = (
-                        "reauthorization_required"
-                        if connection.status in {"reauthorization_required", "authorization_required"}
-                        else "disconnected"
-                    )
+                connection_status = self._resource_connection_status(connection)
+                if connection_status is not None:
+                    status = connection_status
                     sync_config = {
                         **sync_config,
                         "connection_status": connection.status,
@@ -555,18 +548,38 @@ class SourceResourceService:
             )
 
         sync_config = resource.sync_config_json or {}
+        effective_status = resource.status
+        if resource.source_connection_id:
+            connection = await session.scalar(
+                select(SourceConnection).where(
+                    SourceConnection.tenant_id == tenant_id,
+                    SourceConnection.id == resource.source_connection_id,
+                )
+            )
+            if connection is not None:
+                connection_status = self._resource_connection_status(connection)
+                if connection_status is not None:
+                    effective_status = connection_status
+                    sync_config = {
+                        **sync_config,
+                        "connection_status": connection.status,
+                        "last_error": self._connection_last_error(
+                            connection=connection,
+                            status=connection_status,
+                        ),
+                    }
         last_error = sync_config.get("last_error") if isinstance(sync_config.get("last_error"), dict) else None
-        if resource.status == "ready":
+        if effective_status == "ready":
             stage = "indexed"
             message = "Source is ready. Snapshot, context index, and evidence are available."
             next_actions = ["Search evidence", "Attach to notebook"]
             connector_required = False
-        elif resource.status == "needs_confirmation" and (last_error or {}).get("code") == "large_file_confirmation_required":
+        elif effective_status == "needs_confirmation" and (last_error or {}).get("code") == "large_file_confirmation_required":
             stage = "needs_confirmation"
             message = "Object is too large for automatic sync. Review the object size and confirm large object sync before retrying."
             next_actions = ["Review object size", "Confirm large object sync"]
             connector_required = False
-        elif resource.status in {
+        elif effective_status in {
             "failed",
             "source_unavailable",
             "permission_lost",
@@ -574,8 +587,16 @@ class SourceResourceService:
             "authorization_required",
         }:
             stage = "failed"
-            message = self._processing_failure_message(resource=resource, last_error=last_error)
-            next_actions = self._processing_failure_actions(resource=resource, last_error=last_error)
+            message = self._processing_failure_message(
+                resource=resource,
+                status=effective_status,
+                last_error=last_error,
+            )
+            next_actions = self._processing_failure_actions(
+                resource=resource,
+                status=effective_status,
+                last_error=last_error,
+            )
             connector_required = False
         elif resource.latest_snapshot_id:
             stage = "captured"
@@ -590,7 +611,7 @@ class SourceResourceService:
 
         return {
             "resource_id": resource.id,
-            "status": resource.status,
+            "status": effective_status,
             "stage": stage,
             "message": message,
             "last_error": last_error,
@@ -605,8 +626,40 @@ class SourceResourceService:
                 knowledge_resource=knowledge_resource,
                 evidence_count=evidence_count,
                 stage=stage,
+                effective_status=effective_status,
             ),
         }
+
+    def _resource_connection_status(self, connection: SourceConnection) -> str | None:
+        if connection.status in {"reauthorization_required", "authorization_required", "disconnected"}:
+            return "reauthorization_required" if connection.status == "reauthorization_required" else "authorization_required"
+        if connection.status == "failed":
+            code = self._source_connection_error_code(connection)
+            if code in {"permission_lost", "source_unavailable"}:
+                return code
+            return "source_unavailable"
+        return None
+
+    def _connection_last_error(self, *, connection: SourceConnection, status: str) -> dict[str, Any]:
+        capabilities = connection.capabilities_json if isinstance(connection.capabilities_json, dict) else {}
+        last_error = capabilities.get("last_error") if isinstance(capabilities.get("last_error"), dict) else None
+        if last_error is not None:
+            return last_error
+        return {
+            "code": status,
+            "message": f"Source connection is not usable: {connection.status}",
+            "permanent": True,
+        }
+
+    def _source_connection_error_code(self, connection: SourceConnection) -> str | None:
+        capabilities = connection.capabilities_json
+        if not isinstance(capabilities, dict):
+            return None
+        last_error = capabilities.get("last_error")
+        if not isinstance(last_error, dict):
+            return None
+        code = last_error.get("code")
+        return str(code) if code else None
 
     def _processing_steps(
         self,
@@ -616,14 +669,16 @@ class SourceResourceService:
         knowledge_resource: KnowledgeResource | None,
         evidence_count: int,
         stage: str,
+        effective_status: str | None = None,
     ) -> list[dict[str, str]]:
+        status_for_steps = effective_status or resource.status
         snapshot_captured = resource.latest_snapshot_id is not None
         parsed = bool(knowledge_resource and knowledge_resource.parse_status == "parsed")
         projected_dataset_id = self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot)
         table_detected = bool(projected_dataset_id or self._projection_payload(resource=resource, latest_snapshot=latest_snapshot))
         context_indexed = bool(knowledge_resource and knowledge_resource.index_status == "indexed")
         has_semantic_suggestions = table_detected or context_indexed or evidence_count > 0
-        ready = resource.status == "ready" and (context_indexed or table_detected or evidence_count > 0)
+        ready = status_for_steps == "ready" and (context_indexed or table_detected or evidence_count > 0)
 
         succeeded: dict[str, bool] = {
             "capture": snapshot_captured,
@@ -635,8 +690,8 @@ class SourceResourceService:
             "ready": ready,
         }
         optional_skipped = {
-            "detect_tables": resource.status == "ready" and not table_detected and context_indexed,
-            "normalize_dataset": resource.status == "ready" and not projected_dataset_id and context_indexed,
+            "detect_tables": status_for_steps == "ready" and not table_detected and context_indexed,
+            "normalize_dataset": status_for_steps == "ready" and not projected_dataset_id and context_indexed,
         }
         failed_step = {
             "failed": "parse",
@@ -644,8 +699,10 @@ class SourceResourceService:
             "permission_lost": "capture",
             "authorization_required": "capture",
             "reauthorization_required": "capture",
-        }.get(resource.status)
-        if resource.status == "needs_confirmation" and stage == "needs_confirmation":
+        }.get(status_for_steps)
+        if failed_step == "capture" and snapshot_captured:
+            failed_step = "ready"
+        if status_for_steps == "needs_confirmation" and stage == "needs_confirmation":
             failed_step = "capture"
         if stage == "failed" and failed_step is None:
             failed_step = "parse"
@@ -700,6 +757,7 @@ class SourceResourceService:
             return {
                 "capture": "Source capture cannot proceed until setup, authorization, or upstream availability is resolved.",
                 "parse": "Parsing or indexing failed. Review the error and retry.",
+                "ready": "Source readiness is blocked until authorization, permissions, or upstream availability is restored.",
             }.get(step_id, "Step failed.")
         if status == "running":
             return {
@@ -713,9 +771,10 @@ class SourceResourceService:
         self,
         *,
         resource: SourceResource,
+        status: str | None = None,
         last_error: dict[str, Any] | None,
     ) -> str:
-        status = resource.status
+        status = status or resource.status
         code = (last_error or {}).get("code")
         message = (last_error or {}).get("message")
         if status in {"authorization_required", "reauthorization_required"} or code in {
@@ -736,9 +795,10 @@ class SourceResourceService:
         self,
         *,
         resource: SourceResource,
+        status: str | None = None,
         last_error: dict[str, Any] | None,
     ) -> list[str]:
-        status = resource.status
+        status = status or resource.status
         code = (last_error or {}).get("code")
         if status in {"authorization_required", "reauthorization_required"} or code in {
             "authorization_required",

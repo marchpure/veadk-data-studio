@@ -77,7 +77,7 @@ const productStatusLabel = (status?: string | null) => {
     source_unavailable: 'Source unavailable',
     needs_confirmation: 'Needs confirmation',
     failed: 'Failed',
-    disconnected: 'Source unavailable',
+    disconnected: 'Authorization required',
   }
   return labels[normalized] || status.replace(/_/g, ' ')
 }
