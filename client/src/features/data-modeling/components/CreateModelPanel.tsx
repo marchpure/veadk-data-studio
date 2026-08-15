@@ -104,6 +104,10 @@ export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpen
                 onQuestionsChange={businessQuestions => updateCreateDraft({ businessQuestions })}
                 onToggleTable={toggleCreateTable}
                 onNext={() => setStep(1)}
+                onOpenSourceDetail={sourceId => {
+                  onOpenChange(false)
+                  navigate(`/sources/${sourceId}`)
+                }}
               />
             )}
 
@@ -203,6 +207,7 @@ function DatasourceStep({
   onQuestionsChange,
   onToggleTable,
   onNext,
+  onOpenSourceDetail,
 }: {
   datasources: DataModelingDatasource[]
   profiles: DataSourceProfile[]
@@ -217,6 +222,7 @@ function DatasourceStep({
   onQuestionsChange: (questions: string) => void
   onToggleTable: (table: string) => void
   onNext: () => void
+  onOpenSourceDetail: (sourceId: string) => void
 }) {
   const selectedDatasource = datasources.find(item => item.id === selectedId)
   const profile = selectedDatasource?.canLoadProfile
@@ -306,8 +312,28 @@ function DatasourceStep({
             <div className="mb-2 text-xs font-medium text-[#9aa4ac]">Default recommendations</div>
             {selectedDatasource && !selectedDatasource.canLoadProfile && (
               <div className="rounded-md border border-amber-500/25 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100">
-                <div className="font-medium text-amber-100">{modelingStatusLabel(selectedDatasource.modelingStatus)}</div>
-                <div className="mt-1 text-amber-100/75">{selectedDatasource.reason}</div>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-amber-100">{modelingStatusLabel(selectedDatasource.modelingStatus)}</div>
+                    <div className="mt-1 text-amber-100/75">{selectedDatasource.reason}</div>
+                    {selectedDatasource.nextActions.length > 0 && (
+                      <div className="mt-2 text-xs font-medium text-amber-100/80">
+                        Next: {selectedDatasource.nextActions[0]}
+                      </div>
+                    )}
+                  </div>
+                  {selectedDatasource.sourceType === 'source_resource' && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="border-amber-500/30 text-amber-100 hover:bg-amber-500/10"
+                      onClick={() => onOpenSourceDetail(selectedDatasource.id)}
+                    >
+                      Open source detail
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
             {!selectedDatasource && visibleBlockers.length > 0 && (
