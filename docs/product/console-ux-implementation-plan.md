@@ -284,6 +284,7 @@ Current implementation:
 - The legacy long connector list has been removed from the dialog DOM; users pick a family first, then choose the exact source option.
 - Existing setup forms are preserved behind the selected concrete option: uploads, file URL import, PDF, web page, SQL databases, MongoDB, DynamoDB, Oracle, Databricks, Feishu/Lark, and TOS.
 - Databricks appears under `Warehouses` and reuses the existing OAuth/catalog/schema wizard.
+- Databricks warehouse creation keeps the Add Source flow open after batch create, shows created warehouse Sources, and links users to `Open source`, `Create model`, and the Sources inventory instead of closing directly back to the list.
 - Connector catalog entries are mapped into families from `ConnectorDefinition.category`; `documents` maps to `Business docs`, `object_storage` maps to `Object storage`, `data_lake` maps to `Warehouses`, and database catalog entries map to `Databases`.
 - Each source option shows availability (`available`, `beta`, `planned`) and output chips (`Context`, `Dataset`, `Semantic-ready`, `Dashboard-ready`) where applicable.
 - Connector catalog payloads now expose `provider`, `family`, `limitations`, `required_scopes`, `resource_picker_type`, `status`, `modeling_modes`, and structured `readiness_gates`, so the UI can show readiness constraints without hardcoding them into the Add Source dialog.

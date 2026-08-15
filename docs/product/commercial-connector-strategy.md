@@ -252,7 +252,7 @@ V1 should support these production adapter groups:
 | P0 | SQL database contract | Yes | Users can connect common SQL databases, inspect schema/sample/profile, and generate semantic-ready datasets. |
 | P0 | Web import/crawl | Yes | Users can import URL/page group/sitemap with crawl policy, snapshot refresh, and page evidence. |
 | P0 | Object storage contract | Yes | Users can browse bucket/prefix/object, import files, and sync through a vendor-neutral object storage contract. |
-| P1 | Databricks Source wrapper | Yes | The existing Databricks flow becomes a Source with snapshots/profile/semantic model lineage, instead of staying a separate warehouse wizard. |
+| P1 | Databricks Source wrapper | Yes | The existing Databricks flow becomes a Source with schema/profile handoff, Source detail links, and semantic model next actions instead of staying a separate warehouse wizard. |
 | P1 | Google Workspace | Yes for global beta | Drive/Docs/Sheets follow the same source contract as Feishu; ship after the picker and ACL model are proven. |
 | P1 | Microsoft 365 | Yes for global beta | SharePoint/OneDrive/Excel support admin consent and permission state; prioritize based on target customers. |
 | P2 | Snowflake/BigQuery/Redshift | Yes for selected top vendors | Add only after Databricks Source wrapper and SQL contract are stable. |

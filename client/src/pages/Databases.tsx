@@ -19,6 +19,12 @@ import { isTauriApp, openExternalUrl } from '../lib/tauri-api'
 
 type DatabricksPair = { catalog: string; schema: string | null }
 const pairKey = (p: DatabricksPair) => `${p.catalog}::${p.schema ?? '*'}`
+type DatabricksCreatedSource = {
+  pair: DatabricksPair
+  connectionId: string
+  connectionName: string
+  sourceId?: string
+}
 type SourceConnectorCreateType = `connector:${string}`
 type DatasourceCreateType = ConnectionType | 'upload' | 'url' | 'pdf' | 'web' | SourceConnectorCreateType
 type SourceInventoryTab = 'all' | 'needs_attention'
@@ -221,6 +227,7 @@ export default function DatabasesPage() {
     total: number
     failures: Array<{ pair: DatabricksPair; error: string }>
   } | null>(null)
+  const [databricksCreatedSources, setDatabricksCreatedSources] = useState<DatabricksCreatedSource[]>([])
   const [databricksCatalogFilter, setDatabricksCatalogFilter] = useState('')
 
   const [databricksOAuthConfigured, setDatabricksOAuthConfigured] = useState<boolean>(!isSelfHosted)
@@ -607,6 +614,7 @@ export default function DatabasesPage() {
     setWarehouses(null)
     setSelectedWarehouseId(null)
     setLoadingWarehouses(false)
+    setDatabricksCreatedSources([])
   }
 
   useEffect(() => {
@@ -768,7 +776,9 @@ export default function DatabasesPage() {
     if (selectedPairs.length === 0) return
     const pairs = selectedPairs
     const failures: Array<{ pair: DatabricksPair; error: string }> = []
+    const createdSources: DatabricksCreatedSource[] = []
     let done = 0
+    setDatabricksCreatedSources([])
     setBatchProgress({ done: 0, total: pairs.length, failures: [] })
 
     for (const pair of pairs) {
@@ -777,7 +787,7 @@ export default function DatabasesPage() {
         const suffix = `${pair.catalog}.${pair.schema ?? '*'}`
         const name = prefix ? `${prefix} · ${suffix}` : ''
         if (!oauthTokens) throw new Error('Not signed in to Databricks')
-        await ApiService.createConnection({
+        const connection = await ApiService.createConnection({
           type: 'databricks',
           name: name || undefined,
           connection_obj: {
@@ -794,6 +804,11 @@ export default function DatabasesPage() {
             },
           },
         })
+        createdSources.push({
+          pair,
+          connectionId: connection.id,
+          connectionName: connection.name || name || suffix,
+        })
       } catch (err: any) {
         failures.push({ pair, error: err?.message || 'Unknown error' })
       }
@@ -805,12 +820,25 @@ export default function DatabasesPage() {
     if (succeededCount > 0) {
       queryClient.invalidateQueries({ queryKey: ['datasources'] })
       queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
+      try {
+        const overview = await ApiService.listSourcesOverview()
+        const sourceByConnectionId = new Map(
+          overview.items
+            .filter(item => item.provider === 'databricks' && item.connection_id)
+            .map(item => [item.connection_id as string, item.id]),
+        )
+        setDatabricksCreatedSources(
+          createdSources.map(item => ({
+            ...item,
+            sourceId: sourceByConnectionId.get(item.connectionId),
+          })),
+        )
+      } catch {
+        setDatabricksCreatedSources(createdSources)
+      }
       showToast.success(`Created ${succeededCount} Databricks connection${succeededCount !== 1 ? 's' : ''}`)
     }
-    if (failures.length === 0) {
-      setShowCreateDialog(false)
-      resetForm()
-    } else {
+    if (failures.length > 0) {
       setSelectedPairs(failures.map(f => f.pair))
       showToast.error(`${failures.length} connection${failures.length !== 1 ? 's' : ''} failed`)
     }
@@ -2654,6 +2682,17 @@ export default function DatabasesPage() {
                                 ))}
                               </div>
                             )}
+                            {databricksCreatedSources.length > 0 && (
+                              <DatabricksCreatedSourcesPanel
+                                sources={databricksCreatedSources}
+                                onAddAnother={() => {
+                                  setBatchProgress(null)
+                                  setDatabricksCreatedSources([])
+                                  setSelectedPairs([])
+                                  setDatabricksStep(1)
+                                }}
+                              />
+                            )}
                           </div>
                         ) : (
                           <>
@@ -2943,47 +2982,65 @@ export default function DatabasesPage() {
                     >
                       Close
                     </Button>
-                  ) : selectedType === 'databricks' ? (
-                    <>
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          if (batchProgress && batchProgress.done < batchProgress.total) return
-                          if (databricksStep === 2) {
-                            setDatabricksStep(1)
-                            setBatchProgress(null)
-                          } else {
-                            setShowCreateDialog(false)
-                            resetForm()
-                          }
-                        }}
-                        disabled={!!(batchProgress && batchProgress.done < batchProgress.total) || discovering}
-                        className="border-[#555555] text-white hover:bg-[#3a3a3a]"
-                      >
-                        {databricksStep === 2 ? 'Back' : 'Cancel'}
-                      </Button>
-                      {databricksStep === 1 ? (
-                        <Button
-                          onClick={handleDatabricksDiscover}
-                          disabled={!isCreateFormValid || discovering}
+	                  ) : selectedType === 'databricks' ? (
+	                    <>
+	                      <Button
+	                        variant="outline"
+	                        onClick={() => {
+	                          if (batchProgress && batchProgress.done < batchProgress.total) return
+	                          if (databricksCreatedSources.length > 0 && batchProgress?.failures.length === 0) {
+	                            setShowCreateDialog(false)
+	                            resetForm()
+	                            return
+	                          }
+	                          if (databricksStep === 2) {
+	                            setDatabricksStep(1)
+	                            setBatchProgress(null)
+	                            setDatabricksCreatedSources([])
+	                          } else {
+	                            setShowCreateDialog(false)
+	                            resetForm()
+	                          }
+	                        }}
+	                        disabled={!!(batchProgress && batchProgress.done < batchProgress.total) || discovering}
+	                        className="border-[#555555] text-white hover:bg-[#3a3a3a]"
+	                      >
+	                        {databricksCreatedSources.length > 0 && batchProgress?.failures.length === 0 ? 'Close' : databricksStep === 2 ? 'Back' : 'Cancel'}
+	                      </Button>
+	                      {databricksStep === 1 ? (
+	                        <Button
+	                          onClick={handleDatabricksDiscover}
+	                          disabled={!isCreateFormValid || discovering}
                           className={`${isCreateFormValid && !discovering ? 'bg-brand-orange hover:bg-brand-orange/90' : 'bg-gray-500 cursor-not-allowed'} flex items-center gap-2`}
                         >
-                          {discovering && <Loader2 className="w-4 h-4 animate-spin" />}
-                          Next →
-                        </Button>
-                      ) : (
-                        <Button
-                          onClick={handleDatabricksBatchCreate}
-                          disabled={!isCreateFormValid || !!(batchProgress && batchProgress.done < batchProgress.total)}
-                          className={`${isCreateFormValid && !batchProgress ? 'bg-brand-orange hover:bg-brand-orange/90' : 'bg-gray-500 cursor-not-allowed'} flex items-center gap-2`}
-                        >
-                          {batchProgress && batchProgress.done < batchProgress.total && <Loader2 className="w-4 h-4 animate-spin" />}
-                          {batchProgress && batchProgress.failures.length > 0 && batchProgress.done === batchProgress.total
-                            ? `Retry ${batchProgress.failures.length} failed`
-                            : `Create ${selectedPairs.length} connection${selectedPairs.length !== 1 ? 's' : ''}`}
-                        </Button>
-                      )}
-                    </>
+	                          {discovering && <Loader2 className="w-4 h-4 animate-spin" />}
+	                          Next →
+	                        </Button>
+	                      ) : (
+	                        <Button
+	                          onClick={handleDatabricksBatchCreate}
+	                          disabled={
+	                            !isCreateFormValid ||
+	                            !!(batchProgress && batchProgress.done < batchProgress.total) ||
+	                            (databricksCreatedSources.length > 0 && batchProgress?.failures.length === 0)
+	                          }
+	                          className={`${
+	                            isCreateFormValid &&
+	                            (!batchProgress || (batchProgress.done === batchProgress.total && batchProgress.failures.length > 0)) &&
+	                            !(databricksCreatedSources.length > 0 && batchProgress?.failures.length === 0)
+	                              ? 'bg-brand-orange hover:bg-brand-orange/90'
+	                              : 'bg-gray-500 cursor-not-allowed'
+	                          } flex items-center gap-2`}
+	                        >
+	                          {batchProgress && batchProgress.done < batchProgress.total && <Loader2 className="w-4 h-4 animate-spin" />}
+	                          {databricksCreatedSources.length > 0 && batchProgress?.failures.length === 0
+	                            ? 'Sources created'
+	                            : batchProgress && batchProgress.failures.length > 0 && batchProgress.done === batchProgress.total
+	                              ? `Retry ${batchProgress.failures.length} failed`
+	                              : `Create ${selectedPairs.length} connection${selectedPairs.length !== 1 ? 's' : ''}`}
+	                        </Button>
+	                      )}
+	                    </>
                   ) : isSourceConnectorType(selectedType) ? (
                     <Button
                       variant="outline"
@@ -3495,6 +3552,72 @@ function DirectSourceProcessingPanel({
             </Button>
             <Button type="button" size="sm" variant="ghost" onClick={onAddAnother} className="text-gray-300 hover:text-white">
               Add another source
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DatabricksCreatedSourcesPanel({
+  sources,
+  onAddAnother,
+}: {
+  sources: DatabricksCreatedSource[]
+  onAddAnother: () => void
+}) {
+  const mappedCount = sources.filter(source => source.sourceId).length
+
+  return (
+    <div className="rounded-lg border border-green-700/40 bg-green-950/20 p-4">
+      <div className="flex items-start gap-3">
+        <CheckCircle2 className="mt-0.5 h-5 w-5 flex-shrink-0 text-green-400" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-green-100">
+            {sources.length} Databricks warehouse source{sources.length !== 1 ? 's' : ''} created
+          </div>
+          <p className="mt-1 text-xs text-green-100/75">
+            {mappedCount === sources.length
+              ? 'Each warehouse now appears in Sources with schema/profile evidence for Data Modeling.'
+              : 'The warehouse connections were created. Sources inventory is refreshing before every direct source link is available.'}
+          </p>
+
+          <div className="mt-3 space-y-2">
+            {sources.map(source => (
+              <div key={source.connectionId} className="rounded border border-green-700/30 bg-[#101010] px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm text-white">{source.connectionName}</div>
+                    <div className="text-[11px] text-gray-400">
+                      Warehouse · {source.pair.catalog}.{source.pair.schema ?? '*'}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {source.sourceId ? (
+                      <Button asChild size="sm" className="bg-brand-orange hover:bg-brand-orange/90">
+                        <Link to={`/sources/${source.sourceId}`}>Open source</Link>
+                      </Button>
+                    ) : (
+                      <Button asChild size="sm" variant="outline" className="border-[#555555] text-white hover:bg-[#3a3a3a]">
+                        <Link to="/sources">Open Sources</Link>
+                      </Button>
+                    )}
+                    <Button asChild size="sm" variant="outline" className="border-[#555555] text-white hover:bg-[#3a3a3a]">
+                      <Link to="/data-models">Create model</Link>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="ghost" onClick={onAddAnother} className="text-green-100 hover:text-white">
+              Add another warehouse source
+            </Button>
+            <Button asChild size="sm" variant="ghost" className="text-green-100 hover:text-white">
+              <Link to="/sources">Review Sources inventory</Link>
             </Button>
           </div>
         </div>
