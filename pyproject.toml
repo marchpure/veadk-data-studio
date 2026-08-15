@@ -1,0 +1,150 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "project-x"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.116.1",
+  "httpx>=0.28.1",
+  "mcp[cli]>=1.28.1",
+  "fastmcp>=2.11.0",
+  "openai-agents[litellm,sqlalchemy]>=0.7.0",
+  "psycopg2-binary>=2.9.10",
+  "pymongo>=4.13.2",
+  "python-dotenv>=1.0.0",
+  "sqlalchemy>=2.0.31",
+  "alembic>=1.13.2",
+  "aiosqlite>=0.20.0",
+  "cryptography>=48.0.1",
+  "python-dateutil>=2.8.2",
+  "litellm>=1.84.0",
+  "Mako>=1.3.12",
+  "authlib>=1.6.12",
+  "urllib3>=2.7.0",
+  "python-multipart>=0.0.31",
+  "boto3>=1.35.0",
+  "uvicorn>=0.30.0",
+  "certifi>=2024.0.0",
+  "sqlglot>=27.8.0",
+  "ruff>=0.8.0",
+  "asyncpg>=0.30.0",
+  "aiomysql>=0.2.0",
+  "aioodbc>=0.5.0",
+  "pyodbc>=5.2.0",
+  "oracledb>=2.4.1",
+  "motor>=3.7.1",
+  "databricks-sql-connector>=3.0.0",
+  "aiofiles>=24.1.0",
+  "chardet>=5.0.0",
+  "openpyxl>=3.1.0",
+  "duckdb>=1.1.0",
+  "duckdb-extensions>=0.1.0",
+  "duckdb-extension-excel>=0.1.0",
+  "posthog>=6.7.7",
+  "greenlet>=3.0.0",
+  "email-validator>=2.1.0",
+  "resend>=2.5.0",
+  "claude-agent-sdk>=0.1.37",
+  "fastapi-users[sqlalchemy]>=15.0.0",
+  "google-auth>=2.0.0",
+  "pytz>=2024.1",
+  "slack-sdk>=3.27.0",
+  "croniter>=2.0.0",
+  "lark-oapi>=1.4.23",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=9.0.3",
+  "pytest-asyncio>=0.23.0",
+  "pytest-cov>=4.1.0",
+  "faker>=20.0.0",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+  ".git",
+  ".venv",
+  "__pycache__",
+  "*.pyc",
+  "*.pyo",
+  "*.pyd",
+  ".Python",
+  "build",
+  "dist",
+  "migrations",
+]
+
+[tool.ruff.lint]
+select = [
+  "E",  # pycodestyle errors
+  "W",  # pycodestyle warnings
+  "F",  # pyflakes
+  "I",  # isort
+  "B",  # flake8-bugbear
+  "C4", # flake8-comprehensions
+  "UP", # pyupgrade
+]
+ignore = [
+  "E501",  # line too long (handled by formatter)
+  "B008",  # do not perform function calls in argument defaults
+  "W191",  # indentation contains tabs
+  "F821",  # undefined name (for forward references)
+  "W293",  # blank line contains whitespace
+  "B904",  # raise without from inside except
+  "E722",  # bare except
+  "UP038", # use X | Y in isinstance
+  "B007",  # unused loop variable
+  "UP042", # str-Enum migration to StrEnum (behavioral risk)
+  "B012",  # return/break/continue in finally (intentional cleanup paths)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.uv]
+exclude-newer = "2026-08-05T00:00:00Z"
+constraint-dependencies = [
+  "aiohttp>=3.14.2",
+  "starlette>=1.3.1",
+  "joserfc>=1.6.8",
+  "pyjwt>=2.13.0",
+  "idna>=3.15",
+  "pyasn1>=0.6.4",
+  "pydantic-settings>=2.14.2",
+  "setuptools>=83.0.0",
+]
+
+[dependency-groups]
+dev = ["pytest-asyncio>=1.1.0", "pyinstaller>=6.0.0", "pytest>=9.0.3"]
+
+[tool.ruff.lint.per-file-ignores]
+"server/main.py" = ["E402"]
+"server/services/dataset_storage.py" = ["E402"]
+"server/services/slack_agent_service.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+  "server",
+  "models",
+  "routers",
+  "services",
+  "repositories",
+  "schemas",
+  "utils",
+  "db",
+  "tools",
+]

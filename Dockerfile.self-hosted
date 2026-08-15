@@ -1,0 +1,123 @@
+# All-in-one self-hosted Byaan container
+# Includes: PostgreSQL 15, Python backend, Caddy reverse proxy, built frontend
+
+# Stage 1: Frontend build
+# The frontend produces static assets, so build it on the native builder
+# platform to avoid QEMU crashes during arm64 dependency installation.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-builder
+
+WORKDIR /build
+
+ARG VITE_IS_HOSTED
+ARG VITE_IS_SELF_HOSTED
+
+RUN (npm install -g pnpm@10.18.3) || (sleep 10 && npm install -g pnpm@10.18.3) || (sleep 30 && npm install -g pnpm@10.18.3)
+
+COPY client/package*.json client/pnpm-lock.yaml* client/.npmrc /build/client/
+WORKDIR /build/client
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile || (sleep 15 && pnpm install --frozen-lockfile) || (sleep 30 && pnpm install --frozen-lockfile)
+
+COPY client/ /build/client/
+RUN pnpm exec vite --version && pnpm build
+
+# Stage 2: Python dependency build (runs in parallel with frontend-builder via BuildKit)
+FROM python:3.11-slim AS python-builder
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.11.3 /uv /usr/local/bin/uv
+
+COPY pyproject.toml uv.lock /app/
+
+ENV UV_HTTP_TIMEOUT=300
+RUN --mount=type=cache,target=/root/.cache/uv UV_LINK_MODE=copy uv sync --frozen --no-install-project
+
+# Stage 3: Runtime image
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install runtime dependencies + PostgreSQL + Caddy
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    libffi-dev \
+    shared-mime-info \
+    libcairo2 \
+    libglib2.0-0 \
+    libgobject-2.0-0 \
+    gnupg2 \
+    supervisor \
+    lsb-release \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+    && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-15 postgresql-client-15 caddy gettext-base \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install MS ODBC driver (optional, for SQL Server connections)
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" > /etc/apt/sources.list.d/mssql-release.list \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 || true \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.11.3 /uv /usr/local/bin/uv
+
+# Copy pre-built frontend
+COPY --from=frontend-builder /build/client/dist /app/client/dist
+
+# Copy pre-built Python venv and server code
+COPY --from=python-builder /app/.venv /app/.venv
+COPY pyproject.toml uv.lock /app/
+COPY server/ /app/server/
+
+# Pre-compile Python bytecode
+RUN .venv/bin/python -m compileall -q /app/server/ || true
+
+# Copy self-hosted config files
+COPY docker/self-hosted/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker/self-hosted/Caddyfile.template /etc/caddy/Caddyfile.template
+COPY docker/self-hosted/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/self-hosted/start-backend.sh /app/start-backend.sh
+
+RUN chmod +x /usr/local/bin/entrypoint.sh /app/start-backend.sh
+
+# Create non-root user for backend
+RUN useradd --create-home --shell /bin/bash byaan
+
+# Create data directory and cache for byaan user
+RUN mkdir -p /data/postgres /data/uploads /data/backups /data/logs /home/byaan/.cache/uv
+
+# Setup PostgreSQL
+RUN mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql
+RUN mkdir -p /var/lib/postgresql/15/main && chown -R postgres:postgres /var/lib/postgresql
+
+# Set ownership for byaan user
+RUN chown -R byaan:byaan /app /data/uploads /data/backups /data/logs /home/byaan
+
+# Environment variables
+ENV PYTHONPATH=/app
+ENV DATA_DIR=/data
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+# Expose HTTP and HTTPS ports
+EXPOSE 80 443
+
+# Volume for persistent data
+VOLUME ["/data"]
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

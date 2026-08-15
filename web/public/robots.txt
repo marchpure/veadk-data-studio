@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /share/
+Disallow: /n/
+
+Sitemap: https://www.byaan.ai/sitemap.xml

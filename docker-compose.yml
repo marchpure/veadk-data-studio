@@ -1,0 +1,67 @@
+# Docker Compose for LOCAL/COMMUNITY development (SQLite, no PostgreSQL)
+# Usage: make dev | make dev-build | make stop
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: ./server/Dockerfile
+      target: runtime
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-public.ecr.aws/docker/library/python:3.11-slim}
+        UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        INSTALL_MSSQL_ODBC: ${INSTALL_MSSQL_ODBC:-false}
+        INSTALL_CLAUDE_CODE: ${INSTALL_CLAUDE_CODE:-false}
+    ports:
+      - "${BACKEND_PORT:-17433}:8000"
+      - "8020:8020"
+    volumes:
+      - .:/app
+      - /app/.venv
+      - ./server/.data:/app/server/.data
+    environment:
+      - PYTHONPATH=/app
+      - HOME=/root
+      - APP_MODE=community
+      - VITE_DEV_MODE=true
+      - BYAAN_LOCAL_AUTH_IMPERSONATION_ENABLED=true
+      - DATA_SKILL_AGENT_PROVIDER_TIMEOUT_SECONDS=${DATA_SKILL_AGENT_PROVIDER_TIMEOUT_SECONDS:-120}
+      - BYAAN_HOST_PROJECT_DIR=${PWD}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_ENDPOINT=${LLM_ENDPOINT:-}
+      - LLM_MODEL=${LLM_MODEL:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  client:
+    build:
+      context: .
+      dockerfile: ./client/Dockerfile
+      target: dev
+    ports:
+      - "${FRONTEND_PORT:-17434}:5173"
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+      - /app/.pnpm-store
+    environment:
+      - VITE_API_URL=http://server:8000
+      - VITE_DEV_MODE=true
+      - FRONTEND_PORT=${FRONTEND_PORT:-17434}
+      - WAIT_FOR_BACKEND=true
+      - PRINT_CLIENT_URL=false
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5173/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s

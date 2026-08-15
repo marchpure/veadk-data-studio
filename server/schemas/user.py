@@ -1,0 +1,23 @@
+from uuid import UUID
+
+from fastapi_users import schemas
+
+
+class UserRead(schemas.BaseUser[UUID]):
+    """Schema for reading user data."""
+
+    full_name: str | None = None
+    avatar_url: str | None = None
+
+
+class UserCreate(schemas.BaseUserCreate):
+    """Schema for creating a new user."""
+
+    full_name: str | None = None
+
+
+class UserUpdate(schemas.BaseUserUpdate):
+    """Schema for updating user data."""
+
+    full_name: str | None = None
+    avatar_url: str | None = None
