@@ -1016,6 +1016,8 @@ async def test_feishu_picker_import_syncs_real_resource_types_without_placeholde
     for result in imported["results"]:
         resource = result["resource"]
         assert result["status"] == "ready"
+        assert result["already_added"] is False
+        assert result["resource_action"] == "created"
         assert resource["status"] == "ready"
         assert resource["status"] != "needs_confirmation"
         assert str(resource["source_connection_id"]) == str(connection.id)
@@ -1060,6 +1062,8 @@ async def test_feishu_picker_import_syncs_real_resource_types_without_placeholde
 
     assert reimported_wiki["succeeded"] == 1
     assert reimported_wiki["failed"] == 0
+    assert reimported_wiki["results"][0]["already_added"] is True
+    assert reimported_wiki["results"][0]["resource_action"] == "reused"
     wiki_resource = reimported_wiki["results"][0]["resource"]
     assert wiki_resource["selection_config_json"]["imported_from"] == "datasources_connector_picker"
     assert wiki_resource["selection_config_json"]["metadata"]["node_token"] == "wiki_node_1"

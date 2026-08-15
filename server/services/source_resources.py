@@ -137,7 +137,7 @@ class SourceResourceService:
         adapter = adapter or get_connector_adapter(connection.provider)
         results: list[dict[str, Any]] = []
         for selection in payload.selections:
-            resource = await self._get_or_create_imported_resource(
+            resource, already_added = await self._get_or_create_imported_resource(
                 session=session,
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -170,6 +170,8 @@ class SourceResourceService:
                     "resource": await self.resource_payload(session=session, resource=resource),
                     "status": status,
                     "error": error,
+                    "already_added": already_added,
+                    "resource_action": "reused" if already_added else "created",
                 }
             )
         await session.commit()
@@ -1117,7 +1119,7 @@ class SourceResourceService:
         connection: SourceConnection,
         payload: SourceResourceImportRequest,
         selection,
-    ) -> SourceResource:
+    ) -> tuple[SourceResource, bool]:
         selection_config_json = self._selection_config_json(selection)
         existing = await session.scalar(
             select(SourceResource)
@@ -1142,7 +1144,7 @@ class SourceResourceService:
                 **(existing.sync_config_json or {}),
                 "schedule": payload.schedule,
             }
-            return existing
+            return existing, True
         resource = SourceResource(
             tenant_id=tenant_id,
             source_connection_id=connection.id,
@@ -1160,7 +1162,7 @@ class SourceResourceService:
         )
         session.add(resource)
         await session.flush()
-        return resource
+        return resource, False
 
     def _selection_config_json(self, selection) -> dict[str, Any]:
         return {

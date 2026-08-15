@@ -294,6 +294,7 @@ Current implementation:
 - Planned entries use `planned:<connector_id>` and never set `selectedType`, so they cannot open a working setup form by accident.
 - Selecting a planned entry shows a read-only commercial readiness message sourced from the catalog limitations, including roadmap-only picker status and commercial readiness gates.
 - If a family only has planned entries, the dialog automatically selects the first planned entry instead of keeping the previous family's setup form visible.
+- Connector import results now carry explicit already-added state: initial imports return `resource_action = created`, repeat imports reuse the existing Source Resource with `resource_action = reused` / `already_added = true`, and the processing card labels the result as `Already in Sources` with open/reindex next actions.
 - The `AddSourceDialog` component extraction is intentionally deferred until post-import processing and source detail work define the reusable boundaries; this keeps this slice focused on behavior without moving a large mixed form tree.
 
 Acceptance:

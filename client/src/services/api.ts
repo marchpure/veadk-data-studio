@@ -1235,6 +1235,8 @@ export interface SourceResourceImportResult {
   resource: SourceResource
   status: string
   error?: { code?: string; message: string; permanent?: boolean } | null
+  already_added?: boolean
+  resource_action?: 'created' | 'reused'
 }
 
 export interface SourceResourceImportResponse {

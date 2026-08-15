@@ -970,6 +970,10 @@ function ImportProcessingCard({ result }: { result: SourceResourceImportResult }
   const title = result.resource?.name || result.selection.name || result.selection.external_id
   const errorMessage = result.error?.message || processing?.last_error?.message
   const nextActions = processing?.next_actions || []
+  const reusedExisting = result.already_added || result.resource_action === 'reused'
+  const successMessage = reusedExisting
+    ? 'Already in Sources. Snapshot, context, and projection state were refreshed.'
+    : processing?.message || `Snapshot ${result.resource?.latest_snapshot_id || 'created'}${result.resource?.projected_dataset_id ? ` · dataset ${result.resource.projected_dataset_id}` : ''}`
 
   return (
     <div className="rounded border border-[#333333] bg-[#242424] p-3">
@@ -989,13 +993,18 @@ function ImportProcessingCard({ result }: { result: SourceResourceImportResult }
             <span className="rounded bg-[#1a1a1a] px-2 py-0.5 text-[10px] uppercase text-gray-400">
               {resourceLabel(result.selection.resource_type)}
             </span>
+            {reusedExisting && (
+              <span className="rounded border border-green-700/40 bg-green-900/20 px-2 py-0.5 text-[10px] uppercase text-green-300">
+                Already in Sources
+              </span>
+            )}
           </div>
           <div className={`mt-1 text-xs ${tone === 'failed' ? 'text-red-300' : tone === 'ready' ? 'text-green-300' : 'text-gray-300'}`}>
             {tone === 'failed'
               ? `${result.status}${errorMessage ? ` · ${errorMessage}` : ''}`
               : tone === 'needs_confirmation'
                 ? processing?.message || errorMessage || 'Review and confirm this source before retrying sync.'
-              : processing?.message || `Snapshot ${result.resource?.latest_snapshot_id || 'created'}${result.resource?.projected_dataset_id ? ` · dataset ${result.resource.projected_dataset_id}` : ''}`}
+              : successMessage}
           </div>
 
           <div className="mt-3 grid grid-cols-7 gap-1">
@@ -1019,7 +1028,7 @@ function ImportProcessingCard({ result }: { result: SourceResourceImportResult }
 
           {nextActions.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5">
-              {nextActions.slice(0, 3).map(action => (
+              {(reusedExisting ? ['Open source detail', 'Reindex source', ...nextActions] : nextActions).slice(0, 3).map(action => (
                 <span key={action} className="rounded border border-[#444444] px-2 py-1 text-[11px] text-gray-300">
                   {action}
                 </span>
