@@ -477,8 +477,8 @@ Current implementation:
 - SourceOverview rows are mapped into explicit modeling handoff states:
   - `supported` for ready relational database sources.
   - `supported` with `warehouse` mode for ready Databricks/warehouse sources.
-  - `needs_projection` for files, object storage, Feishu Sheets/Base, extracted tables, and any source with `projected_dataset_id`.
-  - `context_only` for documents and web sources that can support definitions, policies, examples, and evidence but cannot be the production fact source for metrics.
+  - `needs_projection` for sources with a confirmed `projected_dataset_id`, parsed table assets, Feishu Sheets/Base, extracted tables, and tabular file projections such as CSV/Excel.
+  - `context_only` for documents, web sources, PDF/Docx/PPTX uploads, and object-storage objects that only provide indexed evidence. They can support definitions, policies, examples, and evidence but cannot be the production fact source for metrics.
   - `permission_required` for upstream permission loss.
   - `reauthorization_required` for sources that need connector authorization before modeling handoff.
   - `source_unavailable` when the upstream system or resource cannot be reached.

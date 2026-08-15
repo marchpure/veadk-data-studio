@@ -383,7 +383,7 @@ function sourceOverviewBlocker(item: SourceOverviewItem): { status: DataModeling
   if (status === 'needs confirmation') {
     return {
       status: 'needs_projection',
-      reason: 'Confirm the selected resource or projection before modeling.',
+      reason: needsConfirmationReason(item),
     }
   }
   if (item.context_index_status === 'failed' && isContextSource(item)) {
@@ -426,14 +426,48 @@ function normalizeStatusText(value: unknown): string {
 function isProjectionSource(item: SourceOverviewItem): boolean {
   const resourceType = String(item.resource_type ?? '')
   return Boolean(item.projected_dataset_id)
-    || item.family === 'files'
-    || item.family === 'object_storage'
-    || ['feishu_sheet', 'feishu_base', 'extracted_table'].includes(resourceType)
+    || hasParsedTables(item)
+    || isProjectionResourceType(resourceType)
+}
+
+function isProjectionResourceType(resourceType: string): boolean {
+  return [
+    'csv',
+    'excel',
+    'xlsx',
+    'xlsm',
+    'feishu_sheet',
+    'feishu_base',
+    'extracted_table',
+  ].includes(resourceType)
+}
+
+function hasParsedTables(item: SourceOverviewItem): boolean {
+  return Number(item.parsed_asset_counts?.tables ?? 0) > 0
+}
+
+function hasIndexedEvidence(item: SourceOverviewItem): boolean {
+  return item.context_index_status === 'indexed' && Number(item.parsed_asset_counts?.evidence ?? 0) > 0
+}
+
+function isContextResourceType(resourceType: string): boolean {
+  return [
+    'file',
+    'pdf',
+    'web',
+    'feishu_doc',
+    'feishu_wiki',
+    'tos_bucket',
+    'tos_prefix',
+    'tos_object',
+  ].includes(resourceType)
 }
 
 function isContextSource(item: SourceOverviewItem): boolean {
+  const resourceType = String(item.resource_type ?? '')
   if (item.family === 'documents' || item.family === 'web') return true
-  return item.context_index_status === 'indexed' && item.parsed_asset_counts.evidence > 0
+  if (isContextResourceType(resourceType) && hasIndexedEvidence(item)) return true
+  return hasIndexedEvidence(item)
 }
 
 function modeForFamily(item: SourceOverviewItem): DataModelingMode | undefined {
@@ -463,6 +497,20 @@ function contextOnlyReason(item: SourceOverviewItem): string {
     return 'No context index is available yet. Add context indexing before using this source as modeling evidence.'
   }
   return 'Indexed context can support definitions, policies, and evidence, but cannot be the production fact source for metrics.'
+}
+
+function needsConfirmationReason(item: SourceOverviewItem): string {
+  const actions = (item.next_actions ?? []).map(normalizeStatusText)
+  if (item.family === 'object_storage' && actions.some(action => action.includes('confirm large object sync'))) {
+    return 'Confirm large object sync before Data Modeling can profile, project, or index this object.'
+  }
+  if (isProjectionSource(item)) {
+    return 'Confirm the projected dataset before production semantic modeling.'
+  }
+  if (isContextSource(item)) {
+    return 'Confirm the selected resource before using it as modeling evidence.'
+  }
+  return 'Confirm the selected resource before modeling.'
 }
 
 function normalizeSourceOverviewKind(item: SourceOverviewItem): DataSourceKind {
