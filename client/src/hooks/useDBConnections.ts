@@ -614,3 +614,26 @@ export function useSourceOverview() {
     },
   })
 }
+
+export function useSourceOverviewItem(sourceId?: string) {
+  return useQuery({
+    queryKey: [...sourceOverviewKeys.overview(), sourceId],
+    queryFn: async () => {
+      if (!sourceId) throw new Error('Missing source id')
+      const response = await ApiService.listSourcesOverview()
+      const item = response.items.find(source => source.id === sourceId)
+      if (!item) throw new Error('Source not found')
+      return item
+    },
+    enabled: !!sourceId,
+    staleTime: 60 * 1000,
+    gcTime: 5 * 60 * 1000,
+    retry: (failureCount, error) => {
+      const message = error instanceof Error ? error.message.toLowerCase() : ''
+      if (message.includes('not found') || message.includes('no tenant specified') || message.includes('workspace')) {
+        return false
+      }
+      return failureCount < 3
+    },
+  })
+}

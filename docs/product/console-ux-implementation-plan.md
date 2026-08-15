@@ -388,10 +388,12 @@ Tabs:
 
 Current implementation:
 
-- `client/src/pages/SourceDetailPage.tsx` implements the read-only MVP for `SourceResource` sources.
+- `client/src/pages/SourceDetailPage.tsx` implements the read-only MVP for every `SourceOverviewItem`.
 - `/sources/:sourceId` is registered in enterprise, community/local, and legacy local route trees.
-- The Sources inventory links `source_kind = source_resource` rows to `/sources/:sourceId`; connection-backed sources still use the existing edit sidebar.
-- The page reads `GET /source-resources/{resource_id}`, `GET /source-resources/{resource_id}/snapshots`, `GET /source-resources/{resource_id}/processing`, `GET /source-resources/{resource_id}/parsed-assets`, `GET /source-resources/{resource_id}/lineage`, `GET /source-resources/{resource_id}/consumers`, and `POST /knowledge/search`.
+- The Sources inventory links every source row to `/sources/:sourceId`; database and warehouse rows still keep the existing edit sidebar as a separate action.
+- The page first resolves the row through `GET /sources/overview` so it can render connection, dataset, and source-resource sources without guessing the backing table.
+- For `source_kind = source_resource`, the page reads `GET /source-resources/{resource_id}`, `GET /source-resources/{resource_id}/snapshots`, `GET /source-resources/{resource_id}/processing`, `GET /source-resources/{resource_id}/parsed-assets`, `GET /source-resources/{resource_id}/lineage`, `GET /source-resources/{resource_id}/consumers`, and `POST /knowledge/search`.
+- For `source_kind = connection` or `dataset`, the page renders a SourceOverview-backed read-only detail and calls `GET /datasources/{datasource_id}/schema` to show schema/profile tables where available.
 - The page shows metric cards for snapshot capture, dataset projection, context index status, and evidence count.
 - The Processing section uses the same commercial step labels as post-import processing: `Capture`, `Parse`, `Detect tables`, `Normalize dataset`, `Index context`, `Generate semantic suggestions`, and `Ready`.
 - Overview shows external identity, source URL, sync mode, and timestamps.

@@ -9,11 +9,13 @@ import {
   useSourceResource,
   useSourceResourceConsumers,
   useSourceResourceLineage,
+  useSourceOverviewItem,
   useSourceResourceParsedAssets,
   useSourceResourceProcessing,
   useSourceResourceSnapshots,
 } from '../hooks/useDBConnections'
-import type { SourceConsumerItem, SourceLineageEdge, SourceLineageNode, SourceParsedAssetItem, SourceResource, SourceResourceProcessing, SourceSnapshot } from '../services/api'
+import { ApiService, isMultiDatabaseSchema, type DatabaseSchemaResponse, type SourceConsumerItem, type SourceLineageEdge, type SourceLineageNode, type SourceOverviewItem, type SourceParsedAssetItem, type SourceResource, type SourceResourceProcessing, type SourceSnapshot } from '../services/api'
+import { useQuery } from '@tanstack/react-query'
 
 const sourceDetailSteps = [
   'Capture',
@@ -67,12 +69,26 @@ const processingIndex = (resource?: SourceResource, processing?: SourceResourceP
 export default function SourceDetailPage() {
   const { sourceId } = useParams()
   const [evidenceQuery, setEvidenceQuery] = useState('')
-  const resourceQuery = useSourceResource(sourceId)
-  const snapshotsQuery = useSourceResourceSnapshots(sourceId)
-  const processingQuery = useSourceResourceProcessing(sourceId)
-  const parsedAssetsQuery = useSourceResourceParsedAssets(sourceId)
-  const lineageQuery = useSourceResourceLineage(sourceId)
-  const consumersQuery = useSourceResourceConsumers(sourceId)
+  const overviewQuery = useSourceOverviewItem(sourceId)
+  const overview = overviewQuery.data
+  const isSourceResource = overview?.source_kind === 'source_resource'
+  const resourceQuery = useSourceResource(isSourceResource ? sourceId : undefined)
+  const snapshotsQuery = useSourceResourceSnapshots(isSourceResource ? sourceId : undefined)
+  const processingQuery = useSourceResourceProcessing(isSourceResource ? sourceId : undefined)
+  const parsedAssetsQuery = useSourceResourceParsedAssets(isSourceResource ? sourceId : undefined)
+  const lineageQuery = useSourceResourceLineage(isSourceResource ? sourceId : undefined)
+  const consumersQuery = useSourceResourceConsumers(isSourceResource ? sourceId : undefined)
+  const schemaQuery = useQuery({
+    queryKey: ['source-detail-schema', sourceId],
+    queryFn: async () => {
+      if (!sourceId) throw new Error('Missing source id')
+      return ApiService.getDatasourceSchema(sourceId)
+    },
+    enabled: !!sourceId && !!overview && overview.source_kind !== 'source_resource',
+    staleTime: 60 * 1000,
+    gcTime: 5 * 60 * 1000,
+    retry: false,
+  })
   const knowledgeQuery = useKnowledgeSearch(sourceId, evidenceQuery, !!sourceId && !!resourceQuery.data?.knowledge_resource)
 
   const resource = resourceQuery.data
@@ -89,7 +105,7 @@ export default function SourceDetailPage() {
   const fragmentHint = typeof parsedAssets?.metadata?.fragment_hint === 'string' ? parsedAssets.metadata.fragment_hint : null
   const evidenceCount = parsedAssets?.evidence_count ?? resource?.knowledge_resource?.evidence_count ?? processing?.evidence_count ?? 0
 
-  if (resourceQuery.isLoading) {
+  if (overviewQuery.isLoading || (isSourceResource && resourceQuery.isLoading)) {
     return (
       <div className="flex h-full items-center justify-center bg-[#0a0a0a] text-gray-300">
         <Loader2 className="mr-2 h-5 w-5 animate-spin text-brand-orange" />
@@ -98,7 +114,7 @@ export default function SourceDetailPage() {
     )
   }
 
-  if (resourceQuery.error || !resource) {
+  if (overviewQuery.error || !overview || (isSourceResource && (resourceQuery.error || !resource))) {
     return (
       <div className="min-h-screen bg-[#0a0a0a] p-8 text-white">
         <div className="mx-auto max-w-4xl">
@@ -110,7 +126,40 @@ export default function SourceDetailPage() {
               <AlertCircle className="mt-0.5 h-5 w-5 text-red-300" />
               <div>
                 <h1 className="text-lg font-semibold text-white">Source not available</h1>
-                <p className="mt-1 text-sm text-red-100/80">{resourceQuery.error?.message || 'The source resource could not be loaded.'}</p>
+                <p className="mt-1 text-sm text-red-100/80">{overviewQuery.error?.message || resourceQuery.error?.message || 'The source could not be loaded.'}</p>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
+  if (!isSourceResource) {
+    return (
+      <OverviewSourceDetail
+        source={overview}
+        schema={schemaQuery.data}
+        schemaLoading={schemaQuery.isLoading}
+        schemaError={schemaQuery.error instanceof Error ? schemaQuery.error.message : null}
+      />
+    )
+  }
+
+  const sourceResource = resource
+  if (!sourceResource) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0a] p-8 text-white">
+        <div className="mx-auto max-w-4xl">
+          <Button asChild variant="ghost" className="mb-6 text-gray-300 hover:text-white">
+            <Link to="/sources"><ArrowLeft className="h-4 w-4" /> Sources</Link>
+          </Button>
+          <Card className="border-red-900/40 bg-red-950/20 p-6">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-5 w-5 text-red-300" />
+              <div>
+                <h1 className="text-lg font-semibold text-white">Source not available</h1>
+                <p className="mt-1 text-sm text-red-100/80">The source resource could not be loaded.</p>
               </div>
             </div>
           </Card>
@@ -129,23 +178,23 @@ export default function SourceDetailPage() {
             </Button>
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-md bg-brand-orange/15">
-                {resource.projected_dataset_id ? <Database className="h-5 w-5 text-brand-orange" /> : <FileText className="h-5 w-5 text-brand-orange" />}
+                {sourceResource.projected_dataset_id ? <Database className="h-5 w-5 text-brand-orange" /> : <FileText className="h-5 w-5 text-brand-orange" />}
               </div>
               <div>
-                <h1 className="text-2xl font-semibold tracking-normal">{resource.name}</h1>
-                <p className="mt-1 text-sm capitalize text-gray-400">{typeLabel(resource.resource_type)} · {resource.visibility}</p>
+                <h1 className="text-2xl font-semibold tracking-normal">{sourceResource.name}</h1>
+                <p className="mt-1 text-sm capitalize text-gray-400">{typeLabel(sourceResource.resource_type)} · {sourceResource.visibility}</p>
               </div>
             </div>
           </div>
-          <span className={`rounded border px-3 py-1.5 text-sm ${resource.status === 'ready' ? 'border-green-700/50 bg-green-900/20 text-green-200' : 'border-amber-700/50 bg-amber-900/20 text-amber-200'}`}>
-            {productStatusLabel(resource.status)}
+          <span className={`rounded border px-3 py-1.5 text-sm ${sourceResource.status === 'ready' ? 'border-green-700/50 bg-green-900/20 text-green-200' : 'border-amber-700/50 bg-amber-900/20 text-amber-200'}`}>
+            {productStatusLabel(sourceResource.status)}
           </span>
         </div>
 
         <div className="grid gap-4 md:grid-cols-4">
-          <Metric label="Snapshot" value={resource.latest_snapshot_id ? 'Captured' : 'Missing'} tone={resource.latest_snapshot_id ? 'ready' : 'warn'} />
-          <Metric label="Dataset" value={resource.projected_dataset_id ? 'Projected' : 'Not projected'} tone={resource.projected_dataset_id ? 'ready' : 'muted'} />
-          <Metric label="Context" value={resource.knowledge_resource?.index_status || 'Unavailable'} tone={resource.knowledge_resource?.index_status === 'indexed' ? 'ready' : 'muted'} />
+          <Metric label="Snapshot" value={sourceResource.latest_snapshot_id ? 'Captured' : 'Missing'} tone={sourceResource.latest_snapshot_id ? 'ready' : 'warn'} />
+          <Metric label="Dataset" value={sourceResource.projected_dataset_id ? 'Projected' : 'Not projected'} tone={sourceResource.projected_dataset_id ? 'ready' : 'muted'} />
+          <Metric label="Context" value={sourceResource.knowledge_resource?.index_status || 'Unavailable'} tone={sourceResource.knowledge_resource?.index_status === 'indexed' ? 'ready' : 'muted'} />
           <Metric label="Evidence" value={`${evidenceCount}`} tone={evidenceCount > 0 ? 'ready' : 'muted'} />
         </div>
 
@@ -180,11 +229,11 @@ export default function SourceDetailPage() {
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Section title="Overview" icon={<ShieldAlert className="h-4 w-4" />}>
-            <KeyValue label="External ID" value={resource.external_id || '-'} />
-            <KeyValue label="Source URL" value={resource.source_url || '-'} />
-            <KeyValue label="Sync mode" value={resource.sync_mode} />
-            <KeyValue label="Created" value={formatDate(resource.created_at)} />
-            <KeyValue label="Updated" value={formatDate(resource.updated_at)} />
+            <KeyValue label="External ID" value={sourceResource.external_id || '-'} />
+            <KeyValue label="Source URL" value={sourceResource.source_url || '-'} />
+            <KeyValue label="Sync mode" value={sourceResource.sync_mode} />
+            <KeyValue label="Created" value={formatDate(sourceResource.created_at)} />
+            <KeyValue label="Updated" value={formatDate(sourceResource.updated_at)} />
           </Section>
 
           <Section title="Lineage" icon={<Network className="h-4 w-4" />}>
@@ -201,7 +250,7 @@ export default function SourceDetailPage() {
         <div className="grid gap-6 lg:grid-cols-2">
           <Section title="Parsed content" icon={<FileText className="h-4 w-4" />}>
             <KeyValue label="Parser version" value={parsedAssets?.parser_version || latestSnapshot?.parser_version || '-'} />
-            <KeyValue label="Parse status" value={parsedAssets?.parse_status || resource.knowledge_resource?.parse_status || latestSnapshot?.status || 'pending'} />
+            <KeyValue label="Parse status" value={parsedAssets?.parse_status || sourceResource.knowledge_resource?.parse_status || latestSnapshot?.status || 'pending'} />
             <KeyValue label="Content hash" value={parsedAssets?.metadata?.content_hash || latestSnapshot?.content_hash || '-'} />
             <KeyValue label="Raw artifact" value={parsedAssets?.metadata?.raw_storage_uri || latestSnapshot?.raw_storage_uri || '-'} />
             <KeyValue label="Content size" value={contentSize === null ? '-' : `${contentSize.toLocaleString()} bytes`} />
@@ -236,9 +285,9 @@ export default function SourceDetailPage() {
                   <ParsedAssetRow key={`${table.name}-${index}`} item={table} />
                 ))}
               </div>
-            ) : parsedAssets?.projected_dataset_id || resource.projected_dataset_id ? (
+            ) : parsedAssets?.projected_dataset_id || sourceResource.projected_dataset_id ? (
               <>
-                <KeyValue label="Projection" value={parsedAssets?.projected_dataset_id || resource.projected_dataset_id || '-'} />
+                <KeyValue label="Projection" value={parsedAssets?.projected_dataset_id || sourceResource.projected_dataset_id || '-'} />
                 <KeyValue label="Modeling mode" value="Projection review or semantic model generation can use this dataset." />
               </>
             ) : (
@@ -311,16 +360,16 @@ export default function SourceDetailPage() {
             )}
           </Section>
           <Section title="Settings" icon={<ShieldAlert className="h-4 w-4" />}>
-            <KeyValue label="Visibility" value={resource.visibility} />
-            <KeyValue label="Context provider" value={resource.knowledge_resource?.provider || 'Not indexed'} />
-            <KeyValue label="Provider status" value={resource.knowledge_resource?.provider_status || resource.knowledge_resource?.index_status || 'Unavailable'} />
-            <KeyValue label="Last indexed" value={formatDate(resource.knowledge_resource?.last_indexed_at)} />
-            <KeyValue label="Retrieval debug URI" value={resource.knowledge_resource?.retrieval_debug_uri || '-'} />
+            <KeyValue label="Visibility" value={sourceResource.visibility} />
+            <KeyValue label="Context provider" value={sourceResource.knowledge_resource?.provider || 'Not indexed'} />
+            <KeyValue label="Provider status" value={sourceResource.knowledge_resource?.provider_status || sourceResource.knowledge_resource?.index_status || 'Unavailable'} />
+            <KeyValue label="Last indexed" value={formatDate(sourceResource.knowledge_resource?.last_indexed_at)} />
+            <KeyValue label="Retrieval debug URI" value={sourceResource.knowledge_resource?.retrieval_debug_uri || '-'} />
             <KeyValue label="Delete behavior" value="Deleting a source keeps lineage explicit and removes it from the active Sources inventory." />
             <KeyValue label="Reindex behavior" value="Retry sync from the source connector to generate a new snapshot and context state." />
-            {resource.knowledge_resource?.provider_error && (
+            {sourceResource.knowledge_resource?.provider_error && (
               <div className="mt-4 rounded border border-red-900/40 bg-red-950/20 p-3 text-sm text-red-100">
-                {JSON.stringify(resource.knowledge_resource.provider_error)}
+                {JSON.stringify(sourceResource.knowledge_resource.provider_error)}
               </div>
             )}
           </Section>
@@ -350,6 +399,213 @@ function Metric({ label, value, tone }: { label: string; value: string; tone: 'r
       <div className={`mt-2 text-lg font-semibold capitalize ${toneClass}`}>{value}</div>
     </Card>
   )
+}
+
+function OverviewSourceDetail({
+  source,
+  schema,
+  schemaLoading,
+  schemaError,
+}: {
+  source: SourceOverviewItem
+  schema?: DatabaseSchemaResponse
+  schemaLoading: boolean
+  schemaError: string | null
+}) {
+  const schemaTables = sourceSchemaTables(schema)
+  const progressIndex = overviewProgressIndex(source)
+  const icon = source.family === 'warehouses' || source.family === 'databases'
+    ? <Database className="h-5 w-5 text-brand-orange" />
+    : <FileText className="h-5 w-5 text-brand-orange" />
+
+  return (
+    <div className="min-h-screen bg-[#0a0a0a] p-8 text-white">
+      <div className="mx-auto max-w-6xl space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <Button asChild variant="ghost" className="-ml-3 mb-3 text-gray-300 hover:text-white">
+              <Link to="/sources"><ArrowLeft className="h-4 w-4" /> Sources</Link>
+            </Button>
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-md bg-brand-orange/15">
+                {icon}
+              </div>
+              <div>
+                <h1 className="text-2xl font-semibold tracking-normal">{source.name}</h1>
+                <p className="mt-1 text-sm capitalize text-gray-400">{typeLabel(source.resource_type || source.provider)} · {source.family.replace(/_/g, ' ')}</p>
+              </div>
+            </div>
+          </div>
+          <span className={`rounded border px-3 py-1.5 text-sm ${overviewStatusTone(source)}`}>
+            {source.status}
+          </span>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-4">
+          <Metric label="Freshness" value={source.freshness_status} tone={source.freshness_status === 'fresh' ? 'ready' : source.freshness_status === 'stale' ? 'warn' : 'muted'} />
+          <Metric label="Parsed tables" value={`${source.parsed_asset_counts.tables || schemaTables.length}`} tone={source.parsed_asset_counts.tables || schemaTables.length ? 'ready' : 'muted'} />
+          <Metric label="Context" value={source.context_index_status.replace(/_/g, ' ')} tone={source.context_index_status === 'indexed' ? 'ready' : source.context_index_status === 'failed' ? 'warn' : 'muted'} />
+          <Metric label="Semantic models" value={`${source.consumer_counts.semantic_models}`} tone={source.consumer_counts.semantic_models > 0 ? 'ready' : 'muted'} />
+        </div>
+
+        <Section title="Processing" icon={<Clock className="h-4 w-4" />}>
+          <div className="grid grid-cols-7 gap-2">
+            {sourceDetailSteps.map((step, index) => {
+              const complete = index <= progressIndex
+              return (
+                <div key={step} className="min-w-0">
+                  <div className={`h-2 rounded-full ${complete ? 'bg-green-500' : 'bg-[#444444]'}`} />
+                  <div className={`mt-1 truncate text-xs ${complete ? 'text-green-300' : 'text-gray-500'}`} title={step}>{step}</div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="mt-4 rounded border border-[#333333] bg-[#151515] p-3 text-sm text-gray-300">
+            {overviewReadinessMessage(source)}
+          </div>
+          {source.next_actions.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {source.next_actions.map(action => (
+                <span key={action} className="rounded border border-[#444444] px-2 py-1 text-xs text-gray-300">{action}</span>
+              ))}
+            </div>
+          )}
+        </Section>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Section title="Overview" icon={<ShieldAlert className="h-4 w-4" />}>
+            <KeyValue label="Source kind" value={source.source_kind} />
+            <KeyValue label="Provider" value={source.provider} />
+            <KeyValue label="Resource type" value={source.resource_type || '-'} />
+            <KeyValue label="Visibility" value={source.visibility} />
+            <KeyValue label="Owner" value={source.owner?.name || source.owner?.id || '-'} />
+            <KeyValue label="Last synced" value={formatDate(source.last_synced_at)} />
+            <KeyValue label="Created" value={formatDate(source.created_at)} />
+            <KeyValue label="Updated" value={formatDate(source.updated_at)} />
+          </Section>
+
+          <Section title="Lineage" icon={<Network className="h-4 w-4" />}>
+            <LineageList
+              nodes={[
+                { id: source.id, node_type: source.source_kind, label: source.name, status: source.status, metadata: {} },
+                ...(source.projected_dataset_id ? [{ id: source.projected_dataset_id, node_type: 'projected_dataset', label: 'Projected dataset', status: 'available', metadata: {} }] : []),
+              ]}
+              edges={source.projected_dataset_id ? [{ from_id: source.id, to_id: source.projected_dataset_id, relationship: 'projects_to', metadata: {} }] : []}
+            />
+          </Section>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Section title="Parsed content" icon={<FileText className="h-4 w-4" />}>
+            <KeyValue label="Parse status" value={source.parse_status} />
+            <KeyValue label="Latest snapshot" value={source.latest_snapshot_id || '-'} />
+            <KeyValue label="Projected dataset" value={source.projected_dataset_id || '-'} />
+            <KeyValue label="Blocks" value={`${source.parsed_asset_counts.blocks}`} />
+            <KeyValue label="Evidence" value={`${source.parsed_asset_counts.evidence}`} />
+            <KeyValue label="Files" value={`${source.parsed_asset_counts.files}`} />
+            <KeyValue label="Counts partial" value={source.counts_partial ? 'Yes' : 'No'} />
+          </Section>
+
+          <Section title="Tables" icon={<Database className="h-4 w-4" />}>
+            {schemaLoading ? (
+              <LoadingRow label="Loading schema/profile..." />
+            ) : schemaError ? (
+              <div className="rounded border border-amber-700/30 bg-amber-950/20 p-3 text-sm text-amber-100/80">
+                {schemaError}
+              </div>
+            ) : schemaTables.length > 0 ? (
+              <div className="space-y-2">
+                {schemaTables.slice(0, 12).map(table => (
+                  <div key={table.name} className="rounded border border-[#333333] bg-[#151515] p-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium text-gray-200">{table.name}</span>
+                      <span className="rounded border border-[#444444] px-2 py-0.5 text-xs text-gray-400">{table.columns} columns</span>
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">{table.rows === null ? 'row count unavailable' : `${table.rows.toLocaleString()} rows`}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyText>No schema/profile tables are available for this source yet.</EmptyText>
+            )}
+          </Section>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Section title="Consumers" icon={<Network className="h-4 w-4" />}>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(source.consumer_counts).map(([type, count]) => (
+                <span key={type} className="rounded border border-[#444444] px-2 py-1 text-xs text-gray-300">
+                  {typeLabel(type)}: {count}
+                </span>
+              ))}
+            </div>
+            {source.counts_partial && <p className="mt-3 text-sm text-gray-500">Consumer counts are partial until dashboard and MCP references are fully indexed.</p>}
+          </Section>
+
+          <Section title="Settings" icon={<ShieldAlert className="h-4 w-4" />}>
+            <KeyValue label="Delete behavior" value="Delete is handled from the Sources inventory and keeps downstream impact explicit." />
+            <KeyValue label="Refresh behavior" value={source.source_kind === 'connection' ? 'Refresh schema/profile before regenerating semantic suggestions.' : 'Re-profile the dataset or source projection before publishing dependent models.'} />
+            <KeyValue label="Production modeling" value={source.family === 'databases' || source.family === 'warehouses' ? 'Supported through schema/profile evidence.' : 'Requires projection or context-assisted handoff.'} />
+          </Section>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function overviewStatusTone(source: SourceOverviewItem): string {
+  const status = source.status.toLowerCase()
+  if (status === 'ready') return 'border-green-700/50 bg-green-900/20 text-green-200'
+  if (status.includes('failed') || status.includes('permission') || status.includes('authorization')) {
+    return 'border-red-700/50 bg-red-900/20 text-red-200'
+  }
+  return 'border-amber-700/50 bg-amber-900/20 text-amber-200'
+}
+
+function overviewProgressIndex(source: SourceOverviewItem): number {
+  if (source.status.toLowerCase() === 'failed') return -1
+  if (source.context_index_status === 'indexed') return sourceDetailSteps.length - 1
+  if (source.context_index_status === 'indexing') return 4
+  if (source.projected_dataset_id) return 5
+  if (source.parsed_asset_counts.tables > 0) return 3
+  if (source.parse_status === 'parsed') return 2
+  if (source.latest_snapshot_id) return 1
+  return 0
+}
+
+function overviewReadinessMessage(source: SourceOverviewItem): string {
+  if (source.status.toLowerCase() !== 'ready') {
+    return `${source.status}. ${source.next_actions[0] || 'Review the source before modeling or dashboard generation.'}`
+  }
+  if (source.family === 'databases' || source.family === 'warehouses') {
+    return 'Schema/profile evidence is available for semantic model generation.'
+  }
+  if (source.projected_dataset_id) {
+    return 'A projected dataset exists. Review projection shape before production semantic modeling.'
+  }
+  if (source.context_index_status === 'indexed') {
+    return 'Context is indexed for evidence and policy support. Use a governed fact source for production metrics.'
+  }
+  return 'Source is connected, but a projection or context index is still needed before deeper modeling.'
+}
+
+function sourceSchemaTables(schema?: DatabaseSchemaResponse): Array<{ name: string; columns: number; rows: number | null }> {
+  if (!schema) return []
+  if (isMultiDatabaseSchema(schema)) {
+    return schema.databases.flatMap(database => Object.entries(database.schema || {}).map(([name, info]) => schemaTableSummary(name, info)))
+  }
+  return Object.entries(schema.schema || {}).map(([name, info]) => schemaTableSummary(name, info))
+}
+
+function schemaTableSummary(name: string, info: any): { name: string; columns: number; rows: number | null } {
+  const columns = Array.isArray(info?.columns)
+    ? info.columns.length
+    : Array.isArray(info?.sample_fields)
+      ? info.sample_fields.length
+      : 0
+  const rows = typeof info?.row_count === 'number' ? info.row_count : null
+  return { name, columns, rows }
 }
 
 function KeyValue({ label, value }: { label: string; value: string }) {
