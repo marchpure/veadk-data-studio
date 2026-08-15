@@ -180,6 +180,7 @@ async def test_sources_overview_next_actions_cover_warehouse_and_object_storage_
 
     databricks_item = next(item for item in items if item["provider"] == "databricks")
     assert databricks_item["source_kind"] == "connection"
+    assert databricks_item["connection_id"] == str(connection.id)
     assert databricks_item["family"] == "warehouses"
     assert databricks_item["parsed_asset_counts"]["tables"] == 1
     assert databricks_item["next_actions"] == ["Generate semantic model", "Open warehouse catalog"]

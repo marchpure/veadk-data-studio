@@ -863,6 +863,7 @@ export type SourceOverviewVisibility = 'private' | 'workspace' | 'team' | 'publi
 export interface SourceOverviewItem {
   id: string
   source_kind: 'connection' | 'dataset' | 'source_resource'
+  connection_id?: string | null
   family: SourceOverviewFamily
   provider: string
   resource_type?: string | null

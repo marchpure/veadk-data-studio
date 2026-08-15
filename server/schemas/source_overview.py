@@ -35,6 +35,7 @@ class ConsumerCounts(BaseModel):
 class SourceOverviewItem(BaseModel):
     id: str
     source_kind: SourceKind
+    connection_id: str | None = None
     family: SourceFamily
     provider: str
     resource_type: str | None = None

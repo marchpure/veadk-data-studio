@@ -249,6 +249,7 @@ class SourceOverviewService:
             return SourceOverviewItem(
                 id=str(dataset.id),
                 source_kind="connection",
+                connection_id=connection_id,
                 family="warehouses" if provider == "databricks" else "databases",
                 provider=provider,
                 resource_type=provider,
@@ -285,6 +286,7 @@ class SourceOverviewService:
         return SourceOverviewItem(
             id=str(dataset.id),
             source_kind="dataset",
+            connection_id=str(dataset.connection_id) if dataset.connection_id else None,
             family="files",
             provider="local_file",
             resource_type=file_type,
@@ -342,6 +344,7 @@ class SourceOverviewService:
         return SourceOverviewItem(
             id=str(resource.id),
             source_kind="source_resource",
+            connection_id=str(resource.source_connection_id) if resource.source_connection_id else None,
             family=self._resource_family(resource.resource_type),
             provider=self._source_resource_provider(resource=resource, connection=source_connection),
             resource_type=resource.resource_type,

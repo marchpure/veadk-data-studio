@@ -530,6 +530,25 @@ export function useSyncSourceResource() {
   })
 }
 
+export function useRefreshSourceOverviewConnectionSchema() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ connectionId }: { connectionId: string }) => {
+      return ApiService.refreshConnectionSchema(connectionId)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['datasources'] })
+      queryClient.invalidateQueries({ queryKey: ['source-detail-schema'] })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
+      showToast.success('Schema/profile refreshed')
+    },
+    onError: (error: Error) => {
+      showToast.error(`Failed to refresh schema/profile: ${error.message}`)
+    },
+  })
+}
+
 export function useSourceResourceSnapshots(resourceId?: string) {
   return useQuery({
     queryKey: sourceConnectorKeys.snapshots(resourceId),

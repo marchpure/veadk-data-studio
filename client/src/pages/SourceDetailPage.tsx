@@ -6,6 +6,7 @@ import { Card } from '../components/ui/card'
 import { Input } from '../components/ui/input'
 import {
   useKnowledgeSearch,
+  useRefreshSourceOverviewConnectionSchema,
   useSourceResource,
   useSourceResourceConsumers,
   useSourceResourceLineage,
@@ -72,6 +73,7 @@ export default function SourceDetailPage() {
   const [evidenceQuery, setEvidenceQuery] = useState('')
   const overviewQuery = useSourceOverviewItem(sourceId)
   const syncResourceMutation = useSyncSourceResource()
+  const refreshConnectionSchemaMutation = useRefreshSourceOverviewConnectionSchema()
   const overview = overviewQuery.data
   const isSourceResource = overview?.source_kind === 'source_resource'
   const resourceQuery = useSourceResource(isSourceResource ? sourceId : undefined)
@@ -144,6 +146,8 @@ export default function SourceDetailPage() {
         schema={schemaQuery.data}
         schemaLoading={schemaQuery.isLoading}
         schemaError={schemaQuery.error instanceof Error ? schemaQuery.error.message : null}
+        refreshingSchema={refreshConnectionSchemaMutation.isPending}
+        onRefreshSchema={overview.connection_id ? () => refreshConnectionSchemaMutation.mutate({ connectionId: overview.connection_id as string }) : undefined}
       />
     )
   }
@@ -455,11 +459,15 @@ function OverviewSourceDetail({
   schema,
   schemaLoading,
   schemaError,
+  refreshingSchema,
+  onRefreshSchema,
 }: {
   source: SourceOverviewItem
   schema?: DatabaseSchemaResponse
   schemaLoading: boolean
   schemaError: string | null
+  refreshingSchema: boolean
+  onRefreshSchema?: () => void
 }) {
   const schemaTables = sourceSchemaTables(schema)
   const progressIndex = overviewProgressIndex(source)
@@ -485,9 +493,24 @@ function OverviewSourceDetail({
               </div>
             </div>
           </div>
-          <span className={`rounded border px-3 py-1.5 text-sm ${overviewStatusTone(source)}`}>
-            {source.status}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            {source.source_kind === 'connection' && (
+              <Button
+                type="button"
+                size="sm"
+                variant="brand-primary"
+                disabled={!onRefreshSchema || refreshingSchema}
+                onClick={onRefreshSchema}
+                title={onRefreshSchema ? 'Refresh schema/profile from the source connection' : 'This source has no backing connection to refresh.'}
+              >
+                {refreshingSchema ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {refreshingSchema ? 'Refreshing...' : 'Refresh profile'}
+              </Button>
+            )}
+            <span className={`rounded border px-3 py-1.5 text-sm ${overviewStatusTone(source)}`}>
+              {source.status}
+            </span>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-4">
@@ -593,6 +616,28 @@ function OverviewSourceDetail({
           </Section>
 
           <Section title="Settings" icon={<ShieldAlert className="h-4 w-4" />}>
+            {source.source_kind === 'connection' && (
+              <div className="mb-4 rounded border border-[#333333] bg-[#151515] p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-gray-200">Refresh schema/profile</div>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Pull a fresh schema/profile from the database or warehouse before regenerating semantic suggestions.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="brand-primary"
+                    disabled={!onRefreshSchema || refreshingSchema}
+                    onClick={onRefreshSchema}
+                  >
+                    {refreshingSchema ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    {refreshingSchema ? 'Refreshing...' : 'Refresh profile'}
+                  </Button>
+                </div>
+              </div>
+            )}
             <KeyValue label="Delete behavior" value="Delete is handled from the Sources inventory and keeps downstream impact explicit." />
             <KeyValue label="Refresh behavior" value={source.source_kind === 'connection' ? 'Refresh schema/profile before regenerating semantic suggestions.' : 'Re-profile the dataset or source projection before publishing dependent models.'} />
             <KeyValue label="Production modeling" value={source.family === 'databases' || source.family === 'warehouses' ? 'Supported through schema/profile evidence.' : 'Requires projection or context-assisted handoff.'} />
