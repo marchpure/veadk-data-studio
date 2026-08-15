@@ -65,6 +65,7 @@ async def test_sources_overview_includes_ready_web_source_and_compatibility_alia
     assert item["attention_state"] == "none"
     assert item["freshness_status"] == "fresh"
     assert item["latest_snapshot_id"] == resource["latest_snapshot_id"]
+    assert item["raw_artifact_uri"] == "web://sha256/webhash"
     assert item["context_index_status"] == "indexed"
     assert item["parse_status"] == "parsed"
     assert item["parsed_asset_counts"]["evidence"] == 2
@@ -373,6 +374,7 @@ async def test_sources_overview_uses_snapshot_projection_manifest_for_asset_coun
     item = next(item for item in overview.json()["data"]["items"] if item["id"] == str(resource.id))
 
     assert item["projected_dataset_id"] == projected_dataset_id
+    assert item["raw_artifact_uri"] == "tos://sales-bucket/projections/targets.xlsx"
     assert item["parsed_asset_counts"]["tables"] == 2
     assert item["parsed_asset_counts"]["files"] == 1
     assert item["next_actions"] == ["Review projection", "Generate semantic model"]

@@ -184,6 +184,7 @@ type SourceOverviewItem = {
   freshness_status?: 'fresh' | 'stale' | 'unknown'
   last_synced_at?: string
   latest_snapshot_id?: string
+  raw_artifact_uri?: string
   projected_dataset_id?: string
   context_index_status?: 'pending' | 'indexing' | 'indexed' | 'failed' | 'unavailable'
   parse_status?: 'pending' | 'parsed' | 'failed'
@@ -226,6 +227,7 @@ Current implementation:
 - Statuses are normalized to product labels such as `Ready`, `Needs confirmation`, `Authorization required`, `Permission lost`, `Source unavailable`, and `Failed`.
 - `consumer_counts.semantic_models`, notebooks, dashboards, and analysis artifacts are populated from current model/notebook references where available. Dashboard inventory counts include both legacy HTML dashboards and AnalysisArtifact-backed dashboard apps created from consuming notebooks; MCP counts remain `0` with `counts_partial: true` until tool bindings become first-class records.
 - `next_actions` is populated for connection, dataset, and source-resource rows so the inventory can point users toward reauthorization, retry, evidence search, projection review, schema refresh, or semantic model generation without opening a detail page first.
+- Source-resource rows expose `raw_artifact_uri` from the latest immutable snapshot so Source detail can verify where the captured artifact lives without expanding PostgreSQL into raw/chunk/vector storage.
 - Source-resource projection counts fall back from current sync config to the latest snapshot metadata and projection manifest, so CSV/Excel/Sheet/Base/object-storage projections still show table/file counts after reindex, snapshot reuse, or metadata-only migration paths.
 - Frontend API types and `useSourceOverview()` are available.
 - `client/src/pages/Databases.tsx` now renders the Sources inventory from `SourceOverviewItem` instead of the legacy datasource card list.

@@ -350,7 +350,7 @@ The current native provider stores `EvidenceFragment.text` in the database. Trea
 
 Commercial deployments must select the context backend through `KNOWLEDGE_PROVIDER`. Connector-captured snapshots should record both identities separately: `metadata_json.provider` remains the source connector (`web`, `feishu`, `volcengine_tos`, etc.), while `metadata_json.knowledge_provider` records the context backend that indexed the snapshot.
 
-The first `SourceOverview` backend slice keeps this boundary: it exposes product-facing `context_index_status`, parse status, snapshot ids, evidence counts, projected dataset ids, and partial consumer counts, while keeping OpenViking/provider internals out of the Add Source and inventory surface.
+The first `SourceOverview` backend slice keeps this boundary: it exposes product-facing `context_index_status`, parse status, snapshot ids, raw artifact URIs, evidence counts, projected dataset ids, and partial consumer counts, while keeping OpenViking/provider internals out of the Add Source and inventory surface.
 
 Commercial `KnowledgeResource` should gain provider metadata:
 

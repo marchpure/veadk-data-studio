@@ -849,6 +849,7 @@ function OverviewSourceDetail({
           <Section title="Parsed content" icon={<FileText className="h-4 w-4" />}>
             <KeyValue label="Parse status" value={source.parse_status} />
             <KeyValue label="Latest snapshot" value={source.latest_snapshot_id || '-'} />
+            <KeyValue label="Raw artifact" value={source.raw_artifact_uri || '-'} />
             <KeyValue label="Projected dataset" value={source.projected_dataset_id || '-'} />
             <KeyValue label="Blocks" value={`${source.parsed_asset_counts.blocks}`} />
             <KeyValue label="Evidence" value={`${source.parsed_asset_counts.evidence}`} />

@@ -45,6 +45,7 @@ class SourceOverviewItem(BaseModel):
     freshness_status: FreshnessStatus = "unknown"
     last_synced_at: str | None = None
     latest_snapshot_id: str | None = None
+    raw_artifact_uri: str | None = None
     projected_dataset_id: str | None = None
     context_index_status: ContextIndexStatus = "unavailable"
     parse_status: ParseStatus = "pending"

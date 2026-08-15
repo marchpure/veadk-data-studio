@@ -379,6 +379,7 @@ class SourceOverviewService:
             freshness_status=self._freshness_status(status=status, latest_snapshot=latest_snapshot),
             last_synced_at=self._isoformat(latest_snapshot.captured_at if latest_snapshot else resource.updated_at),
             latest_snapshot_id=str(resource.latest_snapshot_id) if resource.latest_snapshot_id else None,
+            raw_artifact_uri=latest_snapshot.raw_storage_uri if latest_snapshot else None,
             projected_dataset_id=str(projected_dataset_id) if projected_dataset_id else None,
             context_index_status=self._context_index_status(status=status, knowledge_resource=knowledge_resource),
             parse_status=self._parse_status(latest_snapshot=latest_snapshot, knowledge_resource=knowledge_resource),

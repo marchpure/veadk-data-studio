@@ -873,6 +873,7 @@ export interface SourceOverviewItem {
   freshness_status: SourceOverviewFreshnessStatus
   last_synced_at?: string | null
   latest_snapshot_id?: string | null
+  raw_artifact_uri?: string | null
   projected_dataset_id?: string | null
   context_index_status: SourceOverviewContextIndexStatus
   parse_status: SourceOverviewParseStatus
