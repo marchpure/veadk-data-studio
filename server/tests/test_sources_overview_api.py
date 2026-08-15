@@ -14,6 +14,7 @@ from server.models.notebooks import Notebook
 from server.models.semantic_models import SemanticModel
 from server.models.source_connections import SourceConnection
 from server.models.source_resources import SourceResource
+from server.models.source_snapshots import SourceSnapshot
 from server.models.tenant import Tenant
 
 pytestmark = __import__("pytest").mark.asyncio
@@ -318,6 +319,63 @@ async def test_sources_overview_object_storage_confirmation_uses_large_object_ac
     assert item["attention_state"] == "parse"
     assert item["context_index_status"] == "unavailable"
     assert item["next_actions"] == ["Review object size", "Confirm large object sync"]
+
+
+async def test_sources_overview_uses_snapshot_projection_manifest_for_asset_counts(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    projected_dataset_id = "11111111-1111-1111-1111-111111111111"
+    resource = SourceResource(
+        tenant_id=tenant.id,
+        resource_type="tos_object",
+        name="targets.xlsx",
+        external_id="sales-bucket/projections/targets.xlsx",
+        owner_id=tenant.owner_id,
+        visibility="workspace",
+        sync_mode="manual",
+        status="ready",
+        sync_config_json={"projected_dataset_id": projected_dataset_id},
+    )
+    test_session.add(resource)
+    await test_session.flush()
+    snapshot = SourceSnapshot(
+        tenant_id=tenant.id,
+        resource_id=resource.id,
+        external_revision="etag-targets",
+        content_hash="sha256:targets",
+        raw_storage_uri=f"tos://sales-bucket/projections/targets.xlsx",
+        captured_at=datetime.utcnow(),
+        parser_version="xlsx-parser-v1",
+        metadata_json={
+            "projected_dataset_id": projected_dataset_id,
+            "projected_dataset": {
+                "dataset_id": projected_dataset_id,
+                "schema_tables": {
+                    "targets": {"row_count": 2},
+                    "channels": {"row_count": 3},
+                },
+            },
+            "projection_manifest": {
+                "dataset_id": projected_dataset_id,
+                "files": [{"filename": "targets.xlsx", "file_type": "xlsx"}],
+            },
+        },
+        status="indexed",
+    )
+    test_session.add(snapshot)
+    await test_session.flush()
+    resource.latest_snapshot_id = snapshot.id
+    await test_session.commit()
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["id"] == str(resource.id))
+
+    assert item["projected_dataset_id"] == projected_dataset_id
+    assert item["parsed_asset_counts"]["tables"] == 2
+    assert item["parsed_asset_counts"]["files"] == 1
+    assert item["next_actions"] == ["Review projection", "Generate semantic model"]
 
 
 async def test_sources_overview_excludes_deleted_source_resources(test_client, test_session, monkeypatch):

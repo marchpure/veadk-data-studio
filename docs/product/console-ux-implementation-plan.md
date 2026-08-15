@@ -226,6 +226,7 @@ Current implementation:
 - Statuses are normalized to product labels such as `Ready`, `Needs confirmation`, `Authorization required`, `Permission lost`, `Source unavailable`, and `Failed`.
 - `consumer_counts.semantic_models`, notebooks, dashboards, and analysis artifacts are populated from current model/notebook references where available. Dashboard inventory counts include both legacy HTML dashboards and AnalysisArtifact-backed dashboard apps created from consuming notebooks; MCP counts remain `0` with `counts_partial: true` until tool bindings become first-class records.
 - `next_actions` is populated for connection, dataset, and source-resource rows so the inventory can point users toward reauthorization, retry, evidence search, projection review, schema refresh, or semantic model generation without opening a detail page first.
+- Source-resource projection counts fall back from current sync config to the latest snapshot metadata and projection manifest, so CSV/Excel/Sheet/Base/object-storage projections still show table/file counts after reindex, snapshot reuse, or metadata-only migration paths.
 - Frontend API types and `useSourceOverview()` are available.
 - `client/src/pages/Databases.tsx` now renders the Sources inventory from `SourceOverviewItem` instead of the legacy datasource card list.
 - Desktop uses a scan-oriented table with Source, Status, Freshness, Parsed assets, Context, Semantic, Dashboards, Owner, and Actions columns.

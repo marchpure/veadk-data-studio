@@ -347,8 +347,11 @@ class SourceOverviewService:
         latest_snapshot = context.get("latest_snapshot")
         knowledge_resource = context.get("knowledge_resource")
         evidence_count = int(context.get("evidence_count") or 0)
-        projected_dataset_id = (resource.sync_config_json or {}).get("projected_dataset_id")
-        projection = (resource.sync_config_json or {}).get("projected_dataset") or {}
+        snapshot_metadata = latest_snapshot.metadata_json if latest_snapshot and isinstance(latest_snapshot.metadata_json, dict) else {}
+        projected_dataset_id = (resource.sync_config_json or {}).get("projected_dataset_id") or snapshot_metadata.get(
+            "projected_dataset_id"
+        )
+        projection = self._projection_payload(resource=resource, snapshot_metadata=snapshot_metadata)
         notebooks = set()
         if knowledge_resource:
             notebooks.update(consumer_index.notebooks_by_knowledge_id.get(str(knowledge_resource.id), set()))
@@ -382,7 +385,7 @@ class SourceOverviewService:
             parsed_asset_counts={
                 "blocks": evidence_count,
                 "tables": self._projection_table_count(projection),
-                "files": int(projection.get("files_count") or len(projection.get("files") or [])),
+                "files": self._projection_file_count(projection),
                 "evidence": evidence_count,
             },
             consumer_counts=consumer_counts,
@@ -578,7 +581,36 @@ class SourceOverviewService:
 
     def _projection_table_count(self, projection: dict[str, Any]) -> int:
         tables = projection.get("schema_tables")
-        return len(tables) if isinstance(tables, list) else 0
+        if isinstance(tables, list):
+            return len(tables)
+        if isinstance(tables, dict):
+            return len(tables)
+        tables = projection.get("tables")
+        if isinstance(tables, list):
+            return len(tables)
+        if isinstance(tables, dict):
+            return len(tables)
+        schema = projection.get("schema")
+        if isinstance(schema, dict):
+            return len(schema)
+        return 0
+
+    def _projection_file_count(self, projection: dict[str, Any]) -> int:
+        files_count = projection.get("files_count")
+        if isinstance(files_count, int):
+            return files_count
+        files = projection.get("files")
+        return len(files) if isinstance(files, list) else 0
+
+    def _projection_payload(self, *, resource: SourceResource, snapshot_metadata: dict[str, Any]) -> dict[str, Any]:
+        sync_config = resource.sync_config_json or {}
+        projection = sync_config.get("projected_dataset") or snapshot_metadata.get("projected_dataset") or {}
+        if not isinstance(projection, dict):
+            projection = {}
+        manifest = snapshot_metadata.get("projection_manifest")
+        if isinstance(manifest, dict):
+            projection = {**manifest, **projection}
+        return projection
 
     def _semantic_count(self, consumer_index: _ConsumerIndex, ids: set[str]) -> int:
         return sum(consumer_index.semantic_by_id.get(item_id, 0) for item_id in ids)
