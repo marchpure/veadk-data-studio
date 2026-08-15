@@ -452,6 +452,8 @@ Connector-backed Source Detail should also show a redacted source-owned authoriz
 
 Connection-backed warehouse Sources must expose the same product health semantics even while they still use the legacy `connections` table. The Databricks Source wrapper should inspect only safe OAuth metadata from the decrypted connection object and surface `Authorization required` or `Reauthorization required` when the OAuth block, refresh token, or token expiry is missing or stale. Token values must never be returned through `SourceOverview`; the user-facing contract is status, attention state, freshness, and next action.
 
+Object-storage prefix and bucket Sources should treat listing output as an object manifest, not as a fake projected dataset. TOS prefix snapshots now include an `object_manifest` and a `projection_manifest.files` listing with bucket/key/etag locators, so Sources overview and Source Detail can show object counts and file entries while Data Modeling still requires explicit projection before treating any object as a structured fact source.
+
 Keep API family enums stable for integrations and modeling adapters, but translate them into product labels in the UI. For example, `documents` remains the SourceOverview/Data Modeling enum while the inventory and Source Detail display `Business docs`, matching the Add Source family.
 
 ## Sellable Scope By Milestone

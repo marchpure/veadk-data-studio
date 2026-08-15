@@ -652,6 +652,8 @@ class SourceOverviewService:
             if knowledge_resource and knowledge_resource.index_status == "indexed":
                 return ["Search evidence", "Review projection"]
             if has_snapshot:
+                if projected_dataset_id is None:
+                    return ["Review object manifest", "Index context"]
                 return ["Parse object", "Index context"]
             return ["Browse bucket or prefix"]
         if family == "databases":

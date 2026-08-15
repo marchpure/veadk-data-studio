@@ -1880,6 +1880,18 @@ async def test_tos_prefix_sync_uses_stable_content_addressed_revision(monkeypatc
     assert first.external_revision.startswith("collection:sha256:")
     assert first.metadata["object_count"] == 2
     assert first.raw_storage_uri == "tos://sales-bucket/reports/"
+    assert first.metadata["object_manifest"]["bucket"] == "sales-bucket"
+    assert first.metadata["object_manifest"]["prefix"] == "reports/"
+    assert first.metadata["object_manifest"]["objects"][0]["key"] == "reports/revenue.csv"
+    assert first.metadata["projection_manifest"]["files"][0]["filename"] == "revenue.csv"
+    assert first.metadata["projection_manifest"]["files"][0]["status"] == "listed"
+    assert first.metadata["projection_manifest"]["files"][0]["source_locator"] == {
+        "kind": "tos_object",
+        "bucket": "sales-bucket",
+        "key": "reports/revenue.csv",
+        "etag": "etag-1",
+        "last_modified": "2026-08-14T00:00:00Z",
+    }
 
 
 async def test_feishu_refresh_failure_marks_connection_reauthorization_required(test_session, monkeypatch):

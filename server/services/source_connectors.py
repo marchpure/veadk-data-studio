@@ -1258,17 +1258,36 @@ class TosConnectorAdapter:
             key = getattr(obj, "key", "")
             if key.endswith("/"):
                 continue
+            etag = getattr(obj, "etag", None)
             rows.append(
                 {
                     "key": key,
                     "size": getattr(obj, "size", None),
-                    "etag": getattr(obj, "etag", None),
+                    "etag": etag.strip('"') if isinstance(etag, str) else etag,
                     "last_modified": str(getattr(obj, "last_modified", "")),
                 }
             )
         text = "\n".join(json.dumps(row, ensure_ascii=False, sort_keys=True) for row in rows)
         raw_bytes = json.dumps(rows, ensure_ascii=False, sort_keys=True).encode("utf-8")
         collection_revision = "collection:sha256:" + hashlib.sha256(raw_bytes).hexdigest()
+        manifest_files = [
+            {
+                "filename": row["key"].rsplit("/", 1)[-1] or row["key"],
+                "file_type": row["key"].rsplit(".", 1)[-1].lower() if "." in row["key"] else "object",
+                "status": "listed",
+                "size": row.get("size"),
+                "etag": row.get("etag"),
+                "last_modified": row.get("last_modified"),
+                "source_locator": {
+                    "kind": "tos_object",
+                    "bucket": bucket,
+                    "key": row["key"],
+                    "etag": row.get("etag"),
+                    "last_modified": row.get("last_modified"),
+                },
+            }
+            for row in rows
+        ]
         return CapturedSnapshot(
             raw_bytes=raw_bytes,
             content_text=text,
@@ -1278,6 +1297,8 @@ class TosConnectorAdapter:
                 "bucket": bucket,
                 "prefix": prefix,
                 "object_count": len(rows),
+                "object_manifest": {"bucket": bucket, "prefix": prefix, "objects": rows},
+                "projection_manifest": {"files": manifest_files},
                 "region": credentials.get("region"),
             },
             provider=default_knowledge_provider_name(),

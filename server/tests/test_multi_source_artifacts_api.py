@@ -1081,6 +1081,80 @@ async def test_source_detail_support_apis_use_snapshot_projection_metadata(test_
     assert consumer_payload["counts"]["notebook"] == 1
 
 
+async def test_source_detail_parsed_assets_show_tos_prefix_manifest(test_client, test_session):
+    tenant = await _tenant(test_session)
+
+    resource = SourceResource(
+        tenant_id=tenant.id,
+        resource_type="tos_prefix",
+        name="reports/",
+        external_id="sales-bucket/reports/",
+        owner_id=tenant.owner_id,
+        visibility="workspace",
+        sync_mode="manual",
+        status="ready",
+    )
+    test_session.add(resource)
+    await test_session.flush()
+    snapshot = SourceSnapshot(
+        tenant_id=tenant.id,
+        resource_id=resource.id,
+        external_revision="collection:sha256:reports",
+        content_hash="sha256:reports-manifest",
+        raw_storage_uri="tos://sales-bucket/reports/",
+        parser_version="tos-prefix-listing-v1",
+        metadata_json={
+            "bucket": "sales-bucket",
+            "prefix": "reports/",
+            "object_count": 2,
+            "object_manifest": {
+                "bucket": "sales-bucket",
+                "prefix": "reports/",
+                "objects": [
+                    {"key": "reports/revenue.csv", "size": 24, "etag": "etag-1"},
+                    {"key": "reports/cost.csv", "size": 20, "etag": "etag-2"},
+                ],
+            },
+            "projection_manifest": {
+                "files": [
+                    {
+                        "filename": "revenue.csv",
+                        "file_type": "csv",
+                        "status": "listed",
+                        "source_locator": {"kind": "tos_object", "bucket": "sales-bucket", "key": "reports/revenue.csv"},
+                    },
+                    {
+                        "filename": "cost.csv",
+                        "file_type": "csv",
+                        "status": "listed",
+                        "source_locator": {"kind": "tos_object", "bucket": "sales-bucket", "key": "reports/cost.csv"},
+                    },
+                ],
+            },
+        },
+        status="indexed",
+    )
+    test_session.add(snapshot)
+    await test_session.flush()
+    resource.latest_snapshot_id = snapshot.id
+    await test_session.commit()
+
+    parsed = await test_client.get(f"/api/source-resources/{resource.id}/parsed-assets")
+    assert parsed.status_code == 200
+    payload = parsed.json()["data"]
+
+    assert payload["latest_snapshot_id"] == str(snapshot.id)
+    assert payload["metadata"]["raw_storage_uri"] == "tos://sales-bucket/reports/"
+    assert [item["name"] for item in payload["files"]] == ["revenue.csv", "cost.csv"]
+    assert payload["files"][0]["status"] == "listed"
+    assert payload["files"][0]["locator"] == {
+        "kind": "tos_object",
+        "bucket": "sales-bucket",
+        "key": "reports/revenue.csv",
+    }
+    assert payload["tables"] == []
+
+
 async def test_agent_asset_search_and_describe_spans_dataset_and_knowledge_resource(test_client, test_session):
     tenant = await _tenant(test_session)
     notebook = await _create_notebook(test_client)

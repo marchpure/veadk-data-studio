@@ -485,6 +485,78 @@ async def test_sources_overview_uses_snapshot_projection_manifest_for_asset_coun
     assert item["next_actions"] == ["Review projection", "Generate semantic model"]
 
 
+async def test_sources_overview_counts_tos_prefix_manifest_files(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    resource = SourceResource(
+        tenant_id=tenant.id,
+        resource_type="tos_prefix",
+        name="reports/",
+        external_id="sales-bucket/reports/",
+        owner_id=tenant.owner_id,
+        visibility="workspace",
+        sync_mode="manual",
+        status="ready",
+    )
+    test_session.add(resource)
+    await test_session.flush()
+    snapshot = SourceSnapshot(
+        tenant_id=tenant.id,
+        resource_id=resource.id,
+        external_revision="collection:sha256:reports",
+        content_hash="sha256:reports-manifest",
+        raw_storage_uri="tos://sales-bucket/reports/",
+        captured_at=datetime.utcnow(),
+        parser_version="tos-prefix-listing-v1",
+        metadata_json={
+            "bucket": "sales-bucket",
+            "prefix": "reports/",
+            "object_count": 2,
+            "object_manifest": {
+                "bucket": "sales-bucket",
+                "prefix": "reports/",
+                "objects": [
+                    {"key": "reports/revenue.csv", "size": 24, "etag": "etag-1"},
+                    {"key": "reports/cost.csv", "size": 20, "etag": "etag-2"},
+                ],
+            },
+            "projection_manifest": {
+                "files": [
+                    {
+                        "filename": "revenue.csv",
+                        "file_type": "csv",
+                        "status": "listed",
+                        "source_locator": {"kind": "tos_object", "bucket": "sales-bucket", "key": "reports/revenue.csv"},
+                    },
+                    {
+                        "filename": "cost.csv",
+                        "file_type": "csv",
+                        "status": "listed",
+                        "source_locator": {"kind": "tos_object", "bucket": "sales-bucket", "key": "reports/cost.csv"},
+                    },
+                ],
+            },
+        },
+        status="indexed",
+    )
+    test_session.add(snapshot)
+    await test_session.flush()
+    resource.latest_snapshot_id = snapshot.id
+    await test_session.commit()
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["id"] == str(resource.id))
+
+    assert item["family"] == "object_storage"
+    assert item["provider"] == "volcengine_tos"
+    assert item["raw_artifact_uri"] == "tos://sales-bucket/reports/"
+    assert item["parsed_asset_counts"]["files"] == 2
+    assert item["parsed_asset_counts"]["tables"] == 0
+    assert item["next_actions"] == ["Review object manifest", "Index context"]
+
+
 async def test_sources_overview_excludes_deleted_source_resources(test_client, test_session, monkeypatch):
     from server.services.web_source_adapter import WebCapturedPage
 
