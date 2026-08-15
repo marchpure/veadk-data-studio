@@ -19,6 +19,7 @@ from server.models.semantic_models import SemanticModel
 from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
 from server.models.tenant import Tenant
+from server.schemas.source_resources import SourceResourceProcessingRead
 from server.services.knowledge_provider import (
     KnowledgeEvidence,
     KnowledgeSearchInput,
@@ -36,6 +37,43 @@ def _assert_product_processing_copy(payload):
     assert "connector-supplied" not in text
     assert "post content" not in text
     assert "api will not fake" not in text
+
+
+def test_source_processing_step_schema_is_typed_contract():
+    schema = SourceResourceProcessingRead.model_json_schema()
+    step_schema = schema["$defs"]["SourceProcessingStepRead"]
+
+    assert schema["properties"]["status"]["enum"] == [
+        "pending",
+        "syncing",
+        "understanding",
+        "authorization_required",
+        "reauthorization_required",
+        "source_unavailable",
+        "permission_lost",
+        "needs_confirmation",
+        "ready",
+        "failed",
+    ]
+    assert schema["properties"]["stage"]["enum"] == [
+        "waiting_for_connector",
+        "captured",
+        "needs_confirmation",
+        "failed",
+        "indexed",
+    ]
+    assert schema["properties"]["steps"]["items"]["$ref"] == "#/$defs/SourceProcessingStepRead"
+    assert step_schema["required"] == ["id", "label", "status", "message"]
+    assert step_schema["properties"]["id"]["enum"] == [
+        "capture",
+        "parse",
+        "detect_tables",
+        "normalize_dataset",
+        "index_context",
+        "generate_semantic_suggestions",
+        "ready",
+    ]
+    assert step_schema["properties"]["status"]["enum"] == ["pending", "running", "succeeded", "skipped", "failed"]
 
 
 async def _tenant(test_session):

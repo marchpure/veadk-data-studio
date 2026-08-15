@@ -451,7 +451,7 @@ A connector is commercial-ready only when it supports:
 
 Anything missing one of these gates can be beta or planned, but not a supported v1 production connector.
 
-The processing API should expose the commercial stepper as structured state, not only as a free-form message. Each source resource reports `Capture`, `Parse`, `Detect tables`, `Normalize dataset`, `Index context`, `Generate semantic suggestions`, and `Ready` with `pending`, `running`, `succeeded`, `skipped`, or `failed` status so Add Source results, Source Detail, and modeling handoff can explain the same recovery path.
+The processing API should expose the commercial stepper as structured state, not only as a free-form message. Each source resource reports typed `status`, typed `stage`, and step ids for `Capture`, `Parse`, `Detect tables`, `Normalize dataset`, `Index context`, `Generate semantic suggestions`, and `Ready` with `pending`, `running`, `succeeded`, `skipped`, or `failed` status so Add Source results, Source Detail, and modeling handoff can explain the same recovery path.
 
 Source Detail destructive actions should also show consumer impact before confirmation. Removing a source or disconnecting connector authorization should surface attached semantic models, notebooks, dashboards, and analysis artifacts so customers understand which downstream work will retain only historical evidence and lose fresh sync or modeling handoff.
 

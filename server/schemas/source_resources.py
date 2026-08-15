@@ -19,6 +19,29 @@ SourceResourceType = Literal[
     "tos_object",
     "extracted_table",
 ]
+SourceResourceStatus = Literal[
+    "pending",
+    "syncing",
+    "understanding",
+    "authorization_required",
+    "reauthorization_required",
+    "source_unavailable",
+    "permission_lost",
+    "needs_confirmation",
+    "ready",
+    "failed",
+]
+SourceProcessingStage = Literal["waiting_for_connector", "captured", "needs_confirmation", "failed", "indexed"]
+SourceProcessingStepId = Literal[
+    "capture",
+    "parse",
+    "detect_tables",
+    "normalize_dataset",
+    "index_context",
+    "generate_semantic_suggestions",
+    "ready",
+]
+SourceProcessingStepStatus = Literal["pending", "running", "succeeded", "skipped", "failed"]
 
 
 class SourceResourceCreate(BaseModel):
@@ -122,7 +145,7 @@ class SourceResourceRead(BaseModel):
     visibility: str
     sync_mode: str
     sync_config_json: dict[str, Any] | None = None
-    status: str
+    status: SourceResourceStatus
     latest_snapshot_id: UUID | None = None
     projected_dataset_id: UUID | None = None
     created_at: datetime
@@ -131,10 +154,17 @@ class SourceResourceRead(BaseModel):
     knowledge_resource: KnowledgeResourceRead | None = None
 
 
+class SourceProcessingStepRead(BaseModel):
+    id: SourceProcessingStepId
+    label: str
+    status: SourceProcessingStepStatus
+    message: str
+
+
 class SourceResourceProcessingRead(BaseModel):
     resource_id: UUID
-    status: str
-    stage: str
+    status: SourceResourceStatus
+    stage: SourceProcessingStage
     message: str
     last_error: dict[str, Any] | None = None
     latest_snapshot_id: UUID | None = None
@@ -142,7 +172,7 @@ class SourceResourceProcessingRead(BaseModel):
     evidence_count: int = 0
     connector_required: bool = False
     next_actions: list[str] = Field(default_factory=list)
-    steps: list[dict[str, Any]] = Field(default_factory=list)
+    steps: list[SourceProcessingStepRead] = Field(default_factory=list)
 
 
 class SourceParsedAssetItem(BaseModel):
