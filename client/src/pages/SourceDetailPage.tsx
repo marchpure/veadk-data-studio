@@ -172,6 +172,15 @@ const connectionStatusTone = (status?: string | null) => {
   return 'border-amber-700/50 bg-amber-900/20 text-amber-200'
 }
 
+const contextReadinessLabel = (knowledgeResource?: SourceResource['knowledge_resource'] | EvidenceReadResponse['knowledge_resource'] | null) => {
+  if (!knowledgeResource) return 'Not indexed'
+  const status = knowledgeResource.provider_status || knowledgeResource.index_status
+  if (status === 'indexed') return 'Context ready'
+  if (status === 'failed') return 'Context indexing failed'
+  if (status === 'pending') return 'Context indexing pending'
+  return productStatusLabel(status)
+}
+
 export default function SourceDetailPage() {
   const { sourceId } = useParams()
   const navigate = useNavigate()
@@ -735,10 +744,10 @@ export default function SourceDetailPage() {
               </div>
             </div>
             <KeyValue label="Visibility" value={sourceResource.visibility} />
-            <KeyValue label="Context provider" value={sourceResource.knowledge_resource?.provider || 'Not indexed'} />
-            <KeyValue label="Provider status" value={sourceResource.knowledge_resource?.provider_status || sourceResource.knowledge_resource?.index_status || 'Unavailable'} />
+            <KeyValue label="Context" value={contextReadinessLabel(sourceResource.knowledge_resource)} />
             <KeyValue label="Last indexed" value={formatDate(sourceResource.knowledge_resource?.last_indexed_at)} />
-            <KeyValue label="Retrieval debug URI" value={sourceResource.knowledge_resource?.retrieval_debug_uri || '-'} />
+            <KeyValue label="Evidence fragments" value={`${sourceResource.knowledge_resource?.evidence_count ?? evidenceCount}`} />
+            <ContextDiagnostics knowledgeResource={sourceResource.knowledge_resource} />
             {sourceConnection && (
               <div className="mt-4 rounded border border-[#333333] bg-[#151515] p-3">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -833,11 +842,6 @@ export default function SourceDetailPage() {
               </div>
             </div>
             <KeyValue label="Reindex behavior" value={hasLocalUploadRawArtifact(sourceResource) ? 'Retry sync from the uploaded raw artifact to refresh parse, projection, and context state.' : 'Retry sync from the source connector to generate a new snapshot and context state.'} />
-            {sourceResource.knowledge_resource?.provider_error && (
-              <div className="mt-4 rounded border border-red-900/40 bg-red-950/20 p-3 text-sm text-red-100">
-                {JSON.stringify(sourceResource.knowledge_resource.provider_error)}
-              </div>
-            )}
           </Section>
         </div>
       </div>
@@ -1179,6 +1183,44 @@ function schemaTableSummary(name: string, info: any): { name: string; columns: n
   return { name, columns, rows }
 }
 
+function ContextDiagnostics({
+  knowledgeResource,
+}: {
+  knowledgeResource?: SourceResource['knowledge_resource'] | EvidenceReadResponse['knowledge_resource'] | null
+}) {
+  if (!knowledgeResource) return null
+  const hasDiagnostics = Boolean(
+    knowledgeResource.provider
+    || knowledgeResource.context_uri
+    || knowledgeResource.retrieval_debug_uri
+    || knowledgeResource.provider_error
+    || knowledgeResource.provider_metadata_json,
+  )
+  if (!hasDiagnostics) return null
+
+  return (
+    <details className="mt-3 rounded border border-[#333333] bg-[#101010] p-3">
+      <summary className="cursor-pointer text-xs uppercase text-gray-500">Context diagnostics</summary>
+      <div className="mt-3 grid gap-x-6 md:grid-cols-2">
+        <KeyValue label="Provider" value={knowledgeResource.provider || '-'} />
+        <KeyValue label="Provider status" value={knowledgeResource.provider_status || knowledgeResource.index_status || '-'} />
+        <KeyValue label="Context URI" value={knowledgeResource.context_uri || '-'} />
+        <KeyValue label="Retrieval debug URI" value={knowledgeResource.retrieval_debug_uri || '-'} />
+      </div>
+      {knowledgeResource.provider_error && (
+        <pre className="mt-3 max-h-40 overflow-auto rounded border border-red-900/30 bg-red-950/20 p-3 text-xs text-red-100">
+          {formatJsonValue(knowledgeResource.provider_error)}
+        </pre>
+      )}
+      {knowledgeResource.provider_metadata_json && Object.keys(knowledgeResource.provider_metadata_json).length > 0 && (
+        <pre className="mt-3 max-h-40 overflow-auto rounded border border-[#333333] bg-[#151515] p-3 text-xs text-gray-300">
+          {formatJsonValue(knowledgeResource.provider_metadata_json)}
+        </pre>
+      )}
+    </details>
+  )
+}
+
 function KeyValue({ label, value }: { label: string; value: string }) {
   return (
     <div className="mb-3 last:mb-0">
@@ -1281,18 +1323,11 @@ function EvidenceDetailDialog({
             <div className="rounded border border-[#333333] bg-[#151515] p-4">
               <div className="mb-3 text-xs uppercase text-gray-500">Context index</div>
               <div className="grid gap-x-6 md:grid-cols-2">
-                <KeyValue label="Provider" value={detail.knowledge_resource.provider} />
-                <KeyValue label="Provider status" value={detail.knowledge_resource.provider_status || detail.knowledge_resource.index_status} />
-                <KeyValue label="Context URI" value={detail.knowledge_resource.context_uri || '-'} />
-                <KeyValue label="Retrieval debug URI" value={detail.knowledge_resource.retrieval_debug_uri || '-'} />
+                <KeyValue label="Context" value={contextReadinessLabel(detail.knowledge_resource)} />
                 <KeyValue label="Last indexed" value={formatDate(detail.knowledge_resource.last_indexed_at)} />
                 <KeyValue label="Evidence count" value={`${detail.knowledge_resource.evidence_count}`} />
               </div>
-              {detail.knowledge_resource.provider_error && (
-                <pre className="mt-3 max-h-40 overflow-auto rounded border border-red-900/30 bg-red-950/20 p-3 text-xs text-red-100">
-                  {formatJsonValue(detail.knowledge_resource.provider_error)}
-                </pre>
-              )}
+              <ContextDiagnostics knowledgeResource={detail.knowledge_resource} />
             </div>
 
             <div className="grid gap-4 lg:grid-cols-2">

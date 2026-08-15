@@ -372,6 +372,8 @@ Evidence returned to users should be mapped back to Byaan locators:
 
 Source Detail should render those locators directly next to evidence previews. Customers need to see snapshot, URL/document token, block/page/table/row, revision, and hash context without opening provider internals. A full evidence context view should read `GET /api/evidence/{id}` and show complete evidence text, the source resource, source snapshot, KnowledgeProvider metadata, raw locator JSON, and snapshot metadata while keeping OpenViking or other provider connector details behind the provider boundary.
 
+In the default Source Detail UI, context storage internals should be summarized as context readiness, last indexed time, and evidence count. Provider names, context URIs, retrieval debug URIs, provider metadata, and provider errors belong in collapsed diagnostics for support/admin inspection, not in the ordinary source management surface.
+
 ## Interface Shape
 
 Keep two modules deep and separate.
