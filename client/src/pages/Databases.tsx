@@ -22,11 +22,48 @@ const pairKey = (p: DatabricksPair) => `${p.catalog}::${p.schema ?? '*'}`
 type SourceConnectorCreateType = `connector:${string}`
 type DatasourceCreateType = ConnectionType | 'upload' | 'url' | 'pdf' | 'web' | SourceConnectorCreateType
 type SourceInventoryTab = 'all' | 'needs_attention'
+type AddSourceFamilyId = 'files' | 'business_docs' | 'databases' | 'warehouses' | 'object_storage' | 'web' | 'api'
+
+type AddSourceOption = {
+  id: DatasourceCreateType | `planned:${string}`
+  label: string
+  family: AddSourceFamilyId
+  icon: typeof Upload
+  availability: 'available' | 'beta' | 'planned'
+  outputs: Array<'Context' | 'Dataset' | 'Semantic-ready' | 'Dashboard-ready'>
+  description: string
+  connector?: ConnectorDefinition
+}
+
 const isSourceConnectorType = (value: string): value is SourceConnectorCreateType => value.startsWith('connector:')
+const isPlannedSourceOption = (value: string): value is `planned:${string}` => value.startsWith('planned:')
 const sourceConnectorId = (value: DatasourceCreateType): string | null =>
   isSourceConnectorType(value) ? value.slice('connector:'.length) : null
 const isDirectSourceResourceType = (value: DatasourceCreateType) => value === 'pdf' || value === 'web'
 const needsAttentionStates = new Set(['auth', 'permission', 'parse', 'index', 'stale', 'policy'])
+
+const addSourceFamilies: Array<{
+  id: AddSourceFamilyId
+  label: string
+  description: string
+  icon: typeof Upload
+}> = [
+  { id: 'files', label: 'Files', description: 'PDF, CSV, Excel and local file imports', icon: Upload },
+  { id: 'business_docs', label: 'Business docs', description: 'Feishu/Lark documents, sheets and bases', icon: FileText },
+  { id: 'databases', label: 'Databases', description: 'Operational SQL and local databases', icon: Database },
+  { id: 'warehouses', label: 'Warehouses', description: 'Databricks and lakehouse sources', icon: Server },
+  { id: 'object_storage', label: 'Object storage', description: 'Buckets, prefixes and objects', icon: HardDrive },
+  { id: 'web', label: 'Web', description: 'URLs and governed web capture', icon: LinkIcon },
+  { id: 'api', label: 'API / More', description: 'Planned SaaS and SDK connectors', icon: Cloud },
+]
+
+const connectorCategoryFamily = (category: string): AddSourceFamilyId => {
+  if (category === 'documents') return 'business_docs'
+  if (category === 'object_storage') return 'object_storage'
+  if (category === 'data_lake') return 'warehouses'
+  if (category === 'databases') return 'databases'
+  return 'api'
+}
 
 export default function DatabasesPage() {
   const queryClient = useQueryClient()
@@ -66,6 +103,8 @@ export default function DatabasesPage() {
   const [webSourceUrl, setWebSourceUrl] = useState('')
 
   // Form state for create dialog
+  const [selectedFamily, setSelectedFamily] = useState<AddSourceFamilyId>('files')
+  const [selectedPlannedOption, setSelectedPlannedOption] = useState<AddSourceOption | null>(null)
   const [selectedType, setSelectedType] = useState<DatasourceCreateType>('upload')
   const [connectionConfig, setConnectionConfig] = useState({
     name: '',
@@ -156,6 +195,89 @@ export default function DatabasesPage() {
     if (!id) return undefined
     return connectorDefinitions.find(item => item.id === id)
   }, [connectorDefinitions, selectedType])
+  const addSourceOptions = useMemo<AddSourceOption[]>(() => {
+    const baseOptions: AddSourceOption[] = [
+      {
+        id: 'upload',
+        label: 'Upload files',
+        family: 'files',
+        icon: Upload,
+        availability: 'available',
+        outputs: ['Dataset', 'Semantic-ready'],
+        description: 'CSV, Excel, Parquet and JSON files become normalized datasets.',
+      },
+      {
+        id: 'pdf',
+        label: 'PDF document',
+        family: 'files',
+        icon: FileText,
+        availability: 'available',
+        outputs: ['Context'],
+        description: 'Capture a PDF snapshot and index it as a knowledge source.',
+      },
+      {
+        id: 'url',
+        label: 'Import file URL',
+        family: 'files',
+        icon: LinkIcon,
+        availability: 'available',
+        outputs: ['Dataset'],
+        description: 'Download supported data files from public URLs.',
+      },
+      {
+        id: 'web',
+        label: 'Web page',
+        family: 'web',
+        icon: LinkIcon,
+        availability: 'available',
+        outputs: ['Context'],
+        description: 'Capture a public web page with SSRF and redirect protections.',
+      },
+      { id: 'pg', label: 'PostgreSQL', family: 'databases', icon: Cylinder, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect a PostgreSQL database for schema, sample and profile.' },
+      { id: 'mysql', label: 'MySQL', family: 'databases', icon: Database, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect MySQL-compatible operational data.' },
+      { id: 'mssql', label: 'SQL Server', family: 'databases', icon: Server, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect SQL Server data for semantic modeling.' },
+      { id: 'oracle', label: 'Oracle', family: 'databases', icon: Database, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect Oracle schemas with service name or SID.' },
+      { id: 'sqlite', label: 'SQLite', family: 'databases', icon: HardDrive, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Use a local SQLite file for repeatable demos and local data.' },
+      { id: 'mongo', label: 'MongoDB', family: 'databases', icon: Leaf, availability: 'beta', outputs: ['Dataset'], description: 'MongoDB remains a beta structured-source connector.' },
+      { id: 'dynamodb', label: 'DynamoDB', family: 'databases', icon: Cloud, availability: 'beta', outputs: ['Dataset'], description: 'DynamoDB remains a beta NoSQL connector path.' },
+    ]
+    if (databricksTileVisible) {
+      baseOptions.push({
+        id: 'databricks',
+        label: 'Databricks',
+        family: 'warehouses',
+        icon: Database,
+        availability: 'available',
+        outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'],
+        description: 'Wrap the existing Databricks OAuth and catalog picker as a Source.',
+      })
+    }
+
+    const connectorOptions = connectorDefinitions.map<AddSourceOption>(item => {
+      const family = connectorCategoryFamily(item.category)
+      const availability = item.availability
+      return {
+        id: availability === 'planned' ? `planned:${item.id}` : `connector:${item.id}`,
+        label: item.display_name,
+        family,
+        icon: family === 'object_storage' ? HardDrive : family === 'business_docs' ? FileText : Cloud,
+        availability,
+        outputs: family === 'business_docs'
+          ? ['Context', 'Dataset']
+          : family === 'object_storage'
+            ? ['Context', 'Dataset']
+            : [],
+        description: item.description || 'Connector is listed in the commercial catalog.',
+        connector: item,
+      }
+    })
+
+    return [...baseOptions, ...connectorOptions]
+  }, [connectorDefinitions, databricksTileVisible])
+  const selectedFamilyMeta = addSourceFamilies.find(item => item.id === selectedFamily) || addSourceFamilies[0]
+  const currentFamilyOptions = addSourceOptions.filter(item => item.family === selectedFamily)
+  const selectedConcreteOption = currentFamilyOptions.find(option => !isPlannedSourceOption(option.id) && option.id === selectedType)
+  const hasActiveSetupForm = !selectedPlannedOption && !!selectedConcreteOption
 
   const formatDbType = (type: string): string => {
     switch (type) {
@@ -686,6 +808,8 @@ export default function DatabasesPage() {
   }
 
   const resetForm = () => {
+    setSelectedFamily('files')
+    setSelectedPlannedOption(null)
     setSelectedType('upload')
     setConnectionConfig({
       name: '',
@@ -799,6 +923,31 @@ export default function DatabasesPage() {
     } finally {
       setTogglingVisibility(null)
     }
+  }
+
+  const handleFamilyChange = (family: AddSourceFamilyId) => {
+    setSelectedFamily(family)
+    setSelectedPlannedOption(null)
+    const firstAvailable = addSourceOptions.find(item => item.family === family && item.availability !== 'planned')
+    if (firstAvailable && !isPlannedSourceOption(firstAvailable.id)) {
+      handleTypeChange(firstAvailable.id)
+      return
+    }
+    const firstPlanned = addSourceOptions.find(item => item.family === family && item.availability === 'planned')
+    if (firstPlanned) {
+      resetDatabricksWizard()
+      setSelectedPlannedOption(firstPlanned)
+    }
+  }
+
+  const handleSourceOptionChange = (option: AddSourceOption) => {
+    if (isPlannedSourceOption(option.id) || option.availability === 'planned') {
+      resetDatabricksWizard()
+      setSelectedPlannedOption(option)
+      return
+    }
+    setSelectedPlannedOption(null)
+    handleTypeChange(option.id)
   }
 
   const handleTypeChange = (newType: DatasourceCreateType) => {
@@ -1541,231 +1690,126 @@ export default function DatabasesPage() {
 
             <div className="flex h-[600px]">
               {/* Sidebar */}
-              <div className="w-52 bg-[#1a1a1a] border-r border-[#444444] p-3 overflow-y-auto custom-scrollbar">
-                <div className="space-y-1">
-                  {/* Upload Files */}
-                  <button
-                    onClick={() => handleTypeChange('upload')}
-                    disabled={isCreatingAnyDatasource}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-                      selectedType === 'upload'
-                        ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-                        : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-                    } ${isCreatingAnyDatasource ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <Upload className={`w-5 h-5 flex-shrink-0 ${selectedType === 'upload' ? 'text-brand-orange' : ''}`} />
-                    <span className="text-sm font-medium">Upload Files</span>
-                  </button>
-
-	                  {/* Import from URL */}
-	                  <button
-                    onClick={() => handleTypeChange('url')}
-                    disabled={isCreatingAnyDatasource}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-                      selectedType === 'url'
-                        ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-                        : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-                    } ${isCreatingAnyDatasource ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <LinkIcon className={`w-5 h-5 flex-shrink-0 ${selectedType === 'url' ? 'text-brand-orange' : ''}`} />
-	                    <span className="text-sm font-medium">Import from URL</span>
-	                  </button>
-
-	                  {/* PDF knowledge resource */}
-	                  <button
-	                    onClick={() => handleTypeChange('pdf')}
-	                    disabled={isCreatingAnyDatasource}
-	                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-	                      selectedType === 'pdf'
-	                        ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-	                        : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-	                    } ${isCreatingAnyDatasource ? 'opacity-50 cursor-not-allowed' : ''}`}
-	                  >
-	                    <FileText className={`w-5 h-5 flex-shrink-0 ${selectedType === 'pdf' ? 'text-brand-orange' : ''}`} />
-	                    <span className="text-sm font-medium">PDF document</span>
-	                  </button>
-
-	                  {/* Web knowledge resource */}
-	                  <button
-	                    onClick={() => handleTypeChange('web')}
-	                    disabled={isCreatingAnyDatasource}
-	                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-	                      selectedType === 'web'
-	                        ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-	                        : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-	                    } ${isCreatingAnyDatasource ? 'opacity-50 cursor-not-allowed' : ''}`}
-	                  >
-	                    <LinkIcon className={`w-5 h-5 flex-shrink-0 ${selectedType === 'web' ? 'text-brand-orange' : ''}`} />
-	                    <span className="text-sm font-medium">Web page</span>
-	                  </button>
-
-                  {/* Divider */}
-                  <div className="my-2 border-t border-[#444444]"></div>
-
-                  <div className="px-2 py-1 text-[11px] uppercase tracking-wide text-gray-500">Documents & object storage</div>
-
-                  {connectorDefinitionsQuery.isLoading && (
-                    <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500">
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                      Loading connectors
+              <div className="w-72 bg-[#1a1a1a] border-r border-[#444444] p-3 overflow-y-auto custom-scrollbar">
+                <div className="space-y-4">
+                  <div>
+                    <div className="px-2 pb-2 text-[11px] uppercase tracking-wide text-gray-500">Choose family</div>
+                    <div className="space-y-1">
+                      {addSourceFamilies.map(family => {
+                        const Icon = family.icon
+                        const active = selectedFamily === family.id
+                        const optionCount = addSourceOptions.filter(option => option.family === family.id).length
+                        return (
+                          <button
+                            key={family.id}
+                            type="button"
+                            onClick={() => handleFamilyChange(family.id)}
+                            disabled={isCreatingAnyDatasource}
+                            className={`w-full flex items-start gap-3 rounded-md px-3 py-2.5 text-left transition-all ${
+                              active
+                                ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
+                                : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
+                            } ${isCreatingAnyDatasource ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          >
+                            <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${active ? 'text-brand-orange' : ''}`} />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm font-medium">{family.label}</span>
+                              <span className="block truncate text-xs text-gray-500">{family.description}</span>
+                            </span>
+                            <span className="text-xs text-gray-500">{optionCount}</span>
+                          </button>
+                        )
+                      })}
                     </div>
-                  )}
+                  </div>
 
-                  {connectorDefinitions
-                    .filter(item => ['documents', 'object_storage'].includes(item.category))
-                    .map(item => {
-                      const selectedId = `connector:${item.id}` as const
-                      const Icon = item.category === 'object_storage' ? HardDrive : FileText
-                      return (
-                        <button
-                          key={item.id}
-                          onClick={() => handleTypeChange(selectedId)}
-                          disabled={isCreatingAnyDatasource}
-                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-                            selectedType === selectedId
-                              ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-                              : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-                          } ${isCreatingAnyDatasource ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                          <Icon className={`w-5 h-5 flex-shrink-0 ${selectedType === selectedId ? 'text-brand-orange' : item.availability === 'planned' ? 'text-gray-500' : ''}`} />
-                          <span className="min-w-0 flex-1 text-sm font-medium truncate">{item.display_name}</span>
-                          <span className={`text-[10px] uppercase ${
-                            item.availability === 'available'
-                              ? 'text-green-400'
-                              : item.availability === 'beta'
-                                ? 'text-amber-300'
-                                : 'text-gray-500'
-                          }`}>
-                            {item.availability}
-                          </span>
-                        </button>
-                      )
-                    })}
-
-                  <div className="my-2 border-t border-[#444444]"></div>
-
-                  {/* PostgreSQL */}
-                  <button
-                    onClick={() => handleTypeChange('pg')}
-                    disabled={createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-                      selectedType === 'pg'
-                        ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-                        : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-                    } ${createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <Cylinder className="w-5 h-5 flex-shrink-0 text-blue-400" />
-                    <span className="text-sm font-medium">PostgreSQL</span>
-                  </button>
-
-                  {/* MongoDB */}
-                  <button
-                    onClick={() => handleTypeChange('mongo')}
-                    disabled={createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-                      selectedType === 'mongo'
-                        ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-                        : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-                    } ${createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <Leaf className="w-5 h-5 flex-shrink-0 text-green-500" />
-                    <span className="text-sm font-medium">MongoDB</span>
-                  </button>
-
-                  {/* MySQL */}
-                  <button
-                    onClick={() => handleTypeChange('mysql')}
-                    disabled={createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-                      selectedType === 'mysql'
-                        ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-                        : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-                    } ${createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <Database className="w-5 h-5 flex-shrink-0 text-orange-400" />
-                    <span className="text-sm font-medium">MySQL</span>
-                  </button>
-
-                  {/* SQL Server */}
-                  <button
-                    onClick={() => handleTypeChange('mssql')}
-                    disabled={createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-                      selectedType === 'mssql'
-                        ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-                        : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-                    } ${createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <Server className="w-5 h-5 flex-shrink-0 text-red-400" />
-                    <span className="text-sm font-medium">SQL Server</span>
-                  </button>
-
-                  {/* Oracle */}
-                  <button
-                    onClick={() => handleTypeChange('oracle')}
-                    disabled={createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-                      selectedType === 'oracle'
-                        ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-                        : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-                    } ${createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <Database className="w-5 h-5 flex-shrink-0 text-red-300" />
-                    <span className="text-sm font-medium">Oracle</span>
-                  </button>
-
-                  {/* SQLite */}
-                  <button
-                    onClick={() => handleTypeChange('sqlite')}
-                    disabled={createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-                      selectedType === 'sqlite'
-                        ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-                        : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-                    } ${createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <HardDrive className="w-5 h-5 flex-shrink-0 text-cyan-400" />
-                    <span className="text-sm font-medium">SQLite</span>
-                  </button>
-
-                  {/* DynamoDB */}
-                  <button
-                    onClick={() => handleTypeChange('dynamodb')}
-                    disabled={createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-                      selectedType === 'dynamodb'
-                        ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-                        : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-                    } ${createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <Cloud className="w-5 h-5 flex-shrink-0 text-amber-400" />
-                    <span className="text-sm font-medium">DynamoDB</span>
-                  </button>
-
-                  {/* Databricks: hidden for non-admin team members until admin configures OAuth */}
-                  {databricksTileVisible && (
-                    <button
-                      onClick={() => handleTypeChange('databricks')}
-                      disabled={createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-                        selectedType === 'databricks'
-                          ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-                          : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-                      } ${createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    >
-                      <Database className="w-5 h-5 flex-shrink-0 text-red-400" />
-                      <span className="text-sm font-medium">Databricks</span>
-                    </button>
-                  )}
-                </div>
-              </div>
+                  <div className="border-t border-[#444444] pt-3">
+                    <div className="px-2 pb-2 text-[11px] uppercase tracking-wide text-gray-500">{selectedFamilyMeta.label}</div>
+                    <div className="space-y-1">
+                      {connectorDefinitionsQuery.isLoading && selectedFamily !== 'files' && (
+                        <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-500">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Loading connectors
+                        </div>
+                      )}
+                      {currentFamilyOptions.length === 0 && (
+                        <div className="rounded-md border border-dashed border-[#444444] px-3 py-4 text-sm text-gray-500">
+                          No connectors in this family yet.
+                        </div>
+                      )}
+                      {currentFamilyOptions.map(option => {
+                        const Icon = option.icon
+                        const active = isPlannedSourceOption(option.id)
+                          ? selectedPlannedOption?.id === option.id
+                          : selectedType === option.id && !selectedPlannedOption
+                        return (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => handleSourceOptionChange(option)}
+                            disabled={isCreatingAnyDatasource}
+                            className={`w-full flex items-start gap-3 rounded-md px-3 py-2.5 text-left transition-all ${
+                              active
+                                ? 'bg-white/10 text-white'
+                                : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
+                            } ${isCreatingAnyDatasource ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          >
+                            <Icon className={`mt-0.5 h-4 w-4 flex-shrink-0 ${active ? 'text-brand-orange' : option.availability === 'planned' ? 'text-gray-500' : ''}`} />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm font-medium">{option.label}</span>
+                              <span className="block line-clamp-2 text-xs text-gray-500">{option.description}</span>
+                              {option.outputs.length > 0 && (
+                                <span className="mt-1.5 flex flex-wrap gap-1">
+                                  {option.outputs.map(output => (
+                                    <span key={output} className="rounded border border-[#444444] px-1.5 py-0.5 text-[10px] leading-none text-gray-400">
+                                      {output}
+                                    </span>
+                                  ))}
+                                </span>
+                              )}
+                            </span>
+                            <span className={`mt-0.5 text-[10px] uppercase ${
+                              option.availability === 'available'
+                                ? 'text-green-400'
+                                : option.availability === 'beta'
+                                  ? 'text-amber-300'
+                                  : 'text-gray-500'
+                            }`}>
+                              {option.availability}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+	                  </div>
+	                </div>
+	              </div>
 
               {/* Form Content Area */}
               <div className="flex-1 flex flex-col overflow-hidden">
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
                   <div className="space-y-4">
+                    {selectedPlannedOption && (
+                      <div className="rounded-lg border border-dashed border-amber-700/50 bg-amber-950/20 p-5">
+                        <div className="flex items-start gap-3">
+                          <ShieldAlert className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-300" />
+                          <div className="space-y-2">
+                            <div>
+                              <div className="text-sm font-medium text-amber-100">{selectedPlannedOption.label} is planned</div>
+                              <p className="mt-1 text-sm text-amber-100/75">
+                                This catalog entry is on the roadmap, but it is not a supported production connector in the commercial beta.
+                              </p>
+                            </div>
+                            <p className="text-xs text-amber-100/60">
+                              Planned connectors cannot open a setup form until they pass the commercial readiness gates: tenant-isolated authorization, resource picker or import contract, immutable snapshots, parser artifacts, context indexing status, source detail, and clear delete/revoke/reindex behavior.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Connection/Source Name - hidden for OAuth/picker connectors and Databricks wizard */}
-                    {selectedType !== 'databricks' && !isSourceConnectorType(selectedType) && (
+                    {hasActiveSetupForm && selectedType !== 'databricks' && !isSourceConnectorType(selectedType) && (
                       <div>
                         <Label htmlFor="connection-name" className="text-white">
                           {selectedType === 'upload' || selectedType === 'url' || isDirectSourceResourceType(selectedType) ? 'Source Name' : 'Connection Name'} <span className="text-red-400">*</span>
@@ -1787,7 +1831,7 @@ export default function DatabasesPage() {
                       </div>
                     )}
 
-                    {isSourceConnectorType(selectedType) && (
+                    {hasActiveSetupForm && isSourceConnectorType(selectedType) && (
                       <SourceConnectorImportPanel
                         provider={sourceConnectorId(selectedType) === 'volcengine_tos' ? 'volcengine_tos' : 'feishu'}
                         definition={selectedConnectorDefinition}
@@ -1800,7 +1844,7 @@ export default function DatabasesPage() {
                     )}
 
                     {/* Upload Files Form */}
-                    {selectedType === 'upload' && (
+                    {hasActiveSetupForm && selectedType === 'upload' && (
                       <>
                         {/* Progress Indicator */}
                         {uploadMultipleFilesMutation.isPending && (
@@ -1959,7 +2003,7 @@ export default function DatabasesPage() {
                     )}
 
                     {/* Import from URL Form */}
-	                    {selectedType === 'url' && (
+	                    {hasActiveSetupForm && selectedType === 'url' && (
                       <>
                         {/* Progress Indicator */}
                         {uploadFromURLMutation.isPending && (
@@ -2046,7 +2090,7 @@ export default function DatabasesPage() {
 	                      </>
 	                    )}
 
-	                    {selectedType === 'pdf' && (
+	                    {hasActiveSetupForm && selectedType === 'pdf' && (
 	                      <div className="space-y-4">
 	                        {createPdfSourceResourceMutation.isPending && (
 	                          <div className="bg-orange-900/20 border border-brand-orange rounded-lg p-4">
@@ -2092,7 +2136,7 @@ export default function DatabasesPage() {
 	                      </div>
 	                    )}
 
-	                    {selectedType === 'web' && (
+	                    {hasActiveSetupForm && selectedType === 'web' && (
 	                      <div className="space-y-4">
 	                        {createSourceResourceMutation.isPending && (
 	                          <div className="bg-orange-900/20 border border-brand-orange rounded-lg p-4">
@@ -2129,7 +2173,7 @@ export default function DatabasesPage() {
 	                    )}
 
 	                    {/* Database Connection Forms */}
-                    {selectedType === 'mongo' && (
+                    {hasActiveSetupForm && selectedType === 'mongo' && (
                       <div>
                         <Label htmlFor="conn-string" className="text-white">
                           Connection String <span className="text-red-400">*</span>
@@ -2145,7 +2189,7 @@ export default function DatabasesPage() {
                       </div>
                     )}
 
-                    {selectedType === 'sqlite' && (
+                    {hasActiveSetupForm && selectedType === 'sqlite' && (
                       <div>
                         <Label htmlFor="database" className="text-white">
                           Database File Path <span className="text-red-400">*</span>
@@ -2162,7 +2206,7 @@ export default function DatabasesPage() {
                       </div>
                     )}
 
-                    {selectedType === 'dynamodb' && (
+                    {hasActiveSetupForm && selectedType === 'dynamodb' && (
                       <div className="space-y-4">
                         <div>
                           <Label htmlFor="region" className="text-white">AWS Region <span className="text-red-400">*</span></Label>
@@ -2227,7 +2271,7 @@ export default function DatabasesPage() {
                       </div>
                     )}
 
-                    {selectedType === 'databricks' && (
+                    {hasActiveSetupForm && selectedType === 'databricks' && (
                       <div className="mb-4 flex items-center gap-3">
                         <div className="flex items-center gap-2 flex-1">
                           <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${databricksStep === 1 ? 'bg-brand-orange text-white' : 'bg-green-600/20 text-green-400 border border-green-600/40'}`}>
@@ -2243,13 +2287,13 @@ export default function DatabasesPage() {
                       </div>
                     )}
 
-                    {selectedType === 'databricks' && databricksStep === 1 && isSelfHosted && !databricksOAuthConfigured && !databricksOAuthCanConfigure && (
+                    {hasActiveSetupForm && selectedType === 'databricks' && databricksStep === 1 && isSelfHosted && !databricksOAuthConfigured && !databricksOAuthCanConfigure && (
                       <div className="bg-amber-900/20 border border-amber-700/40 rounded-md p-3 text-sm text-amber-200">
                         Databricks OAuth isn't configured for this workspace. Ask your admin to register a custom OAuth app in the Databricks Account Console and add the credentials in Settings.
                       </div>
                     )}
 
-                    {selectedType === 'databricks' && databricksStep === 1 && isSelfHosted && !databricksOAuthConfigured && databricksOAuthCanConfigure && (
+                    {hasActiveSetupForm && selectedType === 'databricks' && databricksStep === 1 && isSelfHosted && !databricksOAuthConfigured && databricksOAuthCanConfigure && (
                       <div className="space-y-3">
                         <div className="bg-amber-900/20 border border-amber-700/40 rounded-md p-3 text-sm text-amber-200">
                           Databricks OAuth isn't configured yet. Register Byaan as a custom OAuth app in the Databricks Account Console and paste the credentials below. After saving, every user can sign in with Databricks.
@@ -2258,7 +2302,7 @@ export default function DatabasesPage() {
                       </div>
                     )}
 
-                    {selectedType === 'databricks' && databricksStep === 1 && databricksOAuthConfigured && (
+                    {hasActiveSetupForm && selectedType === 'databricks' && databricksStep === 1 && databricksOAuthConfigured && (
                       <div className="space-y-4">
                         <div className="flex items-start justify-between gap-3">
                           <p className="text-xs text-gray-400 flex-1">
@@ -2375,7 +2419,7 @@ export default function DatabasesPage() {
                       </div>
                     )}
 
-                    {selectedType === 'databricks' && databricksStep === 2 && discoveredCatalogs && (
+                    {hasActiveSetupForm && selectedType === 'databricks' && databricksStep === 2 && discoveredCatalogs && (
                       <div className="space-y-4">
                         {batchProgress ? (
                           <div className="bg-[#1a1a1a] border border-[#444444] rounded-lg p-5 space-y-4">
@@ -2530,7 +2574,7 @@ export default function DatabasesPage() {
                       </div>
                     )}
 
-                    {(selectedType === 'pg' || selectedType === 'mysql' || selectedType === 'mssql') && (
+                    {hasActiveSetupForm && (selectedType === 'pg' || selectedType === 'mysql' || selectedType === 'mssql') && (
                       <div className="space-y-4">
                         <div className="grid grid-cols-2 gap-3">
                           <div>
@@ -2597,7 +2641,7 @@ export default function DatabasesPage() {
                       </div>
                     )}
 
-                    {selectedType === 'oracle' && (
+                    {hasActiveSetupForm && selectedType === 'oracle' && (
                       <div className="space-y-4">
                         <div className="grid grid-cols-2 gap-3">
                           <div>
@@ -2694,7 +2738,19 @@ export default function DatabasesPage() {
 
                 {/* Action Buttons */}
                 <div className="border-t border-[#444444] p-6 flex justify-end gap-2">
-                  {selectedType === 'databricks' ? (
+                  {selectedPlannedOption || !hasActiveSetupForm ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setShowCreateDialog(false)
+                        resetForm()
+                      }}
+                      disabled={isCreatingAnyDatasource}
+                      className="border-[#555555] text-white hover:bg-[#3a3a3a]"
+                    >
+                      Close
+                    </Button>
+                  ) : selectedType === 'databricks' ? (
                     <>
                       <Button
                         variant="outline"
@@ -2736,65 +2792,65 @@ export default function DatabasesPage() {
                       )}
                     </>
                   ) : isSourceConnectorType(selectedType) ? (
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setShowCreateDialog(false)
-                      resetForm()
-                    }}
-                    disabled={isCreatingAnyDatasource}
-                    className="border-[#555555] text-white hover:bg-[#3a3a3a]"
-                  >
-                    Close
-                  </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setShowCreateDialog(false)
+                        resetForm()
+                      }}
+                      disabled={isCreatingAnyDatasource}
+                      className="border-[#555555] text-white hover:bg-[#3a3a3a]"
+                    >
+                      Close
+                    </Button>
                   ) : (
-                  <>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setShowCreateDialog(false)
-                      resetForm()
-                    }}
-                    disabled={isCreatingAnyDatasource}
-                    className="border-[#555555] text-white hover:bg-[#3a3a3a]"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    onClick={() => {
-	                      if (selectedType === 'upload' || selectedType === 'url') {
-	                        handleCreateDialogSubmit()
-	                      } else if (isDirectSourceResourceType(selectedType)) {
-	                        handleCreateSourceResourceSubmit()
-	                      } else {
-	                        handleCreateConnection()
-	                      }
-                    }}
-                    disabled={
-	                      (selectedType === 'upload' && (!uploadConnectionName.trim() || !uploadFileType || uploadFiles.length === 0)) ||
-	                      (selectedType === 'url' && (!uploadConnectionName.trim() || uploadURLs.filter(u => u.trim()).length === 0)) ||
-	                      (selectedType === 'pdf' && (!uploadConnectionName.trim() || !pdfSourceFile)) ||
-	                      (selectedType === 'web' && (!uploadConnectionName.trim() || !webSourceUrl.trim())) ||
-	                      (selectedType !== 'upload' && selectedType !== 'url' && !isCreateFormValid) ||
-	                      isCreatingAnyDatasource
-                    }
-                    className={`${
-	                      ((selectedType === 'upload' && uploadConnectionName.trim() && uploadFileType && uploadFiles.length > 0) ||
-	                       (selectedType === 'url' && uploadConnectionName.trim() && uploadURLs.filter(u => u.trim()).length > 0) ||
-	                       (selectedType === 'pdf' && uploadConnectionName.trim() && pdfSourceFile) ||
-	                       (selectedType === 'web' && uploadConnectionName.trim() && webSourceUrl.trim()) ||
-	                       (selectedType !== 'upload' && selectedType !== 'url' && !isDirectSourceResourceType(selectedType) && isCreateFormValid)) &&
-                      !isCreatingAnyDatasource
-                        ? 'bg-brand-orange hover:bg-brand-orange/90'
-                        : 'bg-gray-500 cursor-not-allowed'
-                    } flex items-center gap-2`}
-                  >
-                    {isCreatingAnyDatasource && (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    )}
-                    {isCreatingAnyDatasource ? 'Creating...' : 'Create Source'}
-                  </Button>
-                  </>
+                    <>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setShowCreateDialog(false)
+                          resetForm()
+                        }}
+                        disabled={isCreatingAnyDatasource}
+                        className="border-[#555555] text-white hover:bg-[#3a3a3a]"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          if (selectedType === 'upload' || selectedType === 'url') {
+                            handleCreateDialogSubmit()
+                          } else if (isDirectSourceResourceType(selectedType)) {
+                            handleCreateSourceResourceSubmit()
+                          } else {
+                            handleCreateConnection()
+                          }
+                        }}
+                        disabled={
+                          (selectedType === 'upload' && (!uploadConnectionName.trim() || !uploadFileType || uploadFiles.length === 0)) ||
+                          (selectedType === 'url' && (!uploadConnectionName.trim() || uploadURLs.filter(u => u.trim()).length === 0)) ||
+                          (selectedType === 'pdf' && (!uploadConnectionName.trim() || !pdfSourceFile)) ||
+                          (selectedType === 'web' && (!uploadConnectionName.trim() || !webSourceUrl.trim())) ||
+                          (selectedType !== 'upload' && selectedType !== 'url' && !isCreateFormValid) ||
+                          isCreatingAnyDatasource
+                        }
+                        className={`${
+                          ((selectedType === 'upload' && uploadConnectionName.trim() && uploadFileType && uploadFiles.length > 0) ||
+                            (selectedType === 'url' && uploadConnectionName.trim() && uploadURLs.filter(u => u.trim()).length > 0) ||
+                            (selectedType === 'pdf' && uploadConnectionName.trim() && pdfSourceFile) ||
+                            (selectedType === 'web' && uploadConnectionName.trim() && webSourceUrl.trim()) ||
+                            (selectedType !== 'upload' && selectedType !== 'url' && !isDirectSourceResourceType(selectedType) && isCreateFormValid)) &&
+                          !isCreatingAnyDatasource
+                            ? 'bg-brand-orange hover:bg-brand-orange/90'
+                            : 'bg-gray-500 cursor-not-allowed'
+                        } flex items-center gap-2`}
+                      >
+                        {isCreatingAnyDatasource && (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        )}
+                        {isCreatingAnyDatasource ? 'Creating...' : 'Create Source'}
+                      </Button>
+                    </>
                   )}
                 </div>
               </div>

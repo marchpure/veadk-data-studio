@@ -274,6 +274,20 @@ Tasks:
 8. For planned connectors, show request-access copy instead of a disabled dead end.
 9. Keep Databricks wizard behavior unchanged while visually moving it under Warehouses.
 
+Current implementation:
+
+- `client/src/pages/Databases.tsx` now renders a family-first sidebar inside `Add Source`.
+- Families are `Files`, `Business docs`, `Databases`, `Warehouses`, `Object storage`, `Web`, and `API / More`.
+- The legacy long connector list has been removed from the dialog DOM; users pick a family first, then choose the exact source option.
+- Existing setup forms are preserved behind the selected concrete option: uploads, file URL import, PDF, web page, SQL databases, MongoDB, DynamoDB, Oracle, Databricks, Feishu/Lark, and TOS.
+- Databricks appears under `Warehouses` and reuses the existing OAuth/catalog/schema wizard.
+- Connector catalog entries are mapped into families from `ConnectorDefinition.category`; `documents` maps to `Business docs`, `object_storage` maps to `Object storage`, `data_lake` maps to `Warehouses`, and database catalog entries map to `Databases`.
+- Each source option shows availability (`available`, `beta`, `planned`) and output chips (`Context`, `Dataset`, `Semantic-ready`, `Dashboard-ready`) where applicable.
+- Planned entries use `planned:<connector_id>` and never set `selectedType`, so they cannot open a working setup form by accident.
+- Selecting a planned entry shows a read-only commercial readiness message covering tenant-isolated authorization, resource picker/import contract, immutable snapshots, parser artifacts, context indexing status, source detail, and delete/revoke/reindex behavior.
+- If a family only has planned entries, the dialog automatically selects the first planned entry instead of keeping the previous family's setup form visible.
+- The `AddSourceDialog` component extraction is intentionally deferred until post-import processing and source detail work define the reusable boundaries; this keeps this slice focused on behavior without moving a large mixed form tree.
+
 Acceptance:
 
 - Feishu/Lark is found under Business docs, not buried below PDF/Web.
