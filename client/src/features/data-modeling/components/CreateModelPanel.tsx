@@ -240,7 +240,7 @@ function DatasourceStep({
           <div className="p-4 pb-0">
             <EmptyState
               title="No production-model-ready source found"
-              body="Connected sources are visible below, but each needs a confirmed projection, indexed context boundary, restored permission, or relational profile before production semantic generation."
+              body="Connected sources are visible below, but each needs projection review, context indexing, restored permission, reauthorization, upstream recovery, or a relational profile before production semantic generation."
             />
           </div>
         )}
@@ -350,6 +350,12 @@ function modelingStatusLabel(status: DataModelingDatasource['modelingStatus']): 
   if (status === 'supported') return 'Supported'
   if (status === 'needs_projection') return 'Needs projection'
   if (status === 'context_only') return 'Context only'
+  if (status === 'permission_required') return 'Permission required'
+  if (status === 'reauthorization_required') return 'Reauthorization required'
+  if (status === 'source_unavailable') return 'Source unavailable'
+  if (status === 'processing') return 'Processing'
+  if (status === 'failed') return 'Failed'
+  if (status === 'planned') return 'Planned'
   return 'Unsupported'
 }
 
@@ -357,6 +363,8 @@ function modelingStatusTone(status: DataModelingDatasource['modelingStatus']): '
   if (status === 'supported') return 'ready'
   if (status === 'needs_projection') return 'warning'
   if (status === 'context_only') return 'info'
+  if (status === 'processing' || status === 'planned') return 'info'
+  if (status === 'permission_required' || status === 'reauthorization_required') return 'warning'
   return 'blocked'
 }
 

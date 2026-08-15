@@ -250,9 +250,9 @@ export function sourceOverviewToModelingDatasource(item: SourceOverviewItem): Da
   if (blocked) {
     return {
       ...base,
-      modelingStatus: 'unsupported',
+      modelingStatus: blocked.status,
       modelingMode: modeForFamily(item),
-      reason: blocked,
+      reason: blocked.reason,
       canLoadProfile: false,
     }
   }
@@ -333,40 +333,88 @@ function compareModelingDatasources(left: DataModelingDatasource, right: DataMod
     supported: 0,
     needs_projection: 1,
     context_only: 2,
-    unsupported: 3,
+    reauthorization_required: 3,
+    permission_required: 4,
+    processing: 5,
+    source_unavailable: 6,
+    failed: 7,
+    planned: 8,
+    unsupported: 9,
   }
   const statusDelta = priority[left.modelingStatus] - priority[right.modelingStatus]
   if (statusDelta !== 0) return statusDelta
   return left.name.localeCompare(right.name)
 }
 
-function sourceOverviewBlocker(item: SourceOverviewItem): string | null {
+function sourceOverviewBlocker(item: SourceOverviewItem): { status: DataModelingStatus; reason: string } | null {
   const status = normalizeStatusText(item.status)
-  if (['authorization required', 'reauthorization required'].includes(status)) {
-    return 'Reauthorize this source before it can feed semantic modeling.'
+  if (status === 'authorization required') {
+    return {
+      status: 'reauthorization_required',
+      reason: 'Connect or reauthorize this source before it can feed semantic modeling.',
+    }
+  }
+  if (status === 'reauthorization required') {
+    return {
+      status: 'reauthorization_required',
+      reason: 'Reauthorize this source before it can feed semantic modeling.',
+    }
   }
   if (status === 'permission lost') {
-    return 'Restore upstream permissions before this source can feed semantic modeling.'
+    return {
+      status: 'permission_required',
+      reason: 'Restore upstream permissions before this source can feed semantic modeling.',
+    }
   }
   if (status === 'source unavailable') {
-    return 'The upstream source is unavailable. Retry sync or check the upstream resource.'
+    return {
+      status: 'source_unavailable',
+      reason: 'The upstream source is unavailable. Retry sync or check the upstream resource.',
+    }
   }
   if (status === 'failed') {
-    return item.parse_status === 'failed'
-      ? 'Parser failed. Review parser warnings and retry sync before modeling.'
-      : 'Source processing failed. Retry sync before modeling.'
+    return {
+      status: 'failed',
+      reason: item.parse_status === 'failed'
+        ? 'Parser failed. Review parser warnings and retry sync before modeling.'
+        : 'Source processing failed. Retry sync before modeling.',
+    }
   }
   if (status === 'needs confirmation') {
-    return 'Confirm the selected resource or projection before modeling.'
+    return {
+      status: 'needs_projection',
+      reason: 'Confirm the selected resource or projection before modeling.',
+    }
   }
   if (item.context_index_status === 'failed' && isContextSource(item)) {
-    return 'Context indexing failed. Retry indexing before using this source as modeling evidence.'
+    return {
+      status: 'failed',
+      reason: 'Context indexing failed. Retry indexing before using this source as modeling evidence.',
+    }
   }
   if (item.parse_status === 'failed') {
-    return 'Parsing failed. Review parser warnings and retry sync before modeling.'
+    return {
+      status: 'failed',
+      reason: 'Parsing failed. Review parser warnings and retry sync before modeling.',
+    }
   }
   if (['pending', 'syncing', 'analyzing'].includes(status)) {
-    return 'Source processing is still running. Wait until processing finishes before modeling.'
+    return {
+      status: 'processing',
+      reason: 'Source processing is still running. Wait until processing finishes before modeling.',
+    }
+  }
+  if (status === 'planned') {
+    return {
+      status: 'planned',
+      reason: 'This connector is not production-ready yet. Request access or use an available Source family.',
+    }
+  }
+  if (item.next_actions.some(action => normalizeStatusText(action).includes('request access'))) {
+    return {
+      status: 'planned',
+      reason: 'This connector is not production-ready yet. Request access or use an available Source family.',
+    }
   }
   return null
 }

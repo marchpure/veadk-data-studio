@@ -17,7 +17,17 @@ export type TimeGrain = 'day' | 'week' | 'month' | 'quarter'
 export type HomeViewMode = 'ready' | 'loading' | 'error' | 'empty' | 'permission'
 export type GenerationPhase = 'idle' | 'profile' | 'semantic' | 'validation' | 'completed'
 export type GenerationStepStatus = 'pending' | 'running' | 'done'
-export type DataModelingStatus = 'supported' | 'needs_projection' | 'context_only' | 'unsupported'
+export type DataModelingStatus =
+  | 'supported'
+  | 'needs_projection'
+  | 'context_only'
+  | 'permission_required'
+  | 'reauthorization_required'
+  | 'source_unavailable'
+  | 'processing'
+  | 'failed'
+  | 'planned'
+  | 'unsupported'
 export type DataModelingMode = 'relational' | 'warehouse' | 'projection' | 'context_assisted' | 'business_object' | 'event' | 'semantic_import'
 
 export interface DataModelingDatasource {

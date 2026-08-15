@@ -437,10 +437,16 @@ Current implementation:
   - `supported` with `warehouse` mode for ready Databricks/warehouse sources.
   - `needs_projection` for files, object storage, Feishu Sheets/Base, extracted tables, and any source with `projected_dataset_id`.
   - `context_only` for documents and web sources that can support definitions, policies, examples, and evidence but cannot be the production fact source for metrics.
-  - `unsupported` for permission, auth, parser, source availability, and unsupported-family blockers.
+  - `permission_required` for upstream permission loss.
+  - `reauthorization_required` for sources that need connector authorization before modeling handoff.
+  - `source_unavailable` when the upstream system or resource cannot be reached.
+  - `processing` while sync, parsing, or source analysis is still running.
+  - `failed` for parser, context indexing, or source processing failures.
+  - `planned` for roadmap/request-access entries that must not pretend to be production-ready.
+  - `unsupported` only for source families without a production modeling handoff contract.
 - The Create Model picker shows every connected source with its family, modeling mode, status, next action, and blocker reason instead of only showing `No supported datasource found`.
 - Profile loading and semantic generation are guarded so only `supported` sources with a relational/warehouse profile can continue into production generation.
-- Projection and context sources stay visible but disabled for production generation until their projection or modeling contract is confirmed.
+- Projection, context, permission, reauthorization, processing, failed, planned, and unsupported sources stay visible but disabled for production generation until the corresponding Source next action is resolved.
 
 Acceptance:
 

@@ -265,6 +265,8 @@ Do not put these into the v1 production commitment:
 
 These can appear as planned catalog tiles, beta adapters, SDK examples, or marketplace adapters when the UI makes support status explicit.
 
+Data Modeling must consume this same Source contract instead of silently filtering to SQL-only datasources. The handoff status should distinguish `supported`, `needs_projection`, `context_only`, `permission_required`, `reauthorization_required`, `source_unavailable`, `processing`, `failed`, `planned`, and `unsupported`. Only relational and warehouse sources with profile evidence can enter production semantic generation directly; files, object storage, Feishu Sheets/Base, and extracted tables require projection review; docs, Wiki, PDF, and web sources are context-assisted evidence unless a confirmed projection exists.
+
 ## V1.5 / V2 Connector Expansion
 
 Add these after the source -> semantic model -> dashboard loop is strong:
