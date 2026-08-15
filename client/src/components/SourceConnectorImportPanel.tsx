@@ -13,12 +13,14 @@ import {
   useListSourceConnectionResources,
   useLocateSourceConnectionResource,
   useFeishuOAuthResult,
+  useSourceResourceProcessing,
   useSourceConnections,
   useStartFeishuOAuth,
 } from '../hooks/useDBConnections'
 import type {
   ConnectorDefinition,
   SourceResourceImportResult,
+  SourceResourceProcessing,
   SourceResourceImportSelection,
   SourceResourcePickerItem,
   SourceResourcePickerType,
@@ -104,6 +106,32 @@ const resourceLabel = (type: SourceResourceType | string) => {
     default:
       return type
   }
+}
+
+const processingSteps = [
+  { id: 'capture', label: 'Capture' },
+  { id: 'parse', label: 'Parse' },
+  { id: 'detect', label: 'Detect tables' },
+  { id: 'normalize', label: 'Normalize dataset' },
+  { id: 'index', label: 'Index context' },
+  { id: 'suggest', label: 'Generate semantic suggestions' },
+  { id: 'ready', label: 'Ready' },
+] as const
+
+const processingProgressIndex = (processing: SourceResourceProcessing | undefined, result: SourceResourceImportResult) => {
+  if (result.status !== 'ready' || processing?.stage === 'failed') return -1
+  if (processing?.stage === 'waiting_for_connector') return 0
+  if (processing?.stage === 'captured') return 1
+  if (processing?.stage === 'indexed') return processingSteps.length - 1
+  if (result.resource.projected_dataset_id) return 5
+  if (result.resource.latest_snapshot_id) return 4
+  return 1
+}
+
+const processingTone = (processing: SourceResourceProcessing | undefined, result: SourceResourceImportResult) => {
+  if (result.status !== 'ready' || processing?.stage === 'failed') return 'failed'
+  if (processing?.stage === 'indexed') return 'ready'
+  return 'processing'
 }
 
 export function SourceConnectorImportPanel({
@@ -841,20 +869,13 @@ export function SourceConnectorImportPanel({
       </div>
 
       {importResults && (
-        <div className="space-y-2 rounded-lg border border-[#444444] bg-[#1a1a1a] p-3">
-          <div className="text-sm font-medium text-white">Import results</div>
+        <div className="space-y-3 rounded-lg border border-[#444444] bg-[#1a1a1a] p-3">
+          <div>
+            <div className="text-sm font-medium text-white">Processing</div>
+            <p className="mt-1 text-xs text-gray-400">Imported resources stay here until capture, parse, dataset projection, context indexing, semantic suggestions, and readiness are clear.</p>
+          </div>
           {importResults.map(result => (
-            <div key={`${result.selection.resource_type}:${result.selection.external_id}`} className="flex items-start gap-2 rounded bg-[#242424] px-3 py-2 text-xs">
-              {result.status === 'ready' ? <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-400" /> : <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-400" />}
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-white">{result.resource?.name || result.selection.name || result.selection.external_id}</div>
-                <div className={result.status === 'ready' ? 'text-green-300' : 'text-red-300'}>
-                  {result.status === 'ready'
-                    ? `Ready · snapshot ${result.resource?.latest_snapshot_id || 'created'}${result.resource?.projected_dataset_id ? ` · dataset ${result.resource.projected_dataset_id}` : ''}`
-                    : `${result.status}${result.error?.message ? ` · ${result.error.message}` : ''}`}
-                </div>
-              </div>
-            </div>
+            <ImportProcessingCard key={`${result.selection.resource_type}:${result.selection.external_id}`} result={result} />
           ))}
         </div>
       )}
@@ -901,6 +922,73 @@ function LoadingBox({ label }: { label: string }) {
     <div className="flex items-center gap-3 p-5 text-sm text-gray-300">
       <Loader2 className="h-4 w-4 animate-spin text-brand-orange" />
       {label}
+    </div>
+  )
+}
+
+function ImportProcessingCard({ result }: { result: SourceResourceImportResult }) {
+  const resourceId = result.resource?.id
+  const processingQuery = useSourceResourceProcessing(resourceId, result.status === 'ready')
+  const processing = processingQuery.data
+  const progressIndex = processingProgressIndex(processing, result)
+  const tone = processingTone(processing, result)
+  const title = result.resource?.name || result.selection.name || result.selection.external_id
+  const errorMessage = result.error?.message || processing?.last_error?.message
+  const nextActions = processing?.next_actions || []
+
+  return (
+    <div className="rounded border border-[#333333] bg-[#242424] p-3">
+      <div className="flex items-start gap-2">
+        {tone === 'failed' ? (
+          <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-400" />
+        ) : tone === 'ready' ? (
+          <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-400" />
+        ) : (
+          <Loader2 className="mt-0.5 h-4 w-4 flex-shrink-0 animate-spin text-brand-orange" />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-sm font-medium text-white">{title}</span>
+            <span className="rounded bg-[#1a1a1a] px-2 py-0.5 text-[10px] uppercase text-gray-400">
+              {resourceLabel(result.selection.resource_type)}
+            </span>
+          </div>
+          <div className={`mt-1 text-xs ${tone === 'failed' ? 'text-red-300' : tone === 'ready' ? 'text-green-300' : 'text-gray-300'}`}>
+            {tone === 'failed'
+              ? `${result.status}${errorMessage ? ` · ${errorMessage}` : ''}`
+              : processing?.message || `Snapshot ${result.resource?.latest_snapshot_id || 'created'}${result.resource?.projected_dataset_id ? ` · dataset ${result.resource.projected_dataset_id}` : ''}`}
+          </div>
+
+          <div className="mt-3 grid grid-cols-7 gap-1">
+            {processingSteps.map((step, index) => {
+              const complete = tone !== 'failed' && index <= progressIndex
+              const current = tone === 'processing' && index === Math.max(progressIndex + 1, 0)
+              return (
+                <div key={step.id} className="min-w-0">
+                  <div className={`h-1.5 rounded-full ${complete ? 'bg-green-500' : current ? 'bg-brand-orange' : tone === 'failed' && index === 0 ? 'bg-red-500' : 'bg-[#444444]'}`} />
+                  <div className={`mt-1 truncate text-[10px] ${complete ? 'text-green-300' : current ? 'text-brand-orange' : 'text-gray-500'}`} title={step.label}>
+                    {step.label}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {(processingQuery.isLoading || processingQuery.isFetching) && tone !== 'failed' && (
+            <div className="mt-2 text-[11px] text-gray-500">Refreshing processing state...</div>
+          )}
+
+          {nextActions.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {nextActions.slice(0, 3).map(action => (
+                <span key={action} className="rounded border border-[#444444] px-2 py-1 text-[11px] text-gray-300">
+                  {action}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

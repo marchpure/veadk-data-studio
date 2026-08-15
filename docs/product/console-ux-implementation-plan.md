@@ -326,6 +326,17 @@ Tasks:
    - Create dashboard
 6. Show partial success when multiple resources were selected.
 
+Current implementation:
+
+- `SourceConnectorImportPanel` keeps imported resources visible after `Import and sync`.
+- Import results now render as processing cards instead of a flat success/failure list.
+- The cards call `GET /source-resources/{resource_id}/processing` through `ApiService.getSourceResourceProcessing()` and `useSourceResourceProcessing()`.
+- Each card shows the standard processing steps: `Capture`, `Parse`, `Detect tables`, `Normalize dataset`, `Index context`, `Generate semantic suggestions`, and `Ready`.
+- Current backend stages are mapped conservatively: `waiting_for_connector`, `captured`, `indexed`, and `failed` drive the stepper while existing `latest_snapshot_id` and `projected_dataset_id` fill in partial readiness.
+- Failed imports keep their resource row visible with the connector error and do not hide successful capture/parse state for other selected resources.
+- Backend `next_actions` are shown as small action chips so the user sees whether to retry sync, reauthorize, attach to a notebook asset, or use knowledge retrieval.
+- Processing state is short-polled only while the backend stage is not terminal.
+
 Acceptance:
 
 - Importing a Feishu doc does not simply close the dialog or return to a flat list.

@@ -951,6 +951,19 @@ export interface SourceResource {
   knowledge_resource?: KnowledgeResource | null
 }
 
+export interface SourceResourceProcessing {
+  resource_id: string
+  status: string
+  stage: string
+  message: string
+  last_error?: { code?: string; message?: string; permanent?: boolean } | null
+  latest_snapshot_id?: string | null
+  knowledge_resource_id?: string | null
+  evidence_count: number
+  connector_required: boolean
+  next_actions: string[]
+}
+
 export interface SourceResourceCreateRequest {
   resource_type: SourceResourceType
   name: string
@@ -3074,6 +3087,21 @@ export class ApiService {
       return extractData<{ items: SourceResource[]; total: number }>(responseData)
     } catch (error) {
       console.error('Error listing source resources:', error)
+      throw error
+    }
+  }
+
+  static async getSourceResourceProcessing(resourceId: string): Promise<SourceResourceProcessing> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/source-resources/${resourceId}/processing`)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
+      }
+      const responseData = await response.json()
+      return extractData<SourceResourceProcessing>(responseData)
+    } catch (error) {
+      console.error('Error fetching source resource processing state:', error)
       throw error
     }
   }

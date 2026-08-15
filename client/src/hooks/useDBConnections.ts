@@ -19,6 +19,7 @@ import {
   type SourceResourceImportRequest,
   type SourceResourceImportResponse,
   type SourceResourcePickerResponse,
+  type SourceResourceProcessing,
   type SourceResourceQuickLocateResponse,
 } from '../services/api'
 import { showToast } from '../utils/toast'
@@ -54,6 +55,7 @@ export const sourceConnectorKeys = {
     query || '',
     pageToken || '',
   ] as const,
+  processing: (resourceId?: string) => [...sourceConnectorKeys.all, 'processing', resourceId || 'none'] as const,
 }
 
 export const sourceOverviewKeys = {
@@ -455,6 +457,23 @@ export function useImportSourceResources() {
     },
     onError: (error: Error) => {
       showToast.error(`Failed to import source resources: ${error.message}`)
+    },
+  })
+}
+
+export function useSourceResourceProcessing(resourceId?: string, enabled = true) {
+  return useQuery({
+    queryKey: sourceConnectorKeys.processing(resourceId),
+    queryFn: async (): Promise<SourceResourceProcessing> => {
+      if (!resourceId) throw new Error('Missing source resource id')
+      return ApiService.getSourceResourceProcessing(resourceId)
+    },
+    enabled: enabled && !!resourceId,
+    staleTime: 5 * 1000,
+    gcTime: 2 * 60 * 1000,
+    refetchInterval: query => {
+      const stage = query.state.data?.stage
+      return stage && !['indexed', 'failed'].includes(stage) ? 3000 : false
     },
   })
 }
