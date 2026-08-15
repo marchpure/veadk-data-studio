@@ -892,6 +892,7 @@ export interface SourceOverviewItem {
     name?: string | null
   } | null
   visibility: SourceOverviewVisibility
+  next_actions: string[]
   created_at: string
   updated_at?: string | null
   counts_partial: boolean

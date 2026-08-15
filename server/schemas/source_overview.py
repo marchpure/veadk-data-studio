@@ -51,6 +51,7 @@ class SourceOverviewItem(BaseModel):
     consumer_counts: ConsumerCounts = Field(default_factory=ConsumerCounts)
     owner: SourceOwner | None = None
     visibility: SourceVisibility
+    next_actions: list[str] = Field(default_factory=list)
     created_at: str
     updated_at: str | None = None
     counts_partial: bool = True

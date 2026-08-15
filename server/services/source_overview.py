@@ -268,6 +268,11 @@ class SourceOverviewService:
                 },
                 owner=self._owner_payload(dataset.connection.created_by),
                 visibility="public" if dataset.connection.is_public else "private",
+                next_actions=self._connection_next_actions(
+                    provider=provider,
+                    has_schema=bool(dataset.connection.schema_updated_at),
+                    semantic_count=self._semantic_count(consumer_index, semantic_keys),
+                ),
                 created_at=self._isoformat(dataset.created_at) or "",
                 updated_at=self._isoformat(updated_at),
             )
@@ -302,6 +307,11 @@ class SourceOverviewService:
             },
             owner=self._owner_payload(dataset.created_by),
             visibility="public" if dataset.is_public else "private",
+            next_actions=self._dataset_next_actions(
+                has_files=bool(dataset.files),
+                has_schema=bool(dataset.schema_cache),
+                semantic_count=self._semantic_count(consumer_index, {str(dataset.id)}),
+            ),
             created_at=self._isoformat(dataset.created_at) or "",
             updated_at=self._isoformat(updated_at),
         )
@@ -358,6 +368,14 @@ class SourceOverviewService:
             },
             owner=self._user_owner_payload(resource.owner) or self._owner_payload(resource.owner_id),
             visibility=self._visibility(resource.visibility),
+            next_actions=self._source_resource_next_actions(
+                status=status,
+                family=self._resource_family(resource.resource_type),
+                has_snapshot=latest_snapshot is not None,
+                projected_dataset_id=str(projected_dataset_id) if projected_dataset_id else None,
+                knowledge_resource=knowledge_resource,
+                semantic_count=self._semantic_count(consumer_index, semantic_keys),
+            ),
             created_at=self._isoformat(resource.created_at) or "",
             updated_at=self._isoformat(resource.updated_at),
         )
@@ -456,6 +474,72 @@ class SourceOverviewService:
         if latest_snapshot.status == "failed":
             return "failed"
         return "parsed"
+
+    def _connection_next_actions(self, *, provider: str, has_schema: bool, semantic_count: int) -> list[str]:
+        if not has_schema:
+            return ["Refresh schema profile"]
+        if provider == "databricks":
+            if semantic_count == 0:
+                return ["Generate semantic model", "Open warehouse catalog"]
+            return ["Review warehouse consumers", "Refresh schema profile"]
+        if semantic_count == 0:
+            return ["Generate semantic model"]
+        return ["Review semantic consumers", "Refresh schema profile"]
+
+    def _dataset_next_actions(self, *, has_files: bool, has_schema: bool, semantic_count: int) -> list[str]:
+        if not has_files:
+            return ["Upload files"]
+        if not has_schema:
+            return ["Profile dataset"]
+        if semantic_count == 0:
+            return ["Generate semantic model"]
+        return ["Review semantic consumers"]
+
+    def _source_resource_next_actions(
+        self,
+        *,
+        status: str,
+        family: str,
+        has_snapshot: bool,
+        projected_dataset_id: str | None,
+        knowledge_resource: KnowledgeResource | None,
+        semantic_count: int,
+    ) -> list[str]:
+        if status in {"authorization_required", "reauthorization_required", "disconnected"}:
+            return ["Reauthorize source"]
+        if status == "permission_lost":
+            return ["Review resource permissions", "Reauthorize source"]
+        if status == "source_unavailable":
+            return ["Retry sync", "Check upstream source"]
+        if status == "failed":
+            return ["Review parser warning", "Retry sync"]
+        if status == "needs_confirmation":
+            return ["Confirm resource selection"]
+        if knowledge_resource and knowledge_resource.index_status == "failed":
+            return ["Retry context indexing"]
+        if family in {"documents", "web"}:
+            if knowledge_resource and knowledge_resource.index_status == "indexed":
+                return ["Search evidence", "Attach to notebook"]
+            if has_snapshot:
+                return ["Index context"]
+            return ["Capture snapshot"]
+        if family == "object_storage":
+            if projected_dataset_id and semantic_count == 0:
+                return ["Review projection", "Generate semantic model"]
+            if knowledge_resource and knowledge_resource.index_status == "indexed":
+                return ["Search evidence", "Review projection"]
+            if has_snapshot:
+                return ["Parse object", "Index context"]
+            return ["Browse bucket or prefix"]
+        if family == "databases":
+            if projected_dataset_id and semantic_count == 0:
+                return ["Generate semantic model"]
+            return ["Review schema profile"]
+        if projected_dataset_id and semantic_count == 0:
+            return ["Generate semantic model"]
+        if has_snapshot:
+            return ["Open source detail"]
+        return ["Capture snapshot"]
 
     def _schema_table_count(self, schema_cache: str | None) -> int:
         if not schema_cache:

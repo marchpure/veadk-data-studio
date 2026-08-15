@@ -204,6 +204,7 @@ type SourceOverviewItem = {
     name?: string
   }
   visibility: 'private' | 'workspace' | 'team' | 'public'
+  next_actions?: string[]
   created_at: string
   updated_at?: string
 }
@@ -224,12 +225,14 @@ Current implementation:
 - The backend service aggregates visible `Dataset`, `Connection`, `SourceResource`, `SourceSnapshot`, `KnowledgeResource`, and evidence counts into `SourceOverviewItem`.
 - Statuses are normalized to product labels such as `Ready`, `Needs confirmation`, `Authorization required`, `Permission lost`, `Source unavailable`, and `Failed`.
 - `consumer_counts.semantic_models` and notebook counts are populated from current model/notebook references where available; dashboard and MCP counts remain `0` with `counts_partial: true`.
+- `next_actions` is populated for connection, dataset, and source-resource rows so the inventory can point users toward reauthorization, retry, evidence search, projection review, schema refresh, or semantic model generation without opening a detail page first.
 - Frontend API types and `useSourceOverview()` are available.
 - `client/src/pages/Databases.tsx` now renders the Sources inventory from `SourceOverviewItem` instead of the legacy datasource card list.
 - Desktop uses a scan-oriented table with Source, Status, Freshness, Parsed assets, Context, Semantic, Dashboards, Owner, and Actions columns.
 - Narrow viewports keep a compact mobile card layout.
 - The inventory includes `All` and `Needs attention` tabs. Needs attention uses `attention_state` plus non-ready/non-processing product statuses.
 - Source mutations invalidate both legacy `datasources` queries and the `source-overview` facade so the table stays fresh after create, import, delete, and visibility changes.
+- Databricks connection-backed datasets are surfaced as `family = warehouses` with warehouse-specific next actions; TOS/object-storage source resources surface as `family = object_storage` with evidence/projection next actions.
 
 Acceptance:
 

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime
+
 from sqlalchemy import select
 
+from server.models.connections import Connection
+from server.models.datasets import Dataset
 from server.models.notebook_assets import NotebookAsset
 from server.models.notebooks import Notebook
 from server.models.semantic_models import SemanticModel
@@ -71,6 +76,7 @@ async def test_sources_overview_includes_ready_web_source_and_compatibility_alia
     assert item["created_at"]
     assert item["updated_at"]
     assert item["counts_partial"] is True
+    assert item["next_actions"] == ["Search evidence", "Attach to notebook"]
 
     compatibility = await test_client.get("/api/datasources/overview")
     assert compatibility.status_code == 200
@@ -113,6 +119,76 @@ async def test_sources_overview_maps_failed_and_needs_confirmation_to_product_st
     assert pending_item["attention_state"] == "parse"
     assert pending_item["context_index_status"] == "unavailable"
     assert pending_item["parse_status"] == "pending"
+    assert pending_item["next_actions"] == ["Confirm resource selection"]
+
+
+async def test_sources_overview_next_actions_cover_warehouse_and_object_storage_contracts(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    connection = Connection(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="databricks",
+        name="Databricks Revenue Lakehouse",
+        connection_obj_encrypted=json.dumps(
+            {
+                "server_hostname": "adb.example.databricks.com",
+                "http_path": "/sql/1.0/warehouses/wh_1",
+            }
+        ),
+        schema_cache=json.dumps({"schema": {"gold.orders": {"columns": [{"name": "order_id", "type": "STRING"}]}}}),
+        schema_updated_at=datetime.utcnow(),
+        is_public=True,
+    )
+    test_session.add(connection)
+    await test_session.flush()
+    test_session.add(
+        Dataset(
+            tenant_id=tenant.id,
+            created_by=tenant.owner_id,
+            type="connection",
+            name="Databricks Revenue Lakehouse",
+            connection_id=connection.id,
+            is_public=True,
+        )
+    )
+    await test_session.commit()
+
+    tos = await test_client.post(
+        "/api/source-resources",
+        json={
+            "resource_type": "tos_object",
+            "name": "monthly-targets.csv",
+            "external_id": "sales/monthly-targets.csv",
+            "metadata": {
+                "projected_dataset": {
+                    "files": [{"filename": "monthly-targets.csv", "status": "available"}],
+                    "schema_tables": [{"name": "monthly_targets", "row_count": 2, "column_count": 3}],
+                },
+                "parser_warnings": ["header row inferred"],
+            },
+            "content": "channel,target\nEast,120\n",
+            "external_revision": "etag-tos-1",
+        },
+    )
+    assert tos.status_code == 201
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    items = overview.json()["data"]["items"]
+
+    databricks_item = next(item for item in items if item["provider"] == "databricks")
+    assert databricks_item["source_kind"] == "connection"
+    assert databricks_item["family"] == "warehouses"
+    assert databricks_item["parsed_asset_counts"]["tables"] == 1
+    assert databricks_item["next_actions"] == ["Generate semantic model", "Open warehouse catalog"]
+
+    tos_item = next(item for item in items if item["id"] == tos.json()["data"]["id"])
+    assert tos_item["source_kind"] == "source_resource"
+    assert tos_item["family"] == "object_storage"
+    assert tos_item["provider"] == "volcengine_tos"
+    assert tos_item["next_actions"] == ["Search evidence", "Review projection"]
 
 
 async def test_sources_overview_excludes_deleted_source_resources(test_client, test_session, monkeypatch):

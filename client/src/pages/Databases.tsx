@@ -375,6 +375,11 @@ export default function DatabasesPage() {
     return parts.join(' · ')
   }
 
+  const primaryNextAction = (source: SourceOverviewItem): string | null => {
+    const action = source.next_actions?.[0]
+    return action ? action : null
+  }
+
   const statusClassName = (source: SourceOverviewItem): string => {
     if (source.status === 'Ready') return 'bg-green-500/15 text-green-300 border-green-500/25'
     if (source.status === 'Pending' || source.status === 'Syncing' || source.status === 'Analyzing') {
@@ -1562,6 +1567,14 @@ export default function DatabasesPage() {
                               </td>
                               <td className="px-3 py-4 align-top">
                                 <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                                  {primaryNextAction(source) && (
+                                    <span
+                                      className="mr-1 hidden max-w-[150px] truncate rounded border border-[#444444] px-2 py-1 text-xs text-gray-300 xl:inline-block"
+                                      title={(source.next_actions || []).join(' · ')}
+                                    >
+                                      {primaryNextAction(source)}
+                                    </span>
+                                  )}
                                   {datasource.source_type !== 'source_resource' && showSharingFeatures && canEdit && (
                                     <Button
                                       size="sm"
@@ -1677,6 +1690,12 @@ export default function DatabasesPage() {
                               <div className="text-xs text-gray-500">Consumers</div>
                               <div className="text-gray-300">{consumerLabel(source)}</div>
                             </div>
+                            {primaryNextAction(source) && (
+                              <div className="col-span-2">
+                                <div className="text-xs text-gray-500">Next action</div>
+                                <div className="text-gray-300">{primaryNextAction(source)}</div>
+                              </div>
+                            )}
                           </div>
                           <div className="mt-4 flex justify-end gap-2">
                             {canEdit && (
