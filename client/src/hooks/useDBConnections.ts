@@ -10,6 +10,7 @@ import {
   type SourceOverviewResponse,
   type SourceResource,
   type SourceResourceCreateRequest,
+  type SourceResourceSyncRequest,
   type SourceResourceSnapshotsResponse,
   type ConnectorDefinition,
   type FeishuOAuthStartResponse,
@@ -66,6 +67,7 @@ export const sourceConnectorKeys = {
   parsedAssets: (resourceId?: string) => [...sourceConnectorKeys.all, 'parsed-assets', resourceId || 'none'] as const,
   lineage: (resourceId?: string) => [...sourceConnectorKeys.all, 'lineage', resourceId || 'none'] as const,
   consumers: (resourceId?: string) => [...sourceConnectorKeys.all, 'consumers', resourceId || 'none'] as const,
+  knowledgeSearches: (resourceId?: string) => [...sourceConnectorKeys.all, 'knowledge-search', resourceId || 'none'] as const,
   knowledgeSearch: (resourceId?: string, query?: string) => [...sourceConnectorKeys.all, 'knowledge-search', resourceId || 'none', query || ''] as const,
 }
 
@@ -499,6 +501,32 @@ export function useSourceResource(resourceId?: string) {
     enabled: !!resourceId,
     staleTime: 15 * 1000,
     gcTime: 2 * 60 * 1000,
+  })
+}
+
+export function useSyncSourceResource() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ resourceId, payload = {} }: { resourceId: string; payload?: SourceResourceSyncRequest }): Promise<SourceResource> => {
+      return ApiService.syncSourceResource(resourceId, payload)
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.sourceResource(data.id) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.processing(data.id) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.snapshots(data.id) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.parsedAssets(data.id) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.lineage(data.id) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.consumers(data.id) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.knowledgeSearches(data.id) })
+      queryClient.invalidateQueries({ queryKey: ['source-resources'] })
+      queryClient.invalidateQueries({ queryKey: ['datasources'] })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
+      showToast.success('Source sync started')
+    },
+    onError: (error: Error) => {
+      showToast.error(`Failed to sync source: ${error.message}`)
+    },
   })
 }
 

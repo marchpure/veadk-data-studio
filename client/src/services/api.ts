@@ -1051,6 +1051,13 @@ export interface SourceResourceCreateRequest {
   provider?: string
 }
 
+export interface SourceResourceSyncRequest {
+  content?: string | null
+  external_revision?: string | null
+  metadata?: Record<string, any>
+  provider?: string
+}
+
 export type ConnectorAvailability = 'available' | 'beta' | 'planned'
 export type SourceConnectionProvider = 'feishu' | 'volcengine_tos'
 export type SourceConnectionAuthMode = 'oauth' | 'access_key' | 'sts' | 'none'
@@ -3206,6 +3213,25 @@ export class ApiService {
       return extractData<SourceResource>(responseData)
     } catch (error) {
       console.error('Error fetching source resource:', error)
+      throw error
+    }
+  }
+
+  static async syncSourceResource(resourceId: string, payload: SourceResourceSyncRequest = {}): Promise<SourceResource> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/source-resources/${resourceId}/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
+      }
+      const responseData = await response.json()
+      return extractData<SourceResource>(responseData)
+    } catch (error) {
+      console.error('Error syncing source resource:', error)
       throw error
     }
   }

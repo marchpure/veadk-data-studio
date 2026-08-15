@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router-dom'
-import { AlertCircle, ArrowLeft, CheckCircle2, Clock, Database, FileText, Loader2, Network, ShieldAlert } from 'lucide-react'
+import { AlertCircle, ArrowLeft, CheckCircle2, Clock, Database, FileText, Loader2, Network, RefreshCw, ShieldAlert } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Button } from '../components/ui/button'
 import { Card } from '../components/ui/card'
@@ -13,6 +13,7 @@ import {
   useSourceResourceParsedAssets,
   useSourceResourceProcessing,
   useSourceResourceSnapshots,
+  useSyncSourceResource,
 } from '../hooks/useDBConnections'
 import { ApiService, isMultiDatabaseSchema, type DatabaseSchemaResponse, type SourceConsumerItem, type SourceLineageEdge, type SourceLineageNode, type SourceOverviewItem, type SourceParsedAssetItem, type SourceResource, type SourceResourceProcessing, type SourceSnapshot } from '../services/api'
 import { useQuery } from '@tanstack/react-query'
@@ -70,6 +71,7 @@ export default function SourceDetailPage() {
   const { sourceId } = useParams()
   const [evidenceQuery, setEvidenceQuery] = useState('')
   const overviewQuery = useSourceOverviewItem(sourceId)
+  const syncResourceMutation = useSyncSourceResource()
   const overview = overviewQuery.data
   const isSourceResource = overview?.source_kind === 'source_resource'
   const resourceQuery = useSourceResource(isSourceResource ? sourceId : undefined)
@@ -167,6 +169,18 @@ export default function SourceDetailPage() {
       </div>
     )
   }
+  const canRetrySync = Boolean(sourceResource.source_connection_id || (sourceResource.resource_type === 'web' && sourceResource.source_url))
+  const retrySyncLabel = sourceResource.status === 'ready' ? 'Reindex source' : 'Retry sync'
+  const handleRetrySync = () => {
+    syncResourceMutation.mutate({
+      resourceId: sourceResource.id,
+      payload: {
+        metadata: {
+          trigger: 'source_detail_retry',
+        },
+      },
+    })
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] p-8 text-white">
@@ -186,9 +200,22 @@ export default function SourceDetailPage() {
               </div>
             </div>
           </div>
-          <span className={`rounded border px-3 py-1.5 text-sm ${sourceResource.status === 'ready' ? 'border-green-700/50 bg-green-900/20 text-green-200' : 'border-amber-700/50 bg-amber-900/20 text-amber-200'}`}>
-            {productStatusLabel(sourceResource.status)}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="brand-primary"
+              disabled={!canRetrySync || syncResourceMutation.isPending}
+              onClick={handleRetrySync}
+              title={canRetrySync ? retrySyncLabel : 'This source needs a connector or URL before it can be synced again.'}
+            >
+              {syncResourceMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {syncResourceMutation.isPending ? 'Syncing...' : retrySyncLabel}
+            </Button>
+            <span className={`rounded border px-3 py-1.5 text-sm ${sourceResource.status === 'ready' ? 'border-green-700/50 bg-green-900/20 text-green-200' : 'border-amber-700/50 bg-amber-900/20 text-amber-200'}`}>
+              {productStatusLabel(sourceResource.status)}
+            </span>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-4">
@@ -360,6 +387,28 @@ export default function SourceDetailPage() {
             )}
           </Section>
           <Section title="Settings" icon={<ShieldAlert className="h-4 w-4" />}>
+            <div className="mb-4 rounded border border-[#333333] bg-[#151515] p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-gray-200">{retrySyncLabel}</div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {canRetrySync
+                      ? 'Capture a fresh snapshot and refresh parse, projection, context, lineage, and consumer state.'
+                      : 'This source does not have a connector-backed resource or URL to retry. Re-upload or reselect the resource from Add Source.'}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="brand-primary"
+                  disabled={!canRetrySync || syncResourceMutation.isPending}
+                  onClick={handleRetrySync}
+                >
+                  {syncResourceMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  {syncResourceMutation.isPending ? 'Syncing...' : retrySyncLabel}
+                </Button>
+              </div>
+            </div>
             <KeyValue label="Visibility" value={sourceResource.visibility} />
             <KeyValue label="Context provider" value={sourceResource.knowledge_resource?.provider || 'Not indexed'} />
             <KeyValue label="Provider status" value={sourceResource.knowledge_resource?.provider_status || sourceResource.knowledge_resource?.index_status || 'Unavailable'} />

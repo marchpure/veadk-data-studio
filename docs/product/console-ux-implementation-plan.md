@@ -402,6 +402,7 @@ Current implementation:
 - Evidence search is scoped to the current source resource and shows evidence type, confidence, and text preview.
 - Consumers is backed by the support API and shows semantic models, notebooks, dashboards, and analysis artifacts that reference the source or its latest knowledge resource.
 - Settings exposes visibility, context provider, provider status, last indexed time, retrieval debug URI, delete behavior, reindex behavior, and provider error metadata for admin/debug use.
+- Source-resource detail now exposes a non-destructive `Retry sync` / `Reindex source` action for connector-backed resources and web URLs. The action calls `POST /source-resources/{resource_id}/sync` and refreshes overview, processing, snapshot, parsed asset, lineage, consumer, and evidence state so recovery is visible in place.
 
 Acceptance:
 
