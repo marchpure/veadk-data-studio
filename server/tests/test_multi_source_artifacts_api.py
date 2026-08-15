@@ -14,7 +14,7 @@ from server.models.datasets import Dataset
 from server.models.files import File
 from server.models.knowledge_resources import EvidenceFragment, KnowledgeResource
 from server.models.notebook_assets import NotebookAsset
-from server.models.notebooks import Notebook
+from server.models.notebooks import Notebook, NotebookDataset
 from server.models.semantic_models import SemanticModel
 from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
@@ -953,6 +953,103 @@ async def test_source_detail_support_apis_return_parsed_assets_lineage_and_consu
     consumer_payload = consumers.json()["data"]
     consumer_types = {item["consumer_type"] for item in consumer_payload["items"]}
     assert {"semantic_model", "notebook", "dashboard", "analysis_artifact"}.issubset(consumer_types)
+
+
+async def test_source_detail_support_apis_use_snapshot_projection_metadata(test_client, test_session):
+    tenant = await _tenant(test_session)
+
+    projected_dataset = Dataset(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="file",
+        name="Targets Projection",
+    )
+    test_session.add(projected_dataset)
+    await test_session.flush()
+    resource = SourceResource(
+        tenant_id=tenant.id,
+        resource_type="tos_object",
+        name="targets.xlsx",
+        external_id="sales-bucket/projections/targets.xlsx",
+        owner_id=tenant.owner_id,
+        visibility="workspace",
+        sync_mode="manual",
+        sync_config_json={},
+        status="ready",
+    )
+    test_session.add(resource)
+    await test_session.flush()
+    snapshot = SourceSnapshot(
+        tenant_id=tenant.id,
+        resource_id=resource.id,
+        external_revision="etag-targets",
+        content_hash="sha256:targets",
+        raw_storage_uri="tos://sales-bucket/projections/targets.xlsx",
+        parser_version="xlsx-parser-v1",
+        metadata_json={
+            "projected_dataset_id": str(projected_dataset.id),
+            "projected_dataset": {
+                "dataset_id": str(projected_dataset.id),
+                "schema_tables": {
+                    "targets": {"row_count": 2, "column_count": 3},
+                    "channels": {"row_count": 3, "column_count": 2},
+                },
+            },
+            "projection_manifest": {
+                "dataset_id": str(projected_dataset.id),
+                "files": [{"filename": "targets.xlsx", "file_type": "xlsx"}],
+            },
+        },
+        status="indexed",
+    )
+    test_session.add(snapshot)
+    await test_session.flush()
+    resource.latest_snapshot_id = snapshot.id
+    notebook = Notebook(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        notebook_name="Projection consumer",
+    )
+    test_session.add(notebook)
+    await test_session.flush()
+    test_session.add(NotebookDataset(notebook_id=notebook.id, dataset_id=projected_dataset.id))
+    test_session.add(
+        SemanticModel(
+            tenant_id=tenant.id,
+            created_by=tenant.owner_id,
+            slug="targets_projection",
+            name="Targets Projection Model",
+            domain="Sales",
+            owner="Data Team",
+            datasource_id=str(projected_dataset.id),
+            datasource_name="Targets Projection",
+            datasource_kind="file",
+            status="Draft",
+        )
+    )
+    await test_session.commit()
+
+    detail = await test_client.get(f"/api/source-resources/{resource.id}")
+    assert detail.status_code == 200
+    detail_payload = detail.json()["data"]
+    assert detail_payload["projected_dataset_id"] == str(projected_dataset.id)
+
+    parsed = await test_client.get(f"/api/source-resources/{resource.id}/parsed-assets")
+    assert parsed.status_code == 200
+    parsed_payload = parsed.json()["data"]
+    assert parsed_payload["projected_dataset_id"] == str(projected_dataset.id)
+    assert [item["name"] for item in parsed_payload["tables"]] == ["targets", "channels"]
+    assert parsed_payload["files"][0]["name"] == "targets.xlsx"
+
+    lineage = await test_client.get(f"/api/source-resources/{resource.id}/lineage")
+    assert lineage.status_code == 200
+    lineage_payload = lineage.json()["data"]
+    assert any(node["node_type"] == "projected_dataset" for node in lineage_payload["nodes"])
+    assert any(edge["relationship"] == "projected_to" for edge in lineage_payload["edges"])
+
+    consumers = await test_client.get(f"/api/source-resources/{resource.id}/consumers")
+    assert consumers.status_code == 200
+    consumer_payload = consumers.json()["data"]
     assert consumer_payload["counts"]["semantic_model"] == 1
     assert consumer_payload["counts"]["notebook"] == 1
 

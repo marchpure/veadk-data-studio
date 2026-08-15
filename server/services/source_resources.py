@@ -497,7 +497,7 @@ class SourceResourceService:
             "sync_config_json": sync_config,
             "status": status,
             "latest_snapshot_id": resource.latest_snapshot_id,
-            "projected_dataset_id": (resource.sync_config_json or {}).get("projected_dataset_id"),
+            "projected_dataset_id": self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot),
             "created_at": resource.created_at,
             "updated_at": resource.updated_at,
             "latest_snapshot": self._snapshot_payload(latest_snapshot) if latest_snapshot else None,
@@ -695,8 +695,8 @@ class SourceResourceService:
                 )
                 or 0
             )
-        metadata = latest_snapshot.metadata_json if latest_snapshot and isinstance(latest_snapshot.metadata_json, dict) else {}
-        projection = (resource.sync_config_json or {}).get("projected_dataset") or metadata.get("projected_dataset") or {}
+        metadata = self._snapshot_metadata(latest_snapshot)
+        projection = self._projection_payload(resource=resource, latest_snapshot=latest_snapshot)
         files = self._parsed_asset_items_from_projection(projection, key="files", asset_type="file")
         tables = (
             self._parsed_asset_items_from_projection(projection, key="schema_tables", asset_type="table")
@@ -706,7 +706,7 @@ class SourceResourceService:
         return {
             "resource_id": resource.id,
             "latest_snapshot_id": resource.latest_snapshot_id,
-            "projected_dataset_id": (resource.sync_config_json or {}).get("projected_dataset_id"),
+            "projected_dataset_id": self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot),
             "parse_status": knowledge_resource.parse_status if knowledge_resource else self._parse_status_for_snapshot(latest_snapshot),
             "parser_version": latest_snapshot.parser_version if latest_snapshot else None,
             "parser_warnings": self._parser_warnings(metadata),
@@ -737,7 +737,7 @@ class SourceResourceService:
             tenant_id=tenant_id,
             resource_id=resource.id,
         )
-        projected_dataset_id = (resource.sync_config_json or {}).get("projected_dataset_id")
+        projected_dataset_id = self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot)
         nodes = [
             {
                 "id": f"source:{resource.id}",
@@ -853,7 +853,8 @@ class SourceResourceService:
             tenant_id=tenant_id,
             resource_id=resource.id,
         )
-        projected_dataset_id = (resource.sync_config_json or {}).get("projected_dataset_id")
+        latest_snapshot = await session.get(SourceSnapshot, resource.latest_snapshot_id) if resource.latest_snapshot_id else None
+        projected_dataset_id = self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot)
         source_ids = {str(resource.id)}
         projected_dataset_ids: set[str] = set()
         if projected_dataset_id:
@@ -2218,6 +2219,25 @@ class SourceResourceService:
                 return value
         return []
 
+    def _snapshot_metadata(self, snapshot: SourceSnapshot | None) -> dict[str, Any]:
+        return snapshot.metadata_json if snapshot and isinstance(snapshot.metadata_json, dict) else {}
+
+    def _projected_dataset_id(self, *, resource: SourceResource, latest_snapshot: SourceSnapshot | None) -> str | None:
+        value = (resource.sync_config_json or {}).get("projected_dataset_id") or self._snapshot_metadata(latest_snapshot).get(
+            "projected_dataset_id"
+        )
+        return str(value) if value else None
+
+    def _projection_payload(self, *, resource: SourceResource, latest_snapshot: SourceSnapshot | None) -> dict[str, Any]:
+        metadata = self._snapshot_metadata(latest_snapshot)
+        projection = (resource.sync_config_json or {}).get("projected_dataset") or metadata.get("projected_dataset") or {}
+        if not isinstance(projection, dict):
+            projection = {}
+        manifest = metadata.get("projection_manifest")
+        if isinstance(manifest, dict):
+            projection = {**manifest, **projection}
+        return projection
+
     def _parsed_asset_items_from_projection(
         self,
         projection: dict[str, Any],
@@ -2226,6 +2246,8 @@ class SourceResourceService:
         asset_type: str,
     ) -> list[dict[str, Any]]:
         value = projection.get(key)
+        if isinstance(value, dict):
+            value = [{"name": name, **item} if isinstance(item, dict) else {"name": name, "value": item} for name, item in value.items()]
         if not isinstance(value, list):
             return []
         return [self._parsed_asset_item(item=item, index=index, asset_type=asset_type) for index, item in enumerate(value, start=1)]

@@ -446,6 +446,7 @@ Current implementation:
 - Overview shows external identity, source URL, sync mode, and timestamps.
 - Lineage is backed by the support API and shows source resource, source connection, latest snapshot, knowledge resource, and projected dataset nodes with captured/indexed/projected edges.
 - Parsed content and Tables are read-only and backed by the support API. They show parser version, parser warnings, content hash, raw artifact URI, detected files, detected tables, projected dataset id, and evidence count.
+- Source Detail support APIs resolve projected dataset ids and parsed projection assets from the current sync config or latest snapshot metadata/projection manifest, keeping detail, lineage, consumers, and the Sources overview consistent after reindex, snapshot reuse, and metadata-only migration paths.
 - Evidence search is scoped to the current source resource and shows evidence type, confidence, and text preview.
 - Consumers is backed by the support API and shows semantic models, notebooks, dashboards, and analysis artifacts that reference the source or its latest knowledge resource.
 - Settings exposes visibility, context provider, provider status, last indexed time, retrieval debug URI, delete behavior, reindex behavior, and provider error metadata for admin/debug use.
