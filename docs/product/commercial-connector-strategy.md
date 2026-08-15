@@ -370,7 +370,7 @@ Evidence returned to users should be mapped back to Byaan locators:
 - page/range/block/table locator
 - content hash
 
-Source Detail should render those locators directly next to evidence previews. Customers need to see snapshot, URL/document token, block/page/table/row, revision, and hash context without opening provider internals.
+Source Detail should render those locators directly next to evidence previews. Customers need to see snapshot, URL/document token, block/page/table/row, revision, and hash context without opening provider internals. A full evidence context view should read `GET /api/evidence/{id}` and show complete evidence text, the source resource, source snapshot, KnowledgeProvider metadata, raw locator JSON, and snapshot metadata while keeping OpenViking or other provider connector details behind the provider boundary.
 
 ## Interface Shape
 

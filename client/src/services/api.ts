@@ -1271,6 +1271,13 @@ export interface KnowledgeSearchResponse {
   total: number
 }
 
+export interface EvidenceReadResponse {
+  evidence: SourceEvidence
+  knowledge_resource: KnowledgeResource
+  source_snapshot: SourceSnapshot
+  source_resource: SourceResource
+}
+
 export interface SourceResourceUnderstanding {
   id: string
   resource_type: string
@@ -3344,6 +3351,21 @@ export class ApiService {
       return extractData<KnowledgeSearchResponse>(responseData)
     } catch (error) {
       console.error('Error searching knowledge:', error)
+      throw error
+    }
+  }
+
+  static async readEvidence(evidenceId: string): Promise<EvidenceReadResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/evidence/${encodeURIComponent(evidenceId)}`)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
+      }
+      const responseData = await response.json()
+      return extractData<EvidenceReadResponse>(responseData)
+    } catch (error) {
+      console.error('Error reading evidence:', error)
       throw error
     }
   }

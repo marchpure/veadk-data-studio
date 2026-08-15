@@ -3,6 +3,7 @@ import { AlertCircle, ArrowLeft, CheckCircle2, Clock, Database, FileText, Loader
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Button } from '../components/ui/button'
 import { Card } from '../components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
 import {
   useDeleteSourceConnection,
@@ -22,7 +23,7 @@ import {
   sourceConnectorKeys,
   sourceOverviewKeys,
 } from '../hooks/useDBConnections'
-import { ApiService, isMultiDatabaseSchema, type DatabaseSchemaResponse, type SourceConsumerItem, type SourceEvidence, type SourceLineageEdge, type SourceLineageNode, type SourceOverviewItem, type SourceParsedAssetItem, type SourceResource, type SourceResourceProcessing, type SourceSnapshot } from '../services/api'
+import { ApiService, isMultiDatabaseSchema, type DatabaseSchemaResponse, type EvidenceReadResponse, type SourceConsumerItem, type SourceEvidence, type SourceLineageEdge, type SourceLineageNode, type SourceOverviewItem, type SourceParsedAssetItem, type SourceResource, type SourceResourceProcessing, type SourceSnapshot } from '../services/api'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 const sourceDetailSteps = [
@@ -149,6 +150,11 @@ const evidenceLocatorChips = (item: SourceEvidence): Array<{ label: string; valu
   }).slice(0, 8)
 }
 
+const formatJsonValue = (value?: Record<string, unknown> | null) => {
+  if (!value || Object.keys(value).length === 0) return '-'
+  return JSON.stringify(value, null, 2)
+}
+
 export default function SourceDetailPage() {
   const { sourceId } = useParams()
   const navigate = useNavigate()
@@ -160,6 +166,7 @@ export default function SourceDetailPage() {
   const [feishuAuthUrl, setFeishuAuthUrl] = useState<string | null>(null)
   const [feishuAuthMessage, setFeishuAuthMessage] = useState<string | null>(null)
   const [waitingForFeishuOAuth, setWaitingForFeishuOAuth] = useState(false)
+  const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null)
   const overviewQuery = useSourceOverviewItem(sourceId)
   const syncResourceMutation = useSyncSourceResource()
   const deleteResourceMutation = useDeleteSourceResource()
@@ -187,6 +194,16 @@ export default function SourceDetailPage() {
     retry: false,
   })
   const knowledgeQuery = useKnowledgeSearch(sourceId, evidenceQuery, !!sourceId && !!resourceQuery.data?.knowledge_resource)
+  const evidenceDetailQuery = useQuery({
+    queryKey: ['source-evidence-detail', selectedEvidenceId],
+    queryFn: async (): Promise<EvidenceReadResponse> => {
+      if (!selectedEvidenceId) throw new Error('Missing evidence id')
+      return ApiService.readEvidence(selectedEvidenceId)
+    },
+    enabled: !!selectedEvidenceId,
+    staleTime: 30 * 1000,
+    gcTime: 2 * 60 * 1000,
+  })
 
   const refreshAfterFeishuAuthorization = useCallback(() => {
     setWaitingForFeishuOAuth(false)
@@ -614,7 +631,12 @@ export default function SourceDetailPage() {
           ) : (
             <div className="space-y-2">
               {evidence.map(item => (
-                <div key={item.id} className="rounded border border-[#333333] bg-[#151515] p-3">
+                <button
+                  key={item.id}
+                  type="button"
+                  className="w-full rounded border border-[#333333] bg-[#151515] p-3 text-left transition-colors hover:border-brand-orange/60 hover:bg-[#1d1d1d]"
+                  onClick={() => setSelectedEvidenceId(item.id)}
+                >
                   <div className="flex items-center justify-between gap-3 text-xs text-gray-500">
                     <span>{item.fragment_type}</span>
                     <span>{item.confidence || 'confidence n/a'}</span>
@@ -631,7 +653,8 @@ export default function SourceDetailPage() {
                       </span>
                     ))}
                   </div>
-                </div>
+                  <div className="mt-3 text-xs text-brand-orange">Open evidence context</div>
+                </button>
               ))}
             </div>
           )}
@@ -768,6 +791,15 @@ export default function SourceDetailPage() {
           </Section>
         </div>
       </div>
+      <EvidenceDetailDialog
+        open={!!selectedEvidenceId}
+        detail={evidenceDetailQuery.data}
+        isLoading={evidenceDetailQuery.isLoading}
+        error={evidenceDetailQuery.error instanceof Error ? evidenceDetailQuery.error.message : null}
+        onOpenChange={open => {
+          if (!open) setSelectedEvidenceId(null)
+        }}
+      />
     </div>
   )
 }
@@ -1115,6 +1147,124 @@ function SnapshotRow({ snapshot }: { snapshot: SourceSnapshot }) {
       <td className="py-3 pr-3 text-gray-300">{snapshot.external_revision || '-'}</td>
       <td className="max-w-[280px] truncate py-3 pr-3 text-gray-500" title={snapshot.raw_storage_uri}>{snapshot.raw_storage_uri}</td>
     </tr>
+  )
+}
+
+function EvidenceDetailDialog({
+  open,
+  detail,
+  isLoading,
+  error,
+  onOpenChange,
+}: {
+  open: boolean
+  detail?: EvidenceReadResponse
+  isLoading: boolean
+  error: string | null
+  onOpenChange: (open: boolean) => void
+}) {
+  const evidence = detail?.evidence
+  const chips = evidence ? evidenceLocatorChips(evidence) : []
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[88vh] max-w-4xl overflow-y-auto border-gray-800 bg-[#1a1a1a] text-white">
+        <DialogHeader>
+          <DialogTitle>Evidence context</DialogTitle>
+          <DialogDescription className="text-gray-400">
+            Full provider-neutral evidence with source, snapshot, locator, and context index metadata.
+          </DialogDescription>
+        </DialogHeader>
+
+        {isLoading ? (
+          <LoadingRow label="Loading evidence context..." />
+        ) : error ? (
+          <div className="rounded border border-red-900/40 bg-red-950/20 p-3 text-sm text-red-100">{error}</div>
+        ) : detail && evidence ? (
+          <div className="space-y-4">
+            <div className="rounded border border-[#333333] bg-[#151515] p-4">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="rounded border border-[#444444] px-2 py-1 text-xs text-gray-300">{evidence.fragment_type}</span>
+                <span className="rounded border border-[#444444] px-2 py-1 text-xs text-gray-300">{evidence.confidence || 'confidence n/a'}</span>
+                {evidence.content_hash && <span className="rounded border border-[#444444] px-2 py-1 text-xs text-gray-300">Hash: {evidence.content_hash}</span>}
+              </div>
+              <pre className="max-h-72 whitespace-pre-wrap break-words rounded border border-[#333333] bg-[#101010] p-3 text-sm leading-6 text-gray-200">{evidence.text}</pre>
+            </div>
+
+            {chips.length > 0 && (
+              <div className="rounded border border-[#333333] bg-[#151515] p-4">
+                <div className="mb-3 text-xs uppercase text-gray-500">Locators</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {chips.map(chip => (
+                    <span
+                      key={`${evidence.id}-detail-${chip.label}`}
+                      className="max-w-full truncate rounded border border-[#444444] px-2 py-1 text-xs text-gray-300"
+                      title={chip.value}
+                    >
+                      {chip.label}: {chip.value}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded border border-[#333333] bg-[#151515] p-4">
+                <div className="mb-3 text-xs uppercase text-gray-500">Source</div>
+                <KeyValue label="Name" value={detail.source_resource.name} />
+                <KeyValue label="Type" value={typeLabel(detail.source_resource.resource_type)} />
+                <KeyValue label="Status" value={productStatusLabel(detail.source_resource.status)} />
+                <KeyValue label="External ID" value={detail.source_resource.external_id || '-'} />
+                <KeyValue label="Source URL" value={detail.source_resource.source_url || '-'} />
+              </div>
+
+              <div className="rounded border border-[#333333] bg-[#151515] p-4">
+                <div className="mb-3 text-xs uppercase text-gray-500">Snapshot</div>
+                <KeyValue label="Snapshot ID" value={detail.source_snapshot.id} />
+                <KeyValue label="Captured" value={formatDate(detail.source_snapshot.captured_at)} />
+                <KeyValue label="Revision" value={detail.source_snapshot.external_revision || '-'} />
+                <KeyValue label="Parser" value={detail.source_snapshot.parser_version || '-'} />
+                <KeyValue label="Raw artifact" value={detail.source_snapshot.raw_storage_uri} />
+              </div>
+            </div>
+
+            <div className="rounded border border-[#333333] bg-[#151515] p-4">
+              <div className="mb-3 text-xs uppercase text-gray-500">Context index</div>
+              <div className="grid gap-x-6 md:grid-cols-2">
+                <KeyValue label="Provider" value={detail.knowledge_resource.provider} />
+                <KeyValue label="Provider status" value={detail.knowledge_resource.provider_status || detail.knowledge_resource.index_status} />
+                <KeyValue label="Context URI" value={detail.knowledge_resource.context_uri || '-'} />
+                <KeyValue label="Retrieval debug URI" value={detail.knowledge_resource.retrieval_debug_uri || '-'} />
+                <KeyValue label="Last indexed" value={formatDate(detail.knowledge_resource.last_indexed_at)} />
+                <KeyValue label="Evidence count" value={`${detail.knowledge_resource.evidence_count}`} />
+              </div>
+              {detail.knowledge_resource.provider_error && (
+                <pre className="mt-3 max-h-40 overflow-auto rounded border border-red-900/30 bg-red-950/20 p-3 text-xs text-red-100">
+                  {formatJsonValue(detail.knowledge_resource.provider_error)}
+                </pre>
+              )}
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded border border-[#333333] bg-[#151515] p-4">
+                <div className="mb-3 text-xs uppercase text-gray-500">Raw locator JSON</div>
+                <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border border-[#333333] bg-[#101010] p-3 text-xs text-gray-300">
+                  {formatJsonValue(evidence.locator_json)}
+                </pre>
+              </div>
+              <div className="rounded border border-[#333333] bg-[#151515] p-4">
+                <div className="mb-3 text-xs uppercase text-gray-500">Snapshot metadata</div>
+                <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border border-[#333333] bg-[#101010] p-3 text-xs text-gray-300">
+                  {formatJsonValue(detail.source_snapshot.metadata_json)}
+                </pre>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <EmptyText>Select an evidence fragment to inspect its source context.</EmptyText>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
 
