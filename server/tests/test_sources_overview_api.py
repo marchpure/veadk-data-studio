@@ -10,6 +10,7 @@ from server.models.datasets import Dataset
 from server.models.notebook_assets import NotebookAsset
 from server.models.notebooks import Notebook
 from server.models.semantic_models import SemanticModel
+from server.models.source_connections import SourceConnection
 from server.models.source_resources import SourceResource
 from server.models.tenant import Tenant
 
@@ -120,6 +121,49 @@ async def test_sources_overview_maps_failed_and_needs_confirmation_to_product_st
     assert pending_item["context_index_status"] == "unavailable"
     assert pending_item["parse_status"] == "pending"
     assert pending_item["next_actions"] == ["Confirm resource selection"]
+
+
+async def test_sources_overview_promotes_feishu_reauthorization_to_next_action(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    connection = SourceConnection(
+        tenant_id=tenant.id,
+        provider="feishu",
+        auth_mode="oauth",
+        encrypted_credentials="{}",
+        external_account_id="ou_stale",
+        display_name="Feishu workspace",
+        status="reauthorization_required",
+        capabilities_json={},
+        created_by=tenant.owner_id,
+    )
+    test_session.add(connection)
+    await test_session.flush()
+    resource = SourceResource(
+        tenant_id=tenant.id,
+        source_connection_id=connection.id,
+        resource_type="feishu_doc",
+        name="Stale Feishu doc",
+        external_id="docx_stale",
+        source_url="https://example.feishu.cn/docx/docx_stale",
+        owner_id=tenant.owner_id,
+        visibility="workspace",
+        status="ready",
+    )
+    test_session.add(resource)
+    await test_session.commit()
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["id"] == str(resource.id))
+
+    assert item["provider"] == "feishu"
+    assert item["connection_id"] == str(connection.id)
+    assert item["status"] == "Reauthorization required"
+    assert item["attention_state"] == "auth"
+    assert item["freshness_status"] == "unknown"
+    assert item["next_actions"] == ["Reauthorize source"]
 
 
 async def test_sources_overview_next_actions_cover_warehouse_and_object_storage_contracts(test_client, test_session):

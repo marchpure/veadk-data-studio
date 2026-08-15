@@ -406,6 +406,7 @@ Current implementation:
 - Settings exposes visibility, context provider, provider status, last indexed time, retrieval debug URI, delete behavior, reindex behavior, and provider error metadata for admin/debug use.
 - Source-resource detail now exposes a non-destructive `Retry sync` / `Reindex source` action for connector-backed resources and web URLs. The action calls `POST /source-resources/{resource_id}/sync` and refreshes overview, processing, snapshot, parsed asset, lineage, consumer, and evidence state so recovery is visible in place.
 - Source-resource detail now exposes a confirmation-gated `Remove source` action. It calls the existing `DELETE /source-resources/{resource_id}` tombstone flow, refreshes Sources overview and legacy datasource caches, then returns to `/sources`. The backend keeps a deletion marker snapshot so lineage remains explicit while the source disappears from active inventory.
+- Source detail now promotes `Reauthorize source` next actions into a concrete `Reconnect Feishu` CTA for Feishu-backed sources. It starts the existing Feishu OAuth flow, listens for the OAuth popup callback, polls the OAuth result as fallback, and refreshes source overview, source connection, and source-resource state after authorization succeeds.
 
 Acceptance:
 

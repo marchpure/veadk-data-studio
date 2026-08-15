@@ -1,11 +1,12 @@
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { AlertCircle, ArrowLeft, CheckCircle2, Clock, Database, FileText, Loader2, Network, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Button } from '../components/ui/button'
 import { Card } from '../components/ui/card'
 import { Input } from '../components/ui/input'
 import {
   useDeleteSourceResource,
+  useFeishuOAuthResult,
   useKnowledgeSearch,
   useRefreshSourceOverviewConnectionSchema,
   useSourceResource,
@@ -15,10 +16,13 @@ import {
   useSourceResourceParsedAssets,
   useSourceResourceProcessing,
   useSourceResourceSnapshots,
+  useStartFeishuOAuth,
   useSyncSourceResource,
+  sourceConnectorKeys,
+  sourceOverviewKeys,
 } from '../hooks/useDBConnections'
 import { ApiService, isMultiDatabaseSchema, type DatabaseSchemaResponse, type SourceConsumerItem, type SourceLineageEdge, type SourceLineageNode, type SourceOverviewItem, type SourceParsedAssetItem, type SourceResource, type SourceResourceProcessing, type SourceSnapshot } from '../services/api'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 const sourceDetailSteps = [
   'Capture',
@@ -69,14 +73,24 @@ const processingIndex = (resource?: SourceResource, processing?: SourceResourceP
   return 0
 }
 
+const needsFeishuReauthorization = (source?: SourceOverviewItem) =>
+  source?.provider === 'feishu' && source.next_actions.some(action => action.toLowerCase().includes('reauthorize'))
+
 export default function SourceDetailPage() {
   const { sourceId } = useParams()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [evidenceQuery, setEvidenceQuery] = useState('')
   const [removeConfirmation, setRemoveConfirmation] = useState('')
+  const [feishuAuthState, setFeishuAuthState] = useState<string | null>(null)
+  const [feishuAuthUrl, setFeishuAuthUrl] = useState<string | null>(null)
+  const [feishuAuthMessage, setFeishuAuthMessage] = useState<string | null>(null)
+  const [waitingForFeishuOAuth, setWaitingForFeishuOAuth] = useState(false)
   const overviewQuery = useSourceOverviewItem(sourceId)
   const syncResourceMutation = useSyncSourceResource()
   const deleteResourceMutation = useDeleteSourceResource()
+  const startFeishuOAuth = useStartFeishuOAuth()
+  const pollFeishuOAuth = useFeishuOAuthResult()
   const refreshConnectionSchemaMutation = useRefreshSourceOverviewConnectionSchema()
   const overview = overviewQuery.data
   const isSourceResource = overview?.source_kind === 'source_resource'
@@ -98,6 +112,88 @@ export default function SourceDetailPage() {
     retry: false,
   })
   const knowledgeQuery = useKnowledgeSearch(sourceId, evidenceQuery, !!sourceId && !!resourceQuery.data?.knowledge_resource)
+
+  const refreshAfterFeishuAuthorization = useCallback(() => {
+    setWaitingForFeishuOAuth(false)
+    setFeishuAuthMessage('Feishu authorization connected. Refreshing source state.')
+    queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.connections() })
+    queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.connections('feishu') })
+    queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.feishuStatus() })
+    queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
+    if (sourceId) {
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.sourceResource(sourceId) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.processing(sourceId) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.snapshots(sourceId) })
+    }
+  }, [queryClient, sourceId])
+
+  const beginFeishuReconnect = async () => {
+    const result = await startFeishuOAuth.mutateAsync()
+    setFeishuAuthState(result.state)
+    setFeishuAuthUrl(result.authorization_url)
+    setFeishuAuthMessage(null)
+    setWaitingForFeishuOAuth(true)
+    const popup = window.open(result.authorization_url, 'byaan-feishu-oauth', 'width=720,height=760')
+    if (!popup) {
+      setFeishuAuthMessage('Authorization window was blocked. Reopen Feishu authorization to continue.')
+    }
+  }
+
+  const reopenFeishuAuthorization = () => {
+    if (!feishuAuthUrl) return
+    const popup = window.open(feishuAuthUrl, 'byaan-feishu-oauth', 'width=720,height=760')
+    if (!popup) setFeishuAuthMessage('Authorization window was blocked. Allow popups for this site and try again.')
+  }
+
+  useEffect(() => {
+    if (!waitingForFeishuOAuth || !feishuAuthState) return
+    let stopped = false
+    let attempts = 0
+    const timer = window.setInterval(() => {
+      attempts += 1
+      pollFeishuOAuth.mutateAsync(feishuAuthState).then(result => {
+        if (stopped || !result) return
+        if (result.status === 'connected') {
+          refreshAfterFeishuAuthorization()
+          return
+        }
+        if (result.status && result.status !== 'authorizing') {
+          setWaitingForFeishuOAuth(false)
+          setFeishuAuthMessage(result.error?.message || `Feishu authorization ended with status: ${result.status}.`)
+        }
+      }).catch(() => {
+        if (!stopped && attempts >= 60) {
+          setWaitingForFeishuOAuth(false)
+          setFeishuAuthMessage('Feishu authorization did not complete. Start authorization again when ready.')
+        }
+      })
+      if (attempts >= 60) {
+        setWaitingForFeishuOAuth(false)
+        setFeishuAuthMessage('Feishu authorization did not complete. Start authorization again when ready.')
+      }
+    }, 2000)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
+  }, [feishuAuthState, pollFeishuOAuth, refreshAfterFeishuAuthorization, waitingForFeishuOAuth])
+
+  useEffect(() => {
+    if (!waitingForFeishuOAuth || !feishuAuthState) return
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data
+      if (!data || data.type !== 'byaan:feishu-oauth') return
+      if (data.state !== feishuAuthState) return
+      if (data.status === 'connected') {
+        refreshAfterFeishuAuthorization()
+      } else {
+        setWaitingForFeishuOAuth(false)
+        setFeishuAuthMessage(data.message || `Feishu authorization ended with status: ${data.status}.`)
+      }
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [feishuAuthState, refreshAfterFeishuAuthorization, waitingForFeishuOAuth])
 
   const resource = resourceQuery.data
   const processing = processingQuery.data
@@ -152,6 +248,11 @@ export default function SourceDetailPage() {
         schemaError={schemaQuery.error instanceof Error ? schemaQuery.error.message : null}
         refreshingSchema={refreshConnectionSchemaMutation.isPending}
         onRefreshSchema={overview.connection_id ? () => refreshConnectionSchemaMutation.mutate({ connectionId: overview.connection_id as string }) : undefined}
+        reconnectingFeishu={waitingForFeishuOAuth || startFeishuOAuth.isPending}
+        feishuAuthMessage={feishuAuthMessage}
+        feishuAuthUrl={feishuAuthUrl}
+        onReconnectFeishu={needsFeishuReauthorization(overview) ? beginFeishuReconnect : undefined}
+        onReopenFeishuAuthorization={reopenFeishuAuthorization}
       />
     )
   }
@@ -180,6 +281,8 @@ export default function SourceDetailPage() {
   const canRetrySync = Boolean(sourceResource.source_connection_id || (sourceResource.resource_type === 'web' && sourceResource.source_url))
   const retrySyncLabel = sourceResource.status === 'ready' ? 'Reindex source' : 'Retry sync'
   const canRemoveSource = removeConfirmation.trim() === sourceResource.name.trim()
+  const canReconnectFeishu = needsFeishuReauthorization(overview)
+  const feishuReconnectLabel = waitingForFeishuOAuth || startFeishuOAuth.isPending ? 'Authorizing...' : 'Reconnect Feishu'
   const handleRetrySync = () => {
     syncResourceMutation.mutate({
       resourceId: sourceResource.id,
@@ -215,6 +318,18 @@ export default function SourceDetailPage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {canReconnectFeishu && (
+              <Button
+                type="button"
+                size="sm"
+                variant="brand-primary"
+                disabled={waitingForFeishuOAuth || startFeishuOAuth.isPending}
+                onClick={beginFeishuReconnect}
+              >
+                {waitingForFeishuOAuth || startFeishuOAuth.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
+                {feishuReconnectLabel}
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"
@@ -257,6 +372,16 @@ export default function SourceDetailPage() {
           {processing?.last_error && (
             <div className="mt-3 rounded border border-red-900/40 bg-red-950/20 p-3 text-sm text-red-100">
               {processing.last_error.message || processing.last_error.code}
+            </div>
+          )}
+          {feishuAuthMessage && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded border border-amber-700/40 bg-amber-950/20 p-3 text-sm text-amber-100">
+              <span>{feishuAuthMessage}</span>
+              {feishuAuthUrl && waitingForFeishuOAuth && (
+                <Button type="button" size="sm" variant="outline" onClick={reopenFeishuAuthorization}>
+                  Open authorization
+                </Button>
+              )}
             </div>
           )}
           {!!processing?.next_actions?.length && (
@@ -401,6 +526,28 @@ export default function SourceDetailPage() {
             )}
           </Section>
           <Section title="Settings" icon={<ShieldAlert className="h-4 w-4" />}>
+            {canReconnectFeishu && (
+              <div className="mb-4 rounded border border-amber-700/40 bg-amber-950/20 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-amber-100">Feishu authorization required</div>
+                    <p className="mt-1 text-xs text-amber-100/70">
+                      Reconnect Feishu before browsing, syncing, or using this source for modeling handoff.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="brand-primary"
+                    disabled={waitingForFeishuOAuth || startFeishuOAuth.isPending}
+                    onClick={beginFeishuReconnect}
+                  >
+                    {waitingForFeishuOAuth || startFeishuOAuth.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
+                    {feishuReconnectLabel}
+                  </Button>
+                </div>
+              </div>
+            )}
             <div className="mb-4 rounded border border-[#333333] bg-[#151515] p-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -496,6 +643,11 @@ function OverviewSourceDetail({
   schemaError,
   refreshingSchema,
   onRefreshSchema,
+  reconnectingFeishu,
+  feishuAuthMessage,
+  feishuAuthUrl,
+  onReconnectFeishu,
+  onReopenFeishuAuthorization,
 }: {
   source: SourceOverviewItem
   schema?: DatabaseSchemaResponse
@@ -503,6 +655,11 @@ function OverviewSourceDetail({
   schemaError: string | null
   refreshingSchema: boolean
   onRefreshSchema?: () => void
+  reconnectingFeishu: boolean
+  feishuAuthMessage: string | null
+  feishuAuthUrl: string | null
+  onReconnectFeishu?: () => void
+  onReopenFeishuAuthorization: () => void
 }) {
   const schemaTables = sourceSchemaTables(schema)
   const progressIndex = overviewProgressIndex(source)
@@ -529,6 +686,18 @@ function OverviewSourceDetail({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {onReconnectFeishu && (
+              <Button
+                type="button"
+                size="sm"
+                variant="brand-primary"
+                disabled={reconnectingFeishu}
+                onClick={onReconnectFeishu}
+              >
+                {reconnectingFeishu ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
+                {reconnectingFeishu ? 'Authorizing...' : 'Reconnect Feishu'}
+              </Button>
+            )}
             {source.source_kind === 'connection' && (
               <Button
                 type="button"
@@ -575,6 +744,16 @@ function OverviewSourceDetail({
               {source.next_actions.map(action => (
                 <span key={action} className="rounded border border-[#444444] px-2 py-1 text-xs text-gray-300">{action}</span>
               ))}
+            </div>
+          )}
+          {feishuAuthMessage && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded border border-amber-700/40 bg-amber-950/20 p-3 text-sm text-amber-100">
+              <span>{feishuAuthMessage}</span>
+              {feishuAuthUrl && reconnectingFeishu && (
+                <Button type="button" size="sm" variant="outline" onClick={onReopenFeishuAuthorization}>
+                  Open authorization
+                </Button>
+              )}
             </div>
           )}
         </Section>
@@ -651,6 +830,28 @@ function OverviewSourceDetail({
           </Section>
 
           <Section title="Settings" icon={<ShieldAlert className="h-4 w-4" />}>
+            {onReconnectFeishu && (
+              <div className="mb-4 rounded border border-amber-700/40 bg-amber-950/20 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-amber-100">Feishu authorization required</div>
+                    <p className="mt-1 text-xs text-amber-100/70">
+                      Reconnect Feishu before refreshing source metadata or using this source for modeling handoff.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="brand-primary"
+                    disabled={reconnectingFeishu}
+                    onClick={onReconnectFeishu}
+                  >
+                    {reconnectingFeishu ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
+                    {reconnectingFeishu ? 'Authorizing...' : 'Reconnect Feishu'}
+                  </Button>
+                </div>
+              </div>
+            )}
             {source.source_kind === 'connection' && (
               <div className="mb-4 rounded border border-[#333333] bg-[#151515] p-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
