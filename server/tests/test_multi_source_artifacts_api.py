@@ -26,8 +26,16 @@ from server.services.knowledge_provider import (
     OpenVikingKnowledgeProvider,
     get_knowledge_provider,
 )
+from server.services.source_resources import SourceResourceService
 
 pytestmark = __import__("pytest").mark.asyncio
+
+
+def _assert_product_processing_copy(payload):
+    text = " ".join([payload.get("message") or "", *payload.get("next_actions", [])]).lower()
+    assert "connector-supplied" not in text
+    assert "post content" not in text
+    assert "api will not fake" not in text
 
 
 async def _tenant(test_session):
@@ -545,6 +553,13 @@ async def test_failed_pdf_upload_retry_reparses_raw_artifact_and_preserves_faile
     assert len(snapshots) == 1
     assert knowledge == []
 
+    processing = await test_client.get(f"/api/source-resources/{original['id']}/processing")
+    assert processing.status_code == 200
+    payload = processing.json()["data"]
+    assert payload["stage"] == "failed"
+    assert payload["message"] == "PDF text extraction produced no text; configure a PDF parser worker"
+    assert payload["next_actions"] == ["Upload a readable file", "Retry parse from raw artifact"]
+
 
 def _docx_bytes(text: str) -> bytes:
     buffer = io.BytesIO()
@@ -586,7 +601,48 @@ async def test_source_resource_without_connector_content_is_not_marked_ready(tes
     payload = processing.json()["data"]
     assert payload["connector_required"] is True
     assert payload["stage"] == "waiting_for_connector"
+    assert payload["message"] == "No source snapshot has been captured yet. Complete setup or add source content before indexing."
+    assert payload["next_actions"] == ["Add source URL", "Review crawl policy"]
     assert payload["last_error"] is None
+    _assert_product_processing_copy(payload)
+
+
+async def test_processing_payload_for_captured_unindexed_source_uses_product_actions(test_client, test_session):
+    tenant = await _tenant(test_session)
+    service = SourceResourceService()
+    resource = SourceResource(
+        tenant_id=tenant.id,
+        resource_type="file",
+        name="Captured CSV",
+        visibility="workspace",
+        sync_mode="manual",
+        sync_config_json={"original_filename": "captured.csv", "file_type": "csv"},
+        status="pending",
+    )
+    test_session.add(resource)
+    await test_session.flush()
+    snapshot = SourceSnapshot(
+        tenant_id=tenant.id,
+        resource_id=resource.id,
+        external_revision="rev-captured",
+        content_hash="sha256:captured",
+        raw_storage_uri=f"file://source-resources/{resource.id}/raw/captured.csv",
+        parser_version="test-parser-v1",
+        metadata_json={"original_filename": "captured.csv", "file_type": "csv"},
+        status="captured",
+    )
+    test_session.add(snapshot)
+    await test_session.flush()
+    resource.latest_snapshot_id = snapshot.id
+    await test_session.commit()
+
+    payload = await service.processing_payload(session=test_session, tenant_id=tenant.id, resource_id=str(resource.id))
+
+    assert payload["stage"] == "captured"
+    assert payload["connector_required"] is False
+    assert payload["message"] == "Snapshot is captured, but parsing, projection, or context indexing is incomplete."
+    assert payload["next_actions"] == ["Retry parse from raw artifact", "Review parsed content"]
+    _assert_product_processing_copy(payload)
 
 
 async def test_web_source_url_fetch_creates_snapshot_knowledge_and_search(test_client, monkeypatch):
@@ -669,7 +725,9 @@ async def test_web_source_blocks_private_urls(test_client):
     assert payload["stage"] == "failed"
     assert payload["connector_required"] is False
     assert payload["last_error"]["code"] == "blocked_private_url"
-    assert "Fix the source configuration" in payload["next_actions"]
+    assert payload["message"].startswith("Access to private or non-routable address is not allowed")
+    assert payload["next_actions"] == ["Review source settings", "Retry sync"]
+    _assert_product_processing_copy(payload)
 
 
 async def test_real_public_web_url_capture_e2e(test_client):

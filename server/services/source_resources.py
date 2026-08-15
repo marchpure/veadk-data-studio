@@ -534,8 +534,8 @@ class SourceResourceService:
         last_error = sync_config.get("last_error") if isinstance(sync_config.get("last_error"), dict) else None
         if resource.status == "ready":
             stage = "indexed"
-            message = "Resource has a captured Source Snapshot and indexed Evidence Fragments."
-            next_actions = ["Use search_knowledge/read_evidence in agent runs", "Attach to a notebook asset"]
+            message = "Source is ready. Snapshot, context index, and evidence are available."
+            next_actions = ["Search evidence", "Attach to notebook"]
             connector_required = False
         elif resource.status == "needs_confirmation" and (last_error or {}).get("code") == "large_file_confirmation_required":
             stage = "needs_confirmation"
@@ -550,22 +550,18 @@ class SourceResourceService:
             "authorization_required",
         }:
             stage = "failed"
-            message = (last_error or {}).get("message") or "Resource processing failed."
-            next_actions = [
-                "Fix the source configuration",
-                "Reauthorize the source connection if required",
-                "Retry sync after the source is available",
-            ]
+            message = self._processing_failure_message(resource=resource, last_error=last_error)
+            next_actions = self._processing_failure_actions(resource=resource, last_error=last_error)
             connector_required = False
         elif resource.latest_snapshot_id:
             stage = "captured"
-            message = "Snapshot is captured but indexing is incomplete."
-            next_actions = ["Retry sync with connector-supplied content"]
+            message = "Snapshot is captured, but parsing, projection, or context indexing is incomplete."
+            next_actions = self._processing_incomplete_actions(resource=resource)
             connector_required = False
         else:
             stage = "waiting_for_connector"
-            message = "No content has been captured yet. Provide connector output; the API will not fake retrieval."
-            next_actions = ["Run Feishu/PDF/Web/Sheet connector", "POST content to the sync endpoint"]
+            message = "No source snapshot has been captured yet. Complete setup or add source content before indexing."
+            next_actions = self._processing_setup_actions(resource=resource)
             connector_required = True
 
         return {
@@ -580,6 +576,73 @@ class SourceResourceService:
             "connector_required": connector_required,
             "next_actions": next_actions,
         }
+
+    def _processing_failure_message(
+        self,
+        *,
+        resource: SourceResource,
+        last_error: dict[str, Any] | None,
+    ) -> str:
+        status = resource.status
+        code = (last_error or {}).get("code")
+        message = (last_error or {}).get("message")
+        if status in {"authorization_required", "reauthorization_required"} or code in {
+            "authorization_required",
+            "reauthorization_required",
+            "invalid_state",
+        }:
+            return "Source authorization is not connected or has expired."
+        if status == "permission_lost" or code == "permission_lost":
+            return "The current user or connector no longer has permission to read this source."
+        if status == "source_unavailable" or code == "source_unavailable":
+            return "The upstream source or raw artifact is unavailable."
+        if code and str(code).startswith("parser_"):
+            return message or "The source was captured, but the parser could not extract usable content."
+        return message or "Source processing failed. Review the source settings and retry."
+
+    def _processing_failure_actions(
+        self,
+        *,
+        resource: SourceResource,
+        last_error: dict[str, Any] | None,
+    ) -> list[str]:
+        status = resource.status
+        code = (last_error or {}).get("code")
+        if status in {"authorization_required", "reauthorization_required"} or code in {
+            "authorization_required",
+            "reauthorization_required",
+            "invalid_state",
+        }:
+            return ["Reauthorize source", "Retry sync"]
+        if status == "permission_lost" or code == "permission_lost":
+            return ["Request source access", "Reconnect source"]
+        if status == "source_unavailable" or code == "source_unavailable":
+            if resource.resource_type in {"file", "pdf"}:
+                return ["Re-upload file", "Retry sync after artifact is available"]
+            return ["Check upstream availability", "Retry sync"]
+        if code and str(code).startswith("parser_"):
+            if resource.resource_type in {"file", "pdf"}:
+                return ["Upload a readable file", "Retry parse from raw artifact"]
+            return ["Review parser warning", "Retry sync"]
+        return ["Review source settings", "Retry sync"]
+
+    def _processing_incomplete_actions(self, *, resource: SourceResource) -> list[str]:
+        if resource.resource_type in {"file", "pdf"}:
+            return ["Retry parse from raw artifact", "Review parsed content"]
+        if resource.source_connection_id:
+            return ["Retry sync", "Review source authorization"]
+        if resource.resource_type == "web" and resource.source_url:
+            return ["Retry web capture", "Review crawl policy"]
+        return ["Retry sync", "Review source setup"]
+
+    def _processing_setup_actions(self, *, resource: SourceResource) -> list[str]:
+        if resource.resource_type in {"file", "pdf"}:
+            return ["Upload file", "Review file type support"]
+        if resource.resource_type == "web":
+            return ["Add source URL", "Review crawl policy"]
+        if resource.source_connection_id or resource.resource_type.startswith("feishu_"):
+            return ["Authorize source", "Select resources"]
+        return ["Complete source setup", "Select resources"]
 
     async def list_snapshots(
         self,
