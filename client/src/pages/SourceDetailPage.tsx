@@ -155,6 +155,23 @@ const formatJsonValue = (value?: Record<string, unknown> | null) => {
   return JSON.stringify(value, null, 2)
 }
 
+const stringListValue = (value?: unknown): string[] => {
+  if (!value) return []
+  if (Array.isArray(value)) return value.map(item => String(item)).filter(Boolean)
+  if (typeof value === 'string') {
+    return value.split(/[,\s]+/).map(item => item.trim()).filter(Boolean)
+  }
+  return []
+}
+
+const connectionStatusTone = (status?: string | null) => {
+  if (status === 'connected') return 'border-green-700/50 bg-green-900/20 text-green-200'
+  if (status === 'reauthorization_required' || status === 'authorization_required' || status === 'disconnected') {
+    return 'border-red-700/50 bg-red-900/20 text-red-200'
+  }
+  return 'border-amber-700/50 bg-amber-900/20 text-amber-200'
+}
+
 export default function SourceDetailPage() {
   const { sourceId } = useParams()
   const navigate = useNavigate()
@@ -403,6 +420,8 @@ export default function SourceDetailPage() {
   const canDisconnectConnection = Boolean(sourceResource.source_connection_id) && disconnectConfirmation.trim() === sourceResource.name.trim()
   const canReconnectFeishu = needsFeishuReauthorization(overview)
   const feishuReconnectLabel = waitingForFeishuOAuth || startFeishuOAuth.isPending ? 'Authorizing...' : 'Reconnect Feishu'
+  const sourceConnection = sourceResource.source_connection
+  const grantedScopes = stringListValue(sourceConnection?.scopes || sourceConnection?.capabilities?.scopes || sourceConnection?.capabilities?.scope)
   const handleRetrySync = () => {
     syncResourceMutation.mutate({
       resourceId: sourceResource.id,
@@ -720,6 +739,37 @@ export default function SourceDetailPage() {
             <KeyValue label="Provider status" value={sourceResource.knowledge_resource?.provider_status || sourceResource.knowledge_resource?.index_status || 'Unavailable'} />
             <KeyValue label="Last indexed" value={formatDate(sourceResource.knowledge_resource?.last_indexed_at)} />
             <KeyValue label="Retrieval debug URI" value={sourceResource.knowledge_resource?.retrieval_debug_uri || '-'} />
+            {sourceConnection && (
+              <div className="mt-4 rounded border border-[#333333] bg-[#151515] p-3">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-medium text-gray-200">Connector authorization</div>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Source-owned authorization state used for picker, refresh, permission recovery, and modeling handoff.
+                    </p>
+                  </div>
+                  <span className={`rounded border px-2 py-1 text-xs ${connectionStatusTone(sourceConnection.status)}`}>
+                    {productStatusLabel(sourceConnection.status)}
+                  </span>
+                </div>
+                <div className="grid gap-x-6 md:grid-cols-2">
+                  <KeyValue label="Provider" value={sourceConnection.provider} />
+                  <KeyValue label="Auth mode" value={sourceConnection.auth_mode} />
+                  <KeyValue label="Account" value={sourceConnection.external_account_id || sourceConnection.display_name || '-'} />
+                  <KeyValue label="Token expires" value={formatDate(sourceConnection.token_expires_at)} />
+                  <KeyValue label="Granted scopes" value={grantedScopes.length ? grantedScopes.join(', ') : '-'} />
+                  <KeyValue label="Connection ID" value={sourceConnection.id} />
+                </div>
+                {sourceConnection.capabilities && Object.keys(sourceConnection.capabilities).length > 0 && (
+                  <details className="mt-3 rounded border border-[#333333] bg-[#101010] p-3">
+                    <summary className="cursor-pointer text-xs uppercase text-gray-500">Capabilities</summary>
+                    <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs text-gray-300">
+                      {formatJsonValue(sourceConnection.capabilities)}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
             {sourceResource.source_connection_id && (
               <div className="mt-4 rounded border border-amber-800/40 bg-amber-950/10 p-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">

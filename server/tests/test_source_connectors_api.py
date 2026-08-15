@@ -894,6 +894,9 @@ async def test_picker_import_sync_and_idempotency_use_source_connection_not_plac
     resource = imported["results"][0]["resource"]
     assert resource["status"] == "ready"
     assert str(resource["source_connection_id"]) == str(connection.id)
+    assert resource["source_connection"]["provider"] == "volcengine_tos"
+    assert resource["source_connection"]["auth_mode"] == "access_key"
+    assert resource["source_connection"]["status"] == "connected"
     assert resource["latest_snapshot"]["external_revision"] == "etag-1"
     assert resource["latest_snapshot"]["metadata_json"]["version_id"] == "version-1"
     assert resource["knowledge_resource"]["evidence_count"] == 1
@@ -1021,6 +1024,9 @@ async def test_feishu_picker_import_syncs_real_resource_types_without_placeholde
         assert resource["status"] == "ready"
         assert resource["status"] != "needs_confirmation"
         assert str(resource["source_connection_id"]) == str(connection.id)
+        assert resource["source_connection"]["provider"] == "feishu"
+        assert resource["source_connection"]["auth_mode"] == "oauth"
+        assert resource["source_connection"]["scopes"] == ["drive:drive:readonly", "wiki:wiki:readonly"]
         assert resource["latest_snapshot"]["external_revision"] == f"rev-{resource['external_id']}"
         assert resource["knowledge_resource"]["evidence_count"] == 1
         if resource["resource_type"] in {"feishu_sheet", "feishu_base"}:

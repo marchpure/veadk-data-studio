@@ -948,6 +948,7 @@ export interface SourceResource {
   id: string
   connection_id?: string | null
   source_connection_id?: string | null
+  source_connection?: SourceResourceConnectionSummary | null
   resource_type: SourceResourceType
   name: string
   external_id?: string | null
@@ -1114,6 +1115,10 @@ export interface SourceConnection {
   created_by?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface SourceResourceConnectionSummary extends SourceConnection {
+  scopes?: string[]
 }
 
 export interface SourceConnectionCreateRequest {

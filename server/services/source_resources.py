@@ -457,27 +457,35 @@ class SourceResourceService:
             latest_snapshot = await session.get(SourceSnapshot, resource.latest_snapshot_id)
         status = resource.status
         sync_config = dict(resource.sync_config_json or {})
+        source_connection_payload = None
         if resource.source_connection_id:
-            connection = await session.get(SourceConnection, resource.source_connection_id)
-            if connection is not None and connection.status in {
-                "reauthorization_required",
-                "authorization_required",
-                "disconnected",
-            }:
-                status = (
-                    "reauthorization_required"
-                    if connection.status in {"reauthorization_required", "authorization_required"}
-                    else "disconnected"
+            connection = await session.scalar(
+                select(SourceConnection).where(
+                    SourceConnection.tenant_id == resource.tenant_id,
+                    SourceConnection.id == resource.source_connection_id,
                 )
-                sync_config = {
-                    **sync_config,
-                    "connection_status": connection.status,
-                    "last_error": {
-                        "code": status,
-                        "message": f"Source connection is not usable: {connection.status}",
-                        "permanent": True,
-                    },
-                }
+            )
+            if connection is not None:
+                source_connection_payload = self._source_connection_payload(connection)
+                if connection.status in {
+                    "reauthorization_required",
+                    "authorization_required",
+                    "disconnected",
+                }:
+                    status = (
+                        "reauthorization_required"
+                        if connection.status in {"reauthorization_required", "authorization_required"}
+                        else "disconnected"
+                    )
+                    sync_config = {
+                        **sync_config,
+                        "connection_status": connection.status,
+                        "last_error": {
+                            "code": status,
+                            "message": f"Source connection is not usable: {connection.status}",
+                            "permanent": True,
+                        },
+                    }
 
         knowledge_resource = await session.scalar(
             select(KnowledgeResource)
@@ -496,6 +504,7 @@ class SourceResourceService:
             "id": resource.id,
             "connection_id": resource.connection_id,
             "source_connection_id": resource.source_connection_id,
+            "source_connection": source_connection_payload,
             "resource_type": resource.resource_type,
             "name": resource.name,
             "external_id": resource.external_id,
@@ -2275,6 +2284,23 @@ class SourceResourceService:
             "external_account_id": connection.external_account_id,
             "created_by": str(connection.created_by) if connection.created_by else None,
             "scopes": capabilities.get("scopes") or capabilities.get("scope") or [],
+        }
+
+    def _source_connection_payload(self, connection: SourceConnection) -> dict[str, Any]:
+        capabilities = dict(connection.capabilities_json or {})
+        return {
+            "id": connection.id,
+            "provider": connection.provider,
+            "auth_mode": connection.auth_mode,
+            "external_account_id": connection.external_account_id,
+            "display_name": connection.display_name,
+            "status": connection.status,
+            "capabilities": capabilities,
+            "scopes": capabilities.get("scopes") or capabilities.get("scope") or [],
+            "token_expires_at": connection.token_expires_at,
+            "created_by": str(connection.created_by) if connection.created_by else None,
+            "created_at": connection.created_at,
+            "updated_at": connection.updated_at,
         }
 
     def _safe_filename(self, value: str) -> str:

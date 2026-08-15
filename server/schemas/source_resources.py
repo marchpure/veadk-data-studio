@@ -112,6 +112,7 @@ class SourceResourceRead(BaseModel):
     id: UUID
     connection_id: UUID | None = None
     source_connection_id: UUID | None = None
+    source_connection: dict[str, Any] | None = None
     resource_type: str
     name: str
     external_id: str | None = None
