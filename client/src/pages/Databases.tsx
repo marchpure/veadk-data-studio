@@ -7,8 +7,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
 import { Trash2, Loader2, Database, Pencil, Upload, FileText, X, Search, Link as LinkIcon, Leaf, Cylinder, Server, HardDrive, Users, Lock, Cloud, ChevronDown, ChevronRight, CheckCircle2, AlertCircle, Network, ShieldAlert } from 'lucide-react'
-import { useDatasources, useCreateDBConnection, useDeleteDBConnection, useUploadMultipleFiles, useUploadFromURL, useConnectorDefinitions, useCreateSourceResource, useCreatePdfSourceResource, useSourceOverview, sourceOverviewKeys } from '../hooks/useDBConnections'
-import { ApiService, type ConnectionCreateRequest, type ConnectionType, type Datasource, type DatabricksCatalog, type DatabricksOAuthTokens, type DatabricksWarehouse, type FileType, type ConnectorDefinition, type SourceOverviewItem } from '../services/api'
+import { useDatasources, useCreateDBConnection, useDeleteDBConnection, useUploadMultipleFiles, useUploadFromURL, useConnectorDefinitions, useCreateSourceResource, useCreatePdfSourceResource, useSourceOverview, useSourceResourceProcessing, sourceOverviewKeys } from '../hooks/useDBConnections'
+import { ApiService, type ConnectionCreateRequest, type ConnectionType, type Datasource, type DatabricksCatalog, type DatabricksOAuthTokens, type DatabricksWarehouse, type FileType, type ConnectorDefinition, type SourceOverviewItem, type SourceResource, type SourceResourceProcessing } from '../services/api'
 import { SourceConnectorImportPanel } from '../components/SourceConnectorImportPanel'
 import { showToast } from '../utils/toast'
 import { useStore } from '../stores/useStore'
@@ -43,6 +43,51 @@ const sourceConnectorId = (value: DatasourceCreateType): string | null =>
   isSourceConnectorType(value) ? value.slice('connector:'.length) : null
 const isDirectSourceResourceType = (value: DatasourceCreateType) => value === 'pdf' || value === 'web'
 const needsAttentionStates = new Set(['auth', 'permission', 'parse', 'index', 'stale', 'policy'])
+
+const directSourceProcessingSteps = [
+  { id: 'capture', label: 'Capture' },
+  { id: 'parse', label: 'Parse' },
+  { id: 'detect', label: 'Detect tables' },
+  { id: 'normalize', label: 'Normalize dataset' },
+  { id: 'index', label: 'Index context' },
+  { id: 'suggest', label: 'Generate semantic suggestions' },
+  { id: 'ready', label: 'Ready' },
+] as const
+
+const directSourceProgressIndex = (
+  resource: SourceResource,
+  processing?: SourceResourceProcessing,
+) => {
+  if (resource.status !== 'ready' || processing?.stage === 'failed') return -1
+  if (processing?.stage === 'waiting_for_connector') return 0
+  if (processing?.stage === 'captured') return 1
+  if (processing?.stage === 'indexed') return directSourceProcessingSteps.length - 1
+  if (resource.projected_dataset_id) return 5
+  if (resource.latest_snapshot_id) return 4
+  return 1
+}
+
+const directSourceProcessingTone = (
+  resource: SourceResource,
+  processing?: SourceResourceProcessing,
+) => {
+  if (resource.status !== 'ready' || processing?.stage === 'failed') return 'failed'
+  if (processing?.stage === 'indexed') return 'ready'
+  return 'processing'
+}
+
+const directSourceResourceLabel = (type?: string | null) => {
+  switch (type) {
+    case 'pdf':
+      return 'PDF'
+    case 'file':
+      return 'File'
+    case 'web':
+      return 'Web'
+    default:
+      return type?.replace(/_/g, ' ') || 'Source'
+  }
+}
 
 const addSourceFamilies: Array<{
   id: AddSourceFamilyId
@@ -131,6 +176,8 @@ export default function DatabasesPage() {
   const [urlAbortController, setUrlAbortController] = useState<AbortController | null>(null)
   const [pdfSourceFile, setPdfSourceFile] = useState<File | null>(null)
   const [webSourceUrl, setWebSourceUrl] = useState('')
+  const [directSourceResult, setDirectSourceResult] = useState<SourceResource | null>(null)
+  const sourceResourceFileInputRef = useRef<HTMLInputElement>(null)
 
   // Form state for create dialog
   const [selectedFamily, setSelectedFamily] = useState<AddSourceFamilyId>('files')
@@ -204,6 +251,10 @@ export default function DatabasesPage() {
     refreshDatabricksAuthStatus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    setDirectSourceResult(null)
+  }, [selectedType])
 
   const databricksTileVisible = !isSelfHosted || databricksOAuthConfigured || databricksOAuthCanConfigure
 
@@ -1328,8 +1379,12 @@ export default function DatabasesPage() {
     setUploadURLs([''])
     setPdfSourceFile(null)
     setWebSourceUrl('')
+    setDirectSourceResult(null)
     if (uploadFileInputRef.current) {
       uploadFileInputRef.current.value = ''
+    }
+    if (sourceResourceFileInputRef.current) {
+      sourceResourceFileInputRef.current.value = ''
     }
   }
 
@@ -1364,9 +1419,12 @@ export default function DatabasesPage() {
       createPdfSourceResourceMutation.mutate(
         { file: pdfSourceFile, name: uploadConnectionName.trim() },
         {
-          onSuccess: () => {
-            setShowCreateDialog(false)
-            resetUploadForm()
+          onSuccess: (resource) => {
+            setDirectSourceResult(resource)
+            setPdfSourceFile(null)
+            if (sourceResourceFileInputRef.current) {
+              sourceResourceFileInputRef.current.value = ''
+            }
           },
         },
       )
@@ -1384,9 +1442,8 @@ export default function DatabasesPage() {
           source_url: webSourceUrl.trim(),
         },
         {
-          onSuccess: () => {
-            setShowCreateDialog(false)
-            resetUploadForm()
+          onSuccess: (resource) => {
+            setDirectSourceResult(resource)
           },
         },
       )
@@ -2219,6 +2276,7 @@ export default function DatabasesPage() {
 	                        <div className="rounded-lg border border-[#444444] bg-[#1a1a1a] p-4">
 	                          <Label className="text-white">Source file</Label>
 	                          <input
+	                            ref={sourceResourceFileInputRef}
 	                            type="file"
 	                            accept=".pdf,.csv,.xlsx,.xlsm,.docx,.pptx,application/pdf,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
 	                            onChange={handlePdfSourceFileChange}
@@ -2246,6 +2304,17 @@ export default function DatabasesPage() {
 	                            PDF, Docx and PPTX enter as context evidence. CSV and .xlsx/.xlsm Excel files also create a reviewed dataset projection for semantic modeling handoff.
 	                          </p>
 	                        </div>
+	                        {directSourceResult && (
+	                          <DirectSourceProcessingPanel
+	                            resource={directSourceResult}
+	                            onAddAnother={() => {
+	                              setDirectSourceResult(null)
+	                              resetUploadForm()
+	                              setSelectedFamily('files')
+	                              setSelectedType('pdf')
+	                            }}
+	                          />
+	                        )}
 	                      </div>
 	                    )}
 
@@ -2282,6 +2351,17 @@ export default function DatabasesPage() {
 	                            Supports public HTTP/HTTPS pages. Localhost, private networks and cloud metadata addresses are blocked by the backend.
 	                          </p>
 	                        </div>
+	                        {directSourceResult && (
+	                          <DirectSourceProcessingPanel
+	                            resource={directSourceResult}
+	                            onAddAnother={() => {
+	                              setDirectSourceResult(null)
+	                              resetUploadForm()
+	                              setSelectedFamily('web')
+	                              setSelectedType('web')
+	                            }}
+	                          />
+	                        )}
 	                      </div>
 	                    )}
 
@@ -2945,7 +3025,8 @@ export default function DatabasesPage() {
                           (selectedType === 'pdf' && (!uploadConnectionName.trim() || !pdfSourceFile)) ||
                           (selectedType === 'web' && (!uploadConnectionName.trim() || !webSourceUrl.trim())) ||
                           (selectedType !== 'upload' && selectedType !== 'url' && !isCreateFormValid) ||
-                          isCreatingAnyDatasource
+                          isCreatingAnyDatasource ||
+                          !!directSourceResult
                         }
                         className={`${
                           ((selectedType === 'upload' && uploadConnectionName.trim() && uploadFileType && uploadFiles.length > 0) ||
@@ -2953,7 +3034,8 @@ export default function DatabasesPage() {
                             (selectedType === 'pdf' && uploadConnectionName.trim() && pdfSourceFile) ||
                             (selectedType === 'web' && uploadConnectionName.trim() && webSourceUrl.trim()) ||
                             (selectedType !== 'upload' && selectedType !== 'url' && !isDirectSourceResourceType(selectedType) && isCreateFormValid)) &&
-                          !isCreatingAnyDatasource
+                          !isCreatingAnyDatasource &&
+                          !directSourceResult
                             ? 'bg-brand-orange hover:bg-brand-orange/90'
                             : 'bg-gray-500 cursor-not-allowed'
                         } flex items-center gap-2`}
@@ -2961,7 +3043,7 @@ export default function DatabasesPage() {
                         {isCreatingAnyDatasource && (
                           <Loader2 className="w-4 h-4 animate-spin" />
                         )}
-                        {isCreatingAnyDatasource ? 'Creating...' : 'Create Source'}
+                        {isCreatingAnyDatasource ? 'Creating...' : directSourceResult ? 'Processing source' : 'Create Source'}
                       </Button>
                     </>
                   )}
@@ -3328,5 +3410,95 @@ export default function DatabasesPage() {
           </DialogContent>
         </Dialog>
       </div>
+  )
+}
+
+function DirectSourceProcessingPanel({
+  resource,
+  onAddAnother,
+}: {
+  resource: SourceResource
+  onAddAnother: () => void
+}) {
+  const processingQuery = useSourceResourceProcessing(resource.id, resource.status === 'ready')
+  const processing = processingQuery.data
+  const progressIndex = directSourceProgressIndex(resource, processing)
+  const tone = directSourceProcessingTone(resource, processing)
+  const errorMessage = processing?.last_error?.message
+  const nextActions = processing?.next_actions || []
+  const semanticMode = resource.projected_dataset_id ? 'Projection-ready dataset' : 'Context-assisted source'
+
+  return (
+    <div className="rounded-lg border border-[#444444] bg-[#1a1a1a] p-4">
+      <div className="flex items-start gap-3">
+        {tone === 'failed' ? (
+          <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-400" />
+        ) : tone === 'ready' ? (
+          <CheckCircle2 className="mt-0.5 h-5 w-5 flex-shrink-0 text-green-400" />
+        ) : (
+          <Loader2 className="mt-0.5 h-5 w-5 flex-shrink-0 animate-spin text-brand-orange" />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-sm font-medium text-white">{resource.name}</span>
+            <span className="rounded bg-[#101010] px-2 py-0.5 text-[10px] uppercase text-gray-400">
+              {directSourceResourceLabel(resource.resource_type)}
+            </span>
+            <span className="rounded bg-[#101010] px-2 py-0.5 text-[10px] text-gray-400">
+              {semanticMode}
+            </span>
+          </div>
+          <p className={`mt-1 text-xs ${tone === 'failed' ? 'text-red-300' : tone === 'ready' ? 'text-green-300' : 'text-gray-300'}`}>
+            {tone === 'failed'
+              ? errorMessage || 'Source processing failed.'
+              : processing?.message || `Snapshot ${resource.latest_snapshot_id || 'created'}${resource.projected_dataset_id ? ` · dataset ${resource.projected_dataset_id}` : ''}`}
+          </p>
+
+          <div className="mt-4 grid grid-cols-7 gap-1">
+            {directSourceProcessingSteps.map((step, index) => {
+              const complete = tone !== 'failed' && index <= progressIndex
+              const current = tone === 'processing' && index === Math.max(progressIndex + 1, 0)
+              return (
+                <div key={step.id} className="min-w-0">
+                  <div className={`h-1.5 rounded-full ${complete ? 'bg-green-500' : current ? 'bg-brand-orange' : tone === 'failed' && index === 0 ? 'bg-red-500' : 'bg-[#444444]'}`} />
+                  <div className={`mt-1 truncate text-[10px] ${complete ? 'text-green-300' : current ? 'text-brand-orange' : 'text-gray-500'}`} title={step.label}>
+                    {step.label}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {(processingQuery.isLoading || processingQuery.isFetching) && tone !== 'failed' && (
+            <div className="mt-2 text-[11px] text-gray-500">Refreshing processing state...</div>
+          )}
+
+          {nextActions.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {nextActions.slice(0, 3).map(action => (
+                <span key={action} className="rounded border border-[#444444] px-2 py-1 text-[11px] text-gray-300">
+                  {action}
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button asChild size="sm" className="bg-brand-orange hover:bg-brand-orange/90">
+              <Link to={`/sources/${resource.id}`}>Open source</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline" className="border-[#555555] text-white hover:bg-[#3a3a3a]">
+              <Link to={`/sources/${resource.id}#evidence`}>Search evidence</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline" className="border-[#555555] text-white hover:bg-[#3a3a3a]">
+              <Link to="/data-models">Create model</Link>
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={onAddAnother} className="text-gray-300 hover:text-white">
+              Add another source
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

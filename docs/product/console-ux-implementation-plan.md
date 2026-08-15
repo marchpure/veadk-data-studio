@@ -378,10 +378,14 @@ Current implementation:
 - Failed imports keep their resource row visible with the connector error and do not hide successful capture/parse state for other selected resources.
 - Backend `next_actions` are shown as small action chips so the user sees whether to retry sync, reauthorize, attach to a notebook asset, or use knowledge retrieval.
 - Processing state is short-polled only while the backend stage is not terminal.
+- Direct Files as Source and Web source creation in `Databases.tsx` now also keep the Add Source dialog open after create success.
+- Direct file/web results render the same standard processing steps and poll `GET /source-resources/{resource_id}/processing` through `useSourceResourceProcessing()`.
+- Direct file/web result cards expose next actions for `Open source`, `Search evidence`, `Create model`, and `Add another source`; the primary create button is disabled while the created source is being reviewed to prevent accidental duplicate submission.
 
 Acceptance:
 
 - Importing a Feishu doc does not simply close the dialog or return to a flat list.
+- Creating a direct PDF/CSV/Excel/Docx/PPTX or Web source does not close the dialog before processing state and next actions are visible.
 - User can see whether content is indexed and whether a dataset projection exists.
 - User has an obvious next step.
 - Context indexing failure does not hide a successful capture/parse; the user sees partial readiness and retry.
