@@ -65,7 +65,10 @@ const tosTypes: Array<{ value: string; label: string }> = [
 const readinessGateSummary = (definition?: ConnectorDefinition): string | null => {
   if (!definition?.readiness_gates?.length) return null
   const passed = definition.readiness_gates.filter(gate => gate.status === 'passed').length
-  return `${passed}/${definition.readiness_gates.length} gates`
+  const partial = definition.readiness_gates.filter(gate => gate.status === 'partial').length
+  return partial > 0
+    ? `${passed}/${definition.readiness_gates.length} passed · ${partial} partial`
+    : `${passed}/${definition.readiness_gates.length} gates`
 }
 
 const missingReadinessGates = (definition?: ConnectorDefinition) =>

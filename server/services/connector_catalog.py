@@ -46,9 +46,65 @@ def _readiness_gates(
     return tuple(gates)
 
 
-PRODUCTION_READY_GATES = _readiness_gates(
+FILES_BETA_GATES = _readiness_gates(
     status="passed",
-    detail="Certified for the commercial beta Source control plane.",
+    detail="Commercial beta file Source contract is available.",
+    overrides={
+        "resource_picker": ("partial", "Upload/import contract is available; Drive-style picker and large-file resumable upload remain future hardening."),
+        "parser_warnings": ("partial", "Parser version and warnings are exposed for supported formats; legacy .xls/.ppt require conversion workers."),
+        "lifecycle_actions": ("partial", "Delete and reindex are available; revoke is not applicable, and scheduled retention policy is still being hardened."),
+    },
+)
+WEB_BETA_GATES = _readiness_gates(
+    status="passed",
+    detail="Commercial beta web Source contract is available.",
+    overrides={
+        "resource_picker": ("partial", "Single URL capture is available; sitemap/page-group picker and crawl policy review are still being hardened."),
+        "parser_warnings": ("partial", "HTML parser version is captured; structured table extraction warnings remain best-effort."),
+        "lifecycle_actions": ("partial", "Delete and reindex are available; scheduled crawl refresh and policy audit are still being hardened."),
+    },
+)
+FEISHU_BETA_GATES = _readiness_gates(
+    status="passed",
+    detail="Commercial beta Feishu/Lark Source connector is available.",
+    overrides={
+        "resource_picker": ("partial", "OAuth picker, search, pagination, and multi-select are available; admin consent and every Drive edge case need more hardening."),
+        "raw_artifact_uri": ("partial", "Snapshot raw artifact URIs are recorded; large workspace export retention policy is still being hardened."),
+        "lifecycle_actions": ("partial", "Reauthorization, delete, and reindex are available; tenant-wide revoke and scheduled sync policy remain beta hardening."),
+    },
+)
+TOS_BETA_GATES = _readiness_gates(
+    status="passed",
+    detail="Commercial beta TOS object-storage Source connector is available.",
+    overrides={
+        "resource_picker": ("partial", "Bucket/prefix/object browsing is available; S3-compatible vendor normalization remains future hardening."),
+        "parser_warnings": ("partial", "Parser warnings are available for imported supported objects; prefix-level parser coverage remains manifest-first."),
+        "lifecycle_actions": ("partial", "Delete and reindex are available; revoke and scheduled incremental sync policies are still being hardened."),
+    },
+)
+DATABRICKS_BETA_GATES = _readiness_gates(
+    status="passed",
+    detail="Commercial beta Databricks Source wrapper is available.",
+    overrides={
+        "immutable_snapshot": ("not_applicable", "Warehouse data remains in Databricks; SourceOverview tracks catalog/profile freshness instead of raw snapshots."),
+        "raw_artifact_uri": ("not_applicable", "Warehouse Sources do not copy raw table data into Byaan object storage."),
+        "parser_warnings": ("partial", "Schema/profile health is exposed; parser warning taxonomy is represented as profile refresh errors."),
+        "context_index_status": ("not_applicable", "Warehouse Sources feed semantic modeling from schema/profile evidence, not context indexing."),
+        "source_detail": ("partial", "Source Detail shows profile, readiness, lineage, and consumers; warehouse catalog drill-down remains beta hardening."),
+        "lifecycle_actions": ("partial", "Refresh profile and reauthorization are available; revoke and scheduled profile refresh are still being hardened."),
+    },
+)
+SQL_BETA_GATES = _readiness_gates(
+    status="passed",
+    detail="Commercial beta SQL Source contract is available through the existing database connector flow.",
+    overrides={
+        "immutable_snapshot": ("not_applicable", "Operational databases remain external; SourceOverview tracks schema/profile freshness instead of raw immutable snapshots."),
+        "raw_artifact_uri": ("not_applicable", "Database Sources do not copy raw table data into Byaan object storage."),
+        "parser_warnings": ("partial", "Schema/profile errors are exposed; full parser warning taxonomy remains beta hardening."),
+        "context_index_status": ("not_applicable", "Relational Sources feed semantic modeling from schema/profile evidence, not context indexing."),
+        "source_detail": ("partial", "Source Detail shows profile, readiness, lineage, and consumers; schema browser depth remains beta hardening."),
+        "lifecycle_actions": ("partial", "Refresh profile and disconnect are available; revoke semantics and scheduled profile refresh are still being hardened."),
+    },
 )
 PLANNED_GATES = _readiness_gates(
     status="missing",
@@ -175,7 +231,7 @@ CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
         ),
         resource_picker_type="file_import",
         modeling_modes=("context_assisted", "projection"),
-        readiness_gates=PRODUCTION_READY_GATES,
+        readiness_gates=FILES_BETA_GATES,
         entry_kind="embedded_flow",
     ),
     ConnectorDefinition(
@@ -205,7 +261,7 @@ CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
         ),
         resource_picker_type="url_import",
         modeling_modes=("context_assisted",),
-        readiness_gates=PRODUCTION_READY_GATES,
+        readiness_gates=WEB_BETA_GATES,
         entry_kind="embedded_flow",
     ),
     ConnectorDefinition(
@@ -245,7 +301,7 @@ CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
         ),
         resource_picker_type="oauth_drive_picker",
         modeling_modes=("context_assisted", "projection"),
-        readiness_gates=PRODUCTION_READY_GATES,
+        readiness_gates=FEISHU_BETA_GATES,
     ),
     ConnectorDefinition(
         id="sql_databases",
@@ -274,7 +330,7 @@ CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
         ),
         resource_picker_type="database_schema_picker",
         modeling_modes=("relational",),
-        readiness_gates=PRODUCTION_READY_GATES,
+        readiness_gates=SQL_BETA_GATES,
         entry_kind="embedded_flow",
     ),
     ConnectorDefinition(
@@ -323,7 +379,7 @@ CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
         required_scopes=("tos:ListBucket", "tos:GetObject"),
         resource_picker_type="object_storage_browser",
         modeling_modes=("projection", "context_assisted"),
-        readiness_gates=PRODUCTION_READY_GATES,
+        readiness_gates=TOS_BETA_GATES,
     ),
     ConnectorDefinition(
         id="databricks",
@@ -352,7 +408,7 @@ CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
         ),
         resource_picker_type="warehouse_catalog_picker",
         modeling_modes=("warehouse",),
-        readiness_gates=PRODUCTION_READY_GATES,
+        readiness_gates=DATABRICKS_BETA_GATES,
         entry_kind="embedded_flow",
     ),
     _planned(

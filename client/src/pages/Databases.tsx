@@ -190,7 +190,10 @@ const connectorModeLabel = (mode: string): string => {
 const readinessGateSummary = (connector?: ConnectorDefinition): string | null => {
   if (!connector?.readiness_gates?.length) return null
   const passed = connector.readiness_gates.filter(gate => gate.status === 'passed').length
-  return `${passed}/${connector.readiness_gates.length} gates`
+  const partial = connector.readiness_gates.filter(gate => gate.status === 'partial').length
+  return partial > 0
+    ? `${passed}/${connector.readiness_gates.length} passed · ${partial} partial`
+    : `${passed}/${connector.readiness_gates.length} gates`
 }
 
 const missingReadinessGates = (connector?: ConnectorDefinition) =>

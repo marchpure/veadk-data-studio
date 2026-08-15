@@ -345,13 +345,21 @@ async def test_connector_catalog_marks_only_real_connectors_available(test_clien
         "volcengine_tos",
         "databricks",
     }.issubset(by_id)
+    assert {item["id"] for item in items if item["availability"] == "available"} == {
+        "local_files",
+        "feishu",
+        "web",
+        "sql_databases",
+        "volcengine_tos",
+        "databricks",
+    }
     assert by_id["local_files"]["availability"] == "available"
     assert by_id["local_files"]["entry_kind"] == "embedded_flow"
     assert by_id["local_files"]["family"] == "files"
     assert by_id["local_files"]["resource_picker_type"] == "file_import"
     assert by_id["local_files"]["modeling_modes"] == ["context_assisted", "projection"]
     assert by_id["local_files"]["supported_resource_types"] == ["pdf", "file"]
-    assert {gate["status"] for gate in by_id["local_files"]["readiness_gates"]} == {"passed"}
+    assert {gate["status"] for gate in by_id["local_files"]["readiness_gates"]} == {"passed", "partial"}
     assert by_id["web"]["availability"] == "available"
     assert by_id["web"]["entry_kind"] == "embedded_flow"
     assert by_id["web"]["family"] == "web"
@@ -366,11 +374,16 @@ async def test_connector_catalog_marks_only_real_connectors_available(test_clien
     assert "docx:document:readonly" in by_id["feishu"]["required_scopes"]
     assert by_id["feishu"]["limitations"]
     assert len(by_id["feishu"]["readiness_gates"]) == 10
-    assert {gate["status"] for gate in by_id["feishu"]["readiness_gates"]} == {"passed"}
+    assert {gate["status"] for gate in by_id["feishu"]["readiness_gates"]} == {"passed", "partial"}
     assert {gate["key"] for gate in by_id["feishu"]["readiness_gates"]} >= {
         "tenant_isolated_auth",
         "immutable_snapshot",
         "context_index_status",
+        "lifecycle_actions",
+    }
+    assert {gate["key"] for gate in by_id["feishu"]["readiness_gates"] if gate["status"] == "partial"} == {
+        "resource_picker",
+        "raw_artifact_uri",
         "lifecycle_actions",
     }
     assert by_id["sql_databases"]["availability"] == "available"
@@ -385,12 +398,22 @@ async def test_connector_catalog_marks_only_real_connectors_available(test_clien
     assert by_id["volcengine_tos"]["resource_picker_type"] == "object_storage_browser"
     assert by_id["volcengine_tos"]["modeling_modes"] == ["projection", "context_assisted"]
     assert "tos:GetObject" in by_id["volcengine_tos"]["required_scopes"]
-    assert {gate["status"] for gate in by_id["volcengine_tos"]["readiness_gates"]} == {"passed"}
+    assert {gate["status"] for gate in by_id["volcengine_tos"]["readiness_gates"]} == {"passed", "partial"}
     assert by_id["databricks"]["availability"] == "available"
     assert by_id["databricks"]["entry_kind"] == "embedded_flow"
     assert by_id["databricks"]["family"] == "warehouses"
     assert by_id["databricks"]["resource_picker_type"] == "warehouse_catalog_picker"
     assert by_id["databricks"]["modeling_modes"] == ["warehouse"]
+    assert {gate["status"] for gate in by_id["databricks"]["readiness_gates"]} == {
+        "passed",
+        "partial",
+        "not_applicable",
+    }
+    assert {gate["key"] for gate in by_id["sql_databases"]["readiness_gates"] if gate["status"] == "not_applicable"} == {
+        "immutable_snapshot",
+        "raw_artifact_uri",
+        "context_index_status",
+    }
     assert by_id["aliyun_oss"]["availability"] == "planned"
     assert by_id["aliyun_oss"]["entry_kind"] == "roadmap"
     assert by_id["aliyun_oss"]["status"] == "planned"
