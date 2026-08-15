@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from server.models.analysis_artifacts import AnalysisArtifact
+from server.models.connections import Connection
 from server.models.dashboard import Dashboard
 from server.models.datasets import Dataset
 from server.models.knowledge_resources import EvidenceFragment, KnowledgeResource
@@ -275,7 +276,18 @@ class SourceOverviewService:
             seen_connection_ids.add(connection_id)
             if connection.type == "databricks":
                 connection_obj = await connection.get_decrypted_connection_obj(session)
-                health[connection_id] = self._databricks_connection_health(connection_obj=connection_obj)
+                databricks_health = self._databricks_connection_health(connection_obj=connection_obj)
+                health[connection_id] = (
+                    databricks_health
+                    if databricks_health.status != "ready"
+                    else self._schema_profile_health(connection=connection)
+                )
+            else:
+                connection_obj = await connection.get_decrypted_connection_obj(session)
+                health[connection_id] = self._database_connection_health(
+                    connection=connection,
+                    connection_obj=connection_obj,
+                )
         return health
 
     def _dataset_item(
@@ -304,7 +316,8 @@ class SourceOverviewService:
             )
             health = connection_health or _ConnectionHealth()
             status = health.status
-            has_schema = bool(dataset.connection.schema_updated_at)
+            table_count = self._schema_table_count(dataset.connection.schema_cache)
+            has_schema = table_count > 0
             return SourceOverviewItem(
                 id=str(dataset.id),
                 source_kind="connection",
@@ -315,11 +328,12 @@ class SourceOverviewService:
                 name=dataset.connection.name or "Database Connection",
                 status=SOURCE_STATUS_LABELS.get(status, status.replace("_", " ").capitalize()),
                 attention_state=health.attention_state,
-                freshness_status=health.freshness_status or ("fresh" if has_schema else "unknown"),
+                freshness_status=health.freshness_status
+                or ("fresh" if has_schema and dataset.connection.schema_updated_at else "unknown"),
                 last_synced_at=self._isoformat(dataset.connection.schema_updated_at),
                 context_index_status="unavailable",
                 parse_status=health.parse_status,
-                parsed_asset_counts={"tables": self._schema_table_count(dataset.connection.schema_cache)},
+                parsed_asset_counts={"tables": table_count},
                 consumer_counts=consumer_counts,
                 owner=self._owner_payload(dataset.connection.created_by),
                 visibility="public" if dataset.connection.is_public else "private",
@@ -582,6 +596,53 @@ class SourceOverviewService:
             )
         return _ConnectionHealth()
 
+    def _database_connection_health(
+        self,
+        *,
+        connection: Connection,
+        connection_obj: dict[str, Any] | None,
+    ) -> _ConnectionHealth:
+        if not isinstance(connection_obj, dict) or not connection_obj:
+            return _ConnectionHealth(
+                status="authorization_required",
+                attention_state="auth",
+                freshness_status="unknown",
+                parse_status="pending",
+                next_actions=["Reconnect database"],
+            )
+        return self._schema_profile_health(connection=connection)
+
+    def _schema_profile_health(self, *, connection: Connection) -> _ConnectionHealth:
+        schema_state = self._schema_profile_state(connection.schema_cache)
+        if schema_state == "ready":
+            return _ConnectionHealth()
+        if schema_state == "invalid":
+            return _ConnectionHealth(
+                status="failed",
+                attention_state="parse",
+                freshness_status="stale" if connection.schema_updated_at else "unknown",
+                parse_status="failed",
+                next_actions=["Refresh schema profile", "Review schema parser error"],
+            )
+        return _ConnectionHealth(
+            status="pending",
+            attention_state="parse",
+            freshness_status="unknown",
+            parse_status="pending",
+            next_actions=["Refresh schema profile"],
+        )
+
+    def _schema_profile_state(self, schema_cache: str | None) -> str:
+        if not schema_cache:
+            return "missing"
+        try:
+            schema = json.loads(schema_cache)
+        except json.JSONDecodeError:
+            return "invalid"
+        if not isinstance(schema, dict):
+            return "invalid"
+        return "ready" if self._schema_table_count_from_payload(schema) > 0 else "empty"
+
     def _coerce_epoch_seconds(self, value: Any) -> float | None:
         if isinstance(value, datetime):
             return value.timestamp()
@@ -673,11 +734,24 @@ class SourceOverviewService:
             schema = json.loads(schema_cache)
         except json.JSONDecodeError:
             return 0
-        tables = schema.get("schema") if isinstance(schema, dict) else None
+        return self._schema_table_count_from_payload(schema)
+
+    def _schema_table_count_from_payload(self, schema: Any) -> int:
+        if not isinstance(schema, dict):
+            return 0
+        databases = schema.get("databases")
+        if isinstance(databases, list):
+            return sum(self._schema_table_count_from_payload(database) for database in databases)
+        tables = schema.get("tables")
         if isinstance(tables, dict):
             return len(tables)
-        tables = schema.get("tables") if isinstance(schema, dict) else None
-        return len(tables) if isinstance(tables, dict) else 0
+        if isinstance(tables, list):
+            return len(tables)
+        nested_schema = schema.get("schema")
+        if isinstance(nested_schema, dict):
+            nested_count = self._schema_table_count_from_payload(nested_schema)
+            return nested_count if nested_count > 0 else len(nested_schema)
+        return 0
 
     def _projection_table_count(self, projection: dict[str, Any]) -> int:
         tables = projection.get("schema_tables")

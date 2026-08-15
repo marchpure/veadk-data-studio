@@ -401,7 +401,7 @@ function sourceOverviewBlocker(item: SourceOverviewItem): { status: DataModeling
   if (['pending', 'syncing', 'analyzing'].includes(status)) {
     return {
       status: 'processing',
-      reason: 'Source processing is still running. Wait until processing finishes before modeling.',
+      reason: pendingSourceReason(item),
     }
   }
   if (status === 'planned') {
@@ -421,6 +421,17 @@ function sourceOverviewBlocker(item: SourceOverviewItem): { status: DataModeling
 
 function normalizeStatusText(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
+}
+
+function pendingSourceReason(item: SourceOverviewItem): string {
+  const actions = (item.next_actions ?? []).map(normalizeStatusText)
+  if (item.family === 'databases' || item.family === 'warehouses') {
+    if (actions.some(action => action.includes('refresh schema profile'))) {
+      return 'Refresh the schema/profile before this source can feed production semantic modeling.'
+    }
+    return 'Database schema/profile is not ready yet. Refresh the profile before modeling.'
+  }
+  return 'Source processing is still running. Wait until processing finishes before modeling.'
 }
 
 function isProjectionSource(item: SourceOverviewItem): boolean {

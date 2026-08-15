@@ -392,6 +392,169 @@ async def test_sources_overview_marks_databricks_expired_token_as_reauthorizatio
     assert item["next_actions"] == ["Reauthorize Databricks", "Refresh schema profile"]
 
 
+async def test_sources_overview_marks_sql_connection_without_schema_as_pending_profile(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    connection = Connection(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="pg",
+        name="Postgres without schema profile",
+        connection_obj_encrypted=json.dumps(
+            {
+                "host": "postgres.example.com",
+                "port": 5432,
+                "database": "sales",
+                "user": "readonly",
+            }
+        ),
+        schema_cache=None,
+        schema_updated_at=None,
+        is_public=True,
+    )
+    test_session.add(connection)
+    await test_session.flush()
+    dataset = Dataset(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="connection",
+        name="Postgres without schema profile",
+        connection_id=connection.id,
+        is_public=True,
+    )
+    test_session.add(dataset)
+    await test_session.commit()
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["connection_id"] == str(connection.id))
+
+    assert item["provider"] == "pg"
+    assert item["family"] == "databases"
+    assert item["status"] == "Pending"
+    assert item["attention_state"] == "parse"
+    assert item["freshness_status"] == "unknown"
+    assert item["parse_status"] == "pending"
+    assert item["parsed_asset_counts"]["tables"] == 0
+    assert item["next_actions"] == ["Refresh schema profile"]
+
+
+async def test_sources_overview_marks_sql_connection_invalid_schema_cache_as_failed(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    connection = Connection(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="mysql",
+        name="MySQL invalid schema cache",
+        connection_obj_encrypted=json.dumps(
+            {
+                "host": "mysql.example.com",
+                "port": 3306,
+                "database": "sales",
+                "user": "readonly",
+            }
+        ),
+        schema_cache="{not-json",
+        schema_updated_at=datetime.utcnow(),
+        is_public=True,
+    )
+    test_session.add(connection)
+    await test_session.flush()
+    dataset = Dataset(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="connection",
+        name="MySQL invalid schema cache",
+        connection_id=connection.id,
+        is_public=True,
+    )
+    test_session.add(dataset)
+    await test_session.commit()
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["connection_id"] == str(connection.id))
+
+    assert item["provider"] == "mysql"
+    assert item["family"] == "databases"
+    assert item["status"] == "Failed"
+    assert item["attention_state"] == "parse"
+    assert item["freshness_status"] == "stale"
+    assert item["parse_status"] == "failed"
+    assert item["parsed_asset_counts"]["tables"] == 0
+    assert item["next_actions"] == ["Refresh schema profile", "Review schema parser error"]
+
+
+async def test_sources_overview_counts_multi_database_sql_schema_tables(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    connection = Connection(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="pg",
+        name="Postgres multi schema",
+        connection_obj_encrypted=json.dumps(
+            {
+                "host": "postgres.example.com",
+                "port": 5432,
+                "database": "sales",
+                "user": "readonly",
+            }
+        ),
+        schema_cache=json.dumps(
+            {
+                "total_databases": 2,
+                "databases": [
+                    {
+                        "database_name": "sales",
+                        "schema": {
+                            "orders": {"columns": [{"name": "order_id", "type": "TEXT"}]},
+                            "customers": {"columns": [{"name": "customer_id", "type": "TEXT"}]},
+                        },
+                    },
+                    {
+                        "database_name": "support",
+                        "tables": {
+                            "tickets": {"columns": [{"name": "ticket_id", "type": "TEXT"}]},
+                        },
+                    },
+                ],
+            }
+        ),
+        schema_updated_at=datetime.utcnow(),
+        is_public=True,
+    )
+    test_session.add(connection)
+    await test_session.flush()
+    dataset = Dataset(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="connection",
+        name="Postgres multi schema",
+        connection_id=connection.id,
+        is_public=True,
+    )
+    test_session.add(dataset)
+    await test_session.commit()
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["connection_id"] == str(connection.id))
+
+    assert item["provider"] == "pg"
+    assert item["family"] == "databases"
+    assert item["status"] == "Ready"
+    assert item["attention_state"] == "none"
+    assert item["freshness_status"] == "fresh"
+    assert item["parse_status"] == "parsed"
+    assert item["parsed_asset_counts"]["tables"] == 3
+    assert item["next_actions"] == ["Generate semantic model"]
+
+
 async def test_sources_overview_object_storage_confirmation_uses_large_object_action(test_client, test_session):
     tenant = (await test_session.execute(select(Tenant))).scalars().first()
     assert tenant is not None
