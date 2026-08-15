@@ -5,6 +5,7 @@ import Layout from './components/Layout'
 import ChatPreview from './pages/ChatPreview'
 import LLMConnectionsPage from './pages/LLMConnections'
 import DatabasesPage from './pages/Databases'
+import SourceDetailPage from './pages/SourceDetailPage'
 import DataModelsHomePage from './features/data-modeling/pages/DataModelsHomePage'
 import DataModelBuilderPage from './features/data-modeling/pages/DataModelBuilderPage'
 import TeamMembersPage from './pages/TeamMembers'
@@ -230,6 +231,18 @@ function App() {
             }
           />
           <Route
+            path="/sources/:sourceId"
+            element={
+              <AuthGuard>
+                <ViewerRedirect>
+                  <Layout>
+                    <SourceDetailPage />
+                  </Layout>
+                </ViewerRedirect>
+              </AuthGuard>
+            }
+          />
+          <Route
             path="/data-models"
             element={
               <AuthGuard>
@@ -357,6 +370,7 @@ function App() {
             <Route path="/llm-connections" element={<LLMConnectionsPage />} />
             <Route path="/databases" element={<DatabasesPage />} />
             <Route path="/sources" element={<DatabasesPage />} />
+            <Route path="/sources/:sourceId" element={<SourceDetailPage />} />
             <Route path="/data-models" element={<DataModelsHomePage />} />
             <Route path="/data-models/:modelId" element={<DataModelBuilderPage />} />
             <Route path="/github" element={<GitHubIntegrations />} />
@@ -402,6 +416,7 @@ function App() {
             <Route path="/llm-connections" element={<LLMConnectionsPage />} />
             <Route path="/databases" element={<DatabasesPage />} />
             <Route path="/sources" element={<DatabasesPage />} />
+            <Route path="/sources/:sourceId" element={<SourceDetailPage />} />
             <Route path="/data-models" element={<DataModelsHomePage />} />
             <Route path="/data-models/:modelId" element={<DataModelBuilderPage />} />
             <Route path="/github" element={<GitHubIntegrations />} />

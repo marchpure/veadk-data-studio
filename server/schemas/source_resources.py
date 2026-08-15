@@ -94,6 +94,12 @@ class KnowledgeResourceRead(BaseModel):
     snapshot_id: UUID
     provider: str
     provider_resource_id: str | None = None
+    context_uri: str | None = None
+    provider_status: str | None = None
+    last_indexed_at: datetime | None = None
+    provider_error: dict[str, Any] | None = None
+    retrieval_debug_uri: str | None = None
+    provider_metadata_json: dict[str, Any] | None = None
     parse_status: str
     index_status: str
     completeness_score: float | None = None

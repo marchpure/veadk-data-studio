@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -14,6 +15,7 @@ from server.models.notebooks import Notebook
 from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
 from server.models.tenant import Tenant
+from server.services.knowledge_provider import KnowledgeSearchInput, get_knowledge_provider
 
 pytestmark = __import__("pytest").mark.asyncio
 
@@ -63,6 +65,11 @@ async def test_source_resource_with_supplied_content_creates_snapshot_knowledge_
     assert resource["latest_snapshot"]["status"] == "indexed"
     assert resource["knowledge_resource"]["index_status"] == "indexed"
     assert resource["knowledge_resource"]["evidence_count"] == 2
+    assert resource["knowledge_resource"]["context_uri"].startswith("byaan-native://resources/")
+    assert resource["knowledge_resource"]["provider_status"] == "indexed"
+    assert resource["knowledge_resource"]["retrieval_debug_uri"].startswith("byaan-native://debug/resources/")
+    assert resource["knowledge_resource"]["provider_metadata_json"]["storage_role"] == "local_dev_fallback"
+    assert resource["knowledge_resource"]["provider_metadata_json"]["control_plane_text_storage"] is True
 
     search = await test_client.post("/api/knowledge/search", json={"query": "收入", "limit": 5})
     assert search.status_code == 200
@@ -84,7 +91,21 @@ async def test_source_resource_with_supplied_content_creates_snapshot_knowledge_
     assert rows[0].tenant_id == tenant.id
     assert len(snapshots) == 1
     assert len(knowledge) == 1
+    assert knowledge[0].context_uri == resource["knowledge_resource"]["context_uri"]
+    assert knowledge[0].provider_status == "indexed"
+    assert knowledge[0].last_indexed_at is not None
     assert len(evidence) == 2
+
+
+async def test_openviking_provider_factory_is_explicit_boundary(test_session):
+    provider = get_knowledge_provider("openviking")
+
+    assert provider.provider == "openviking"
+    with pytest.raises(RuntimeError, match="OpenVikingKnowledgeProvider is selected but not configured"):
+        await provider.search(
+            session=test_session,
+            input=KnowledgeSearchInput(tenant_id=uuid4(), query="收入", limit=1),
+        )
 
 
 async def test_read_evidence_returns_source_snapshot_and_resource_context(test_client):

@@ -10,10 +10,12 @@ import {
   type SourceOverviewResponse,
   type SourceResource,
   type SourceResourceCreateRequest,
+  type SourceResourceSnapshotsResponse,
   type ConnectorDefinition,
   type FeishuOAuthStartResponse,
   type FeishuOAuthResult,
   type FeishuStatus,
+  type KnowledgeSearchResponse,
   type SourceConnection,
   type SourceConnectionCreateRequest,
   type SourceResourceImportRequest,
@@ -56,6 +58,9 @@ export const sourceConnectorKeys = {
     pageToken || '',
   ] as const,
   processing: (resourceId?: string) => [...sourceConnectorKeys.all, 'processing', resourceId || 'none'] as const,
+  sourceResource: (resourceId?: string) => [...sourceConnectorKeys.all, 'source-resource', resourceId || 'none'] as const,
+  snapshots: (resourceId?: string) => [...sourceConnectorKeys.all, 'snapshots', resourceId || 'none'] as const,
+  knowledgeSearch: (resourceId?: string, query?: string) => [...sourceConnectorKeys.all, 'knowledge-search', resourceId || 'none', query || ''] as const,
 }
 
 export const sourceOverviewKeys = {
@@ -475,6 +480,45 @@ export function useSourceResourceProcessing(resourceId?: string, enabled = true)
       const stage = query.state.data?.stage
       return stage && !['indexed', 'failed'].includes(stage) ? 3000 : false
     },
+  })
+}
+
+export function useSourceResource(resourceId?: string) {
+  return useQuery({
+    queryKey: sourceConnectorKeys.sourceResource(resourceId),
+    queryFn: async (): Promise<SourceResource> => {
+      if (!resourceId) throw new Error('Missing source resource id')
+      return ApiService.getSourceResource(resourceId)
+    },
+    enabled: !!resourceId,
+    staleTime: 15 * 1000,
+    gcTime: 2 * 60 * 1000,
+  })
+}
+
+export function useSourceResourceSnapshots(resourceId?: string) {
+  return useQuery({
+    queryKey: sourceConnectorKeys.snapshots(resourceId),
+    queryFn: async (): Promise<SourceResourceSnapshotsResponse> => {
+      if (!resourceId) throw new Error('Missing source resource id')
+      return ApiService.listSourceResourceSnapshots(resourceId)
+    },
+    enabled: !!resourceId,
+    staleTime: 30 * 1000,
+    gcTime: 2 * 60 * 1000,
+  })
+}
+
+export function useKnowledgeSearch(resourceId?: string, query = '', enabled = true) {
+  return useQuery({
+    queryKey: sourceConnectorKeys.knowledgeSearch(resourceId, query),
+    queryFn: async (): Promise<KnowledgeSearchResponse> => {
+      if (!resourceId) throw new Error('Missing source resource id')
+      return ApiService.searchKnowledge({ query: query.trim() || '*', resource_ids: [resourceId], limit: 8 })
+    },
+    enabled: enabled && !!resourceId,
+    staleTime: 15 * 1000,
+    gcTime: 2 * 60 * 1000,
   })
 }
 

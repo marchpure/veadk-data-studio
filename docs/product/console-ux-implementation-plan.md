@@ -384,6 +384,20 @@ Tabs:
 - Consumers
 - Settings
 
+Current implementation:
+
+- `client/src/pages/SourceDetailPage.tsx` implements the read-only MVP for `SourceResource` sources.
+- `/sources/:sourceId` is registered in enterprise, community/local, and legacy local route trees.
+- The Sources inventory links `source_kind = source_resource` rows to `/sources/:sourceId`; connection-backed sources still use the existing edit sidebar.
+- The page reads `GET /source-resources/{resource_id}`, `GET /source-resources/{resource_id}/snapshots`, `GET /source-resources/{resource_id}/processing`, and `POST /knowledge/search`.
+- The page shows metric cards for snapshot capture, dataset projection, context index status, and evidence count.
+- The Processing section uses the same commercial step labels as post-import processing: `Capture`, `Parse`, `Detect tables`, `Normalize dataset`, `Index context`, `Generate semantic suggestions`, and `Ready`.
+- Overview and Lineage show external identity, source URL, sync mode, connection id, latest snapshot id, projected dataset id, knowledge resource id, and context URI.
+- Parsed content and Tables are read-only. They use snapshot metadata, parser version, parser warnings, content hash, projected dataset id, and detected table metadata when available.
+- Evidence search is scoped to the current source resource and shows evidence type, confidence, and text preview.
+- Consumers is intentionally a placeholder for the future `/consumers` API; current consumer counts remain visible in the Sources inventory.
+- Settings exposes visibility, context provider, provider status, last indexed time, retrieval debug URI, delete behavior, reindex behavior, and provider error metadata for admin/debug use.
+
 Acceptance:
 
 - Opening a source explains whether it is safe to use for semantic model/dashboard generation.
@@ -507,6 +521,15 @@ Tasks:
    - local/dev: `NativeKnowledgeProvider` allowed
    - commercial beta: OpenViking/default external provider required for new ingestion
    - migration mode: dual-read or dual-write until backfill is complete
+
+Current implementation:
+
+- `KnowledgeResource` now has provider metadata fields for `context_uri`, `provider_status`, `last_indexed_at`, `provider_error`, `retrieval_debug_uri`, and `provider_metadata_json`.
+- `add_knowledge_provider_metadata` adds those columns idempotently for existing deployments.
+- `KnowledgeResourceRead`, `ApiService` types, and `SourceResourceService._knowledge_resource_payload()` return the metadata to Source Detail.
+- `NativeKnowledgeProvider` remains the default local/dev fallback and writes `byaan-native://...` context/debug URIs plus metadata that explicitly marks control-plane text storage as local fallback behavior.
+- `OpenVikingKnowledgeProvider` exists as a provider boundary selected by `KNOWLEDGE_PROVIDER=openviking`, but it fails fast until a real OpenViking client is configured. This keeps OpenViking behind `KnowledgeProvider` and prevents accidental use of OpenViking connectors as the Add Source layer.
+- No Add Source family or connector entry exposes OpenViking to ordinary users.
 
 Acceptance:
 

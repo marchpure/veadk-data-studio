@@ -922,11 +922,23 @@ export interface KnowledgeResource {
   snapshot_id: string
   provider: string
   provider_resource_id?: string | null
+  context_uri?: string | null
+  provider_status?: string | null
+  last_indexed_at?: string | null
+  provider_error?: Record<string, unknown> | null
+  retrieval_debug_uri?: string | null
+  provider_metadata_json?: Record<string, unknown> | null
   parse_status: string
   index_status: string
   completeness_score?: number | null
   created_at: string
   evidence_count: number
+}
+
+export interface SourceResourceSnapshotsResponse {
+  resource_id: string
+  items: SourceSnapshot[]
+  total: number
 }
 
 export interface SourceResource {
@@ -1147,11 +1159,20 @@ export interface SourceResourceImportResponse {
 
 export interface SourceEvidence {
   id: string
+  knowledge_resource_id?: string
+  snapshot_id?: string
   fragment_type: string
   title_path?: unknown[] | null
   text: string
   locator_json: Record<string, unknown>
   confidence?: string | null
+  content_hash?: string | null
+  created_at?: string
+}
+
+export interface KnowledgeSearchResponse {
+  items: SourceEvidence[]
+  total: number
 }
 
 export interface SourceResourceUnderstanding {
@@ -3102,6 +3123,63 @@ export class ApiService {
       return extractData<SourceResourceProcessing>(responseData)
     } catch (error) {
       console.error('Error fetching source resource processing state:', error)
+      throw error
+    }
+  }
+
+  static async getSourceResource(resourceId: string): Promise<SourceResource> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/source-resources/${resourceId}`)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
+      }
+      const responseData = await response.json()
+      return extractData<SourceResource>(responseData)
+    } catch (error) {
+      console.error('Error fetching source resource:', error)
+      throw error
+    }
+  }
+
+  static async listSourceResourceSnapshots(resourceId: string): Promise<SourceResourceSnapshotsResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/source-resources/${resourceId}/snapshots`)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
+      }
+      const responseData = await response.json()
+      return extractData<SourceResourceSnapshotsResponse>(responseData)
+    } catch (error) {
+      console.error('Error fetching source resource snapshots:', error)
+      throw error
+    }
+  }
+
+  static async searchKnowledge(payload: {
+    query: string
+    resource_ids?: string[]
+    limit?: number
+  }): Promise<KnowledgeSearchResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/knowledge/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: payload.query,
+          resource_ids: payload.resource_ids || [],
+          limit: payload.limit || 10,
+        }),
+      })
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
+      }
+      const responseData = await response.json()
+      return extractData<KnowledgeSearchResponse>(responseData)
+    } catch (error) {
+      console.error('Error searching knowledge:', error)
       throw error
     }
   }

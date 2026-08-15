@@ -894,13 +894,6 @@ export default function DatabasesPage() {
 
   const handleEditClick = (datasource: Datasource) => {
     if (datasource.source_type === 'source_resource') {
-      showToast.info(
-        datasource.projected_dataset_id
-          ? 'Source resource is indexed and has a DuckDB dataset projection. Open the generated dataset card to query it.'
-          : datasource.status === 'ready'
-          ? 'Source resource is indexed and available for knowledge retrieval.'
-          : 'Source resource is waiting for connector-supplied content.'
-      )
       return
     }
     setSelectedDatasource(datasource.id)
@@ -1506,17 +1499,28 @@ export default function DatabasesPage() {
                           const datasource = datasourceForSource(source)
                           const canEdit = datasource.source_type !== 'source_resource' && canEditDatasource(datasource.created_by)
                           const canDelete = canDeleteDatasource(datasource.created_by)
+                          const sourceResourceHref = datasource.source_type === 'source_resource' ? `/sources/${source.id}` : null
                           return (
                             <tr key={source.id} className="group hover:bg-white/[0.03]">
                               <td className="px-4 py-4 align-top">
                                 <div className="min-w-0">
-                                  <button
-                                    className="block max-w-full truncate text-left text-sm font-medium text-white hover:text-brand-orange"
-                                    onClick={() => handleEditClick(datasource)}
-                                    title={source.name}
-                                  >
-                                    {source.name}
-                                  </button>
+                                  {sourceResourceHref ? (
+                                    <Link
+                                      to={sourceResourceHref}
+                                      className="block max-w-full truncate text-left text-sm font-medium text-white hover:text-brand-orange"
+                                      title={source.name}
+                                    >
+                                      {source.name}
+                                    </Link>
+                                  ) : (
+                                    <button
+                                      className="block max-w-full truncate text-left text-sm font-medium text-white hover:text-brand-orange"
+                                      onClick={() => handleEditClick(datasource)}
+                                      title={source.name}
+                                    >
+                                      {source.name}
+                                    </button>
+                                  )}
                                   <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
                                     <span>{sourceTypeLabel(source)}</span>
                                     <span>·</span>
@@ -1581,6 +1585,19 @@ export default function DatabasesPage() {
                                       <Pencil className="w-4 h-4" />
                                     </Button>
                                   )}
+                                  {sourceResourceHref && (
+                                    <Button
+                                      asChild
+                                      size="sm"
+                                      variant="ghost"
+                                      className="text-gray-400 hover:text-white hover:bg-gray-800"
+                                      title="Open source detail"
+                                    >
+                                      <Link to={sourceResourceHref}>
+                                        <FileText className="w-4 h-4" />
+                                      </Link>
+                                    </Button>
+                                  )}
                                   {datasource.source_type !== 'source_resource' && (
                                     <Button
                                       asChild
@@ -1620,6 +1637,7 @@ export default function DatabasesPage() {
                       const datasource = datasourceForSource(source)
                       const canEdit = datasource.source_type !== 'source_resource' && canEditDatasource(datasource.created_by)
                       const canDelete = canDeleteDatasource(datasource.created_by)
+                      const sourceResourceHref = datasource.source_type === 'source_resource' ? `/sources/${source.id}` : null
                       return (
                         <Card
                           key={source.id}
@@ -1627,9 +1645,15 @@ export default function DatabasesPage() {
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0 flex-1">
-                              <h3 className="truncate text-base font-medium text-white" title={source.name}>
-                                {source.name}
-                              </h3>
+                              {sourceResourceHref ? (
+                                <Link to={sourceResourceHref} className="block truncate text-base font-medium text-white hover:text-brand-orange" title={source.name}>
+                                  {source.name}
+                                </Link>
+                              ) : (
+                                <h3 className="truncate text-base font-medium text-white" title={source.name}>
+                                  {source.name}
+                                </h3>
+                              )}
                               <p className="mt-1 text-sm text-gray-400">{sourceTypeLabel(source)}</p>
                             </div>
                             <span className={`rounded border px-2 py-1 text-xs ${statusClassName(source)}`}>
@@ -1658,6 +1682,13 @@ export default function DatabasesPage() {
                             {canEdit && (
                               <Button size="sm" variant="ghost" onClick={() => handleEditClick(datasource)} className="text-gray-400 hover:text-white hover:bg-gray-800">
                                 <Pencil className="w-4 h-4" />
+                              </Button>
+                            )}
+                            {sourceResourceHref && (
+                              <Button asChild size="sm" variant="ghost" className="text-gray-400 hover:text-white hover:bg-gray-800">
+                                <Link to={sourceResourceHref}>
+                                  <FileText className="w-4 h-4" />
+                                </Link>
                               </Button>
                             )}
                             {canDelete && (

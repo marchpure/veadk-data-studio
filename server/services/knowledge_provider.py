@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -116,6 +118,14 @@ class NativeKnowledgeProvider:
                 snapshot_id=snapshot.id,
                 provider=self.provider,
                 provider_resource_id=f"{self.provider}:{resource.id}:{snapshot.id}",
+                context_uri=f"byaan-native://resources/{resource.id}/snapshots/{snapshot.id}",
+                provider_status="indexed",
+                last_indexed_at=datetime.utcnow(),
+                retrieval_debug_uri=f"byaan-native://debug/resources/{resource.id}/snapshots/{snapshot.id}",
+                provider_metadata_json={
+                    "storage_role": "local_dev_fallback",
+                    "control_plane_text_storage": True,
+                },
                 parse_status="parsed",
                 index_status="indexed",
                 completeness_score=1.0 if content.strip() else 0.0,
@@ -127,6 +137,16 @@ class NativeKnowledgeProvider:
             knowledge_resource.parse_status = "parsed"
             knowledge_resource.index_status = "indexed"
             knowledge_resource.completeness_score = 1.0 if content.strip() else 0.0
+            knowledge_resource.context_uri = f"byaan-native://resources/{resource.id}/snapshots/{snapshot.id}"
+            knowledge_resource.provider_status = "indexed"
+            knowledge_resource.last_indexed_at = datetime.utcnow()
+            knowledge_resource.provider_error = None
+            knowledge_resource.retrieval_debug_uri = f"byaan-native://debug/resources/{resource.id}/snapshots/{snapshot.id}"
+            knowledge_resource.provider_metadata_json = {
+                **(knowledge_resource.provider_metadata_json or {}),
+                "storage_role": "local_dev_fallback",
+                "control_plane_text_storage": True,
+            }
 
         fragments = self._fragment_content(resource=resource, snapshot=snapshot, content=content)
         evidence_ids: list[UUID] = []
@@ -348,7 +368,73 @@ class NativeKnowledgeProvider:
         return {}
 
 
+class OpenVikingKnowledgeProvider:
+    """Provider boundary for commercial context storage.
+
+    Core Byaan connectors should hand this provider normalized SourceSnapshots.
+    This skeleton intentionally does not expose OpenViking connectors as Add
+    Source entries and fails fast until a real OpenViking client is configured.
+    """
+
+    provider = "openviking"
+
+    def __init__(self, endpoint: str | None = None) -> None:
+        self.endpoint = endpoint or os.getenv("OPENVIKING_ENDPOINT")
+
+    def _not_configured(self) -> RuntimeError:
+        return RuntimeError(
+            "OpenVikingKnowledgeProvider is selected but not configured. "
+            "Configure OPENVIKING_ENDPOINT and implement the provider client before using it for ingestion."
+        )
+
+    async def ingest(
+        self,
+        *,
+        session: AsyncSession,
+        resource: SourceResource,
+        snapshot: SourceSnapshot,
+        content: str,
+    ) -> KnowledgeIngestResult:
+        raise self._not_configured()
+
+    async def search(
+        self,
+        *,
+        session: AsyncSession,
+        input: KnowledgeSearchInput,
+    ) -> list[EvidenceFragment]:
+        raise self._not_configured()
+
+    async def read(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        evidence_id: UUID,
+    ) -> EvidenceFragment | None:
+        raise self._not_configured()
+
+    async def refresh(
+        self,
+        *,
+        session: AsyncSession,
+        resource_id: UUID,
+    ) -> KnowledgeIngestResult:
+        raise self._not_configured()
+
+    async def delete(
+        self,
+        *,
+        session: AsyncSession,
+        resource_id: UUID,
+    ) -> None:
+        raise self._not_configured()
+
+
 def get_knowledge_provider(name: str | None = None) -> KnowledgeProvider:
-    # Single native provider for this slice; external OpenViking/Feishu/PDF/Web
-    # providers can register behind this factory later without changing API.
+    selected = (name or os.getenv("KNOWLEDGE_PROVIDER") or "byaan-native").strip().lower()
+    if selected in {"openviking", "open-viking"}:
+        return OpenVikingKnowledgeProvider()
+    # Native is the local/dev fallback. Commercial deployments should select an
+    # external provider through KNOWLEDGE_PROVIDER rather than expanding PG-backed evidence storage.
     return NativeKnowledgeProvider()
