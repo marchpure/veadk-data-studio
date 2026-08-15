@@ -322,17 +322,15 @@ function DatasourceStep({
                       </div>
                     )}
                   </div>
-                  {selectedDatasource.sourceType === 'source_resource' && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="border-amber-500/30 text-amber-100 hover:bg-amber-500/10"
-                      onClick={() => onOpenSourceDetail(selectedDatasource.id)}
-                    >
-                      Open source detail
-                    </Button>
-                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="border-amber-500/30 text-amber-100 hover:bg-amber-500/10"
+                    onClick={() => onOpenSourceDetail(selectedDatasource.id)}
+                  >
+                    Open source detail
+                  </Button>
                 </div>
               </div>
             )}

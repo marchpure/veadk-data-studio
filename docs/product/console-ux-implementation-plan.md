@@ -493,7 +493,7 @@ Current implementation:
   - `planned` for roadmap/request-access entries that must not pretend to be production-ready.
   - `unsupported` only for source families without a production modeling handoff contract.
 - The Create Model picker shows every connected source with its family, modeling mode, status, next action, and blocker reason instead of only showing `No supported datasource found`.
-- Selecting a blocked source-resource handoff now offers an `Open source detail` action that closes the generator dialog and sends the user to `/sources/:sourceId`, where reauthorization, retry, reindex, projection, context, lineage, and consumers are visible.
+- Selecting any blocked SourceOverview-backed handoff now offers an `Open source detail` action that closes the generator dialog and sends the user to `/sources/:sourceId`, where schema/profile refresh, reauthorization, retry, reindex, projection, context, lineage, and consumers are visible.
 - Profile loading and semantic generation are guarded so only `supported` sources with a relational/warehouse profile can continue into production generation.
 - Projection, context, permission, reauthorization, processing, failed, planned, and unsupported sources stay visible but disabled for production generation until the corresponding Source next action is resolved.
 
