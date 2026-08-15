@@ -218,6 +218,55 @@ async def test_sources_overview_marks_resources_after_connection_disconnect(test
     assert item["next_actions"] == ["Reauthorize source"]
 
 
+async def test_sources_overview_uses_connection_last_error_for_permission_lost(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    connection = SourceConnection(
+        tenant_id=tenant.id,
+        provider="volcengine_tos",
+        auth_mode="access_key",
+        encrypted_credentials="{}",
+        external_account_id="tos-account-1",
+        display_name="TOS workspace",
+        status="failed",
+        capabilities_json={
+            "last_error": {
+                "code": "permission_lost",
+                "message": "TOS permission denied",
+                "stage": "resource_picker",
+                "permanent": True,
+            }
+        },
+        created_by=tenant.owner_id,
+    )
+    test_session.add(connection)
+    await test_session.flush()
+    resource = SourceResource(
+        tenant_id=tenant.id,
+        source_connection_id=connection.id,
+        resource_type="tos_prefix",
+        name="restricted-prefix/",
+        external_id="sales-bucket/restricted-prefix/",
+        owner_id=tenant.owner_id,
+        visibility="workspace",
+        status="ready",
+    )
+    test_session.add(resource)
+    await test_session.commit()
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["id"] == str(resource.id))
+
+    assert item["provider"] == "volcengine_tos"
+    assert item["connection_id"] == str(connection.id)
+    assert item["status"] == "Permission lost"
+    assert item["attention_state"] == "permission"
+    assert item["freshness_status"] == "unknown"
+    assert item["next_actions"] == ["Review resource permissions", "Reauthorize source"]
+
+
 async def test_sources_overview_next_actions_cover_warehouse_and_object_storage_contracts(test_client, test_session):
     tenant = (await test_session.execute(select(Tenant))).scalars().first()
     assert tenant is not None

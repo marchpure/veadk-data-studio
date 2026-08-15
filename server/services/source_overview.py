@@ -468,8 +468,23 @@ class SourceOverviewService:
         if connection.status in {"reauthorization_required", "authorization_required", "disconnected"}:
             return connection.status
         if connection.status == "failed":
+            connection_error_code = self._source_connection_error_code(connection)
+            if connection_error_code == "permission_lost":
+                return "permission_lost"
+            if connection_error_code == "source_unavailable":
+                return "source_unavailable"
             return "source_unavailable"
         return resource.status
+
+    def _source_connection_error_code(self, connection: SourceConnection) -> str | None:
+        capabilities = connection.capabilities_json
+        if not isinstance(capabilities, dict):
+            return None
+        last_error = capabilities.get("last_error")
+        if not isinstance(last_error, dict):
+            return None
+        code = last_error.get("code")
+        return str(code) if code else None
 
     def _source_resource_provider(
         self,
