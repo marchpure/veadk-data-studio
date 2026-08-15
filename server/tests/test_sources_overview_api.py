@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
+from server.models.notebook_assets import NotebookAsset
+from server.models.notebooks import Notebook
+from server.models.semantic_models import SemanticModel
 from server.models.source_resources import SourceResource
+from server.models.tenant import Tenant
 
 pytestmark = __import__("pytest").mark.asyncio
 
@@ -143,3 +147,66 @@ async def test_sources_overview_excludes_deleted_source_resources(test_client, t
     row = await test_session.scalar(select(SourceResource).where(SourceResource.id == resource_id))
     assert row is not None
     assert row.sync_config_json["deletion_marker"]["status"] == "removed"
+
+
+async def test_sources_overview_counts_semantic_and_notebook_consumers(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    created = await test_client.post(
+        "/api/source-resources",
+        json={
+            "resource_type": "feishu_doc",
+            "name": "Operating rules",
+            "external_id": "docx_rules",
+            "source_url": "https://example.feishu.cn/docx/docx_rules",
+            "content": "Revenue = paid order net amount.\n\nRetention risk if no repeat purchase in 30 days.",
+            "external_revision": "rev-1",
+        },
+    )
+    assert created.status_code == 201
+    resource = created.json()["data"]
+    knowledge_id = resource["knowledge_resource"]["id"]
+
+    notebook = Notebook(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        notebook_name="Consumer notebook",
+        description="Checks source consumer counts",
+    )
+    test_session.add(notebook)
+    await test_session.flush()
+    test_session.add(
+        NotebookAsset(
+            tenant_id=tenant.id,
+            notebook_id=notebook.id,
+            asset_type="knowledge_resource",
+            asset_id=knowledge_id,
+            added_by=tenant.owner_id,
+            usage_policy_json={"purpose": "evidence"},
+        )
+    )
+    test_session.add(
+        SemanticModel(
+            tenant_id=tenant.id,
+            created_by=tenant.owner_id,
+            slug="rules-semantic",
+            name="Rules Semantic",
+            domain="Operations",
+            owner="Ops",
+            datasource_id=resource["id"],
+            datasource_name="Operating rules",
+            datasource_kind="feishu_doc",
+            status="Draft",
+        )
+    )
+    await test_session.commit()
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["id"] == resource["id"])
+
+    assert item["consumer_counts"]["semantic_models"] == 1
+    assert item["consumer_counts"]["notebooks"] == 1
+    assert item["consumer_counts"]["dashboards"] == 0
+    assert item["counts_partial"] is True

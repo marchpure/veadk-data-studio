@@ -2,14 +2,13 @@ import { useState, useRef, useMemo, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '../components/ui/button'
-import { Badge } from '../components/ui/badge'
 import { Card } from '../components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
-import { Trash2, Loader2, Database, Pencil, Upload, FileText, X, Search, Link as LinkIcon, Leaf, Cylinder, Server, HardDrive, Users, Lock, Cloud, ChevronDown, ChevronRight, CheckCircle2, AlertCircle, Network } from 'lucide-react'
-import { useDatasources, useCreateDBConnection, useDeleteDBConnection, useUploadMultipleFiles, useUploadFromURL, useConnectorDefinitions, useCreateSourceResource, useCreatePdfSourceResource } from '../hooks/useDBConnections'
-import { ApiService, type ConnectionCreateRequest, type ConnectionType, type Datasource, type DatabricksCatalog, type DatabricksOAuthTokens, type DatabricksWarehouse, type FileType, type ConnectorDefinition } from '../services/api'
+import { Trash2, Loader2, Database, Pencil, Upload, FileText, X, Search, Link as LinkIcon, Leaf, Cylinder, Server, HardDrive, Users, Lock, Cloud, ChevronDown, ChevronRight, CheckCircle2, AlertCircle, Network, ShieldAlert } from 'lucide-react'
+import { useDatasources, useCreateDBConnection, useDeleteDBConnection, useUploadMultipleFiles, useUploadFromURL, useConnectorDefinitions, useCreateSourceResource, useCreatePdfSourceResource, useSourceOverview, sourceOverviewKeys } from '../hooks/useDBConnections'
+import { ApiService, type ConnectionCreateRequest, type ConnectionType, type Datasource, type DatabricksCatalog, type DatabricksOAuthTokens, type DatabricksWarehouse, type FileType, type ConnectorDefinition, type SourceOverviewItem } from '../services/api'
 import { SourceConnectorImportPanel } from '../components/SourceConnectorImportPanel'
 import { showToast } from '../utils/toast'
 import { useStore } from '../stores/useStore'
@@ -22,10 +21,12 @@ type DatabricksPair = { catalog: string; schema: string | null }
 const pairKey = (p: DatabricksPair) => `${p.catalog}::${p.schema ?? '*'}`
 type SourceConnectorCreateType = `connector:${string}`
 type DatasourceCreateType = ConnectionType | 'upload' | 'url' | 'pdf' | 'web' | SourceConnectorCreateType
+type SourceInventoryTab = 'all' | 'needs_attention'
 const isSourceConnectorType = (value: string): value is SourceConnectorCreateType => value.startsWith('connector:')
 const sourceConnectorId = (value: DatasourceCreateType): string | null =>
   isSourceConnectorType(value) ? value.slice('connector:'.length) : null
 const isDirectSourceResourceType = (value: DatasourceCreateType) => value === 'pdf' || value === 'web'
+const needsAttentionStates = new Set(['auth', 'permission', 'parse', 'index', 'stale', 'policy'])
 
 export default function DatabasesPage() {
   const queryClient = useQueryClient()
@@ -42,6 +43,7 @@ export default function DatabasesPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [connectionToDelete, setConnectionToDelete] = useState<Datasource | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [inventoryTab, setInventoryTab] = useState<SourceInventoryTab>('all')
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [csvFiles, setCsvFiles] = useState<File[]>([])
   const [fileAliases, setFileAliases] = useState<Record<string, string>>({})
@@ -137,7 +139,8 @@ export default function DatabasesPage() {
   const databricksTileVisible = !isSelfHosted || databricksOAuthConfigured || databricksOAuthCanConfigure
 
   // Use React Query hooks
-  const { data: datasourcesResponse, isLoading: loading, error } = useDatasources()
+  const { data: datasourcesResponse } = useDatasources()
+  const { data: sourceOverviewResponse, isLoading: loading, error } = useSourceOverview()
   const createMutation = useCreateDBConnection()
   const deleteMutation = useDeleteDBConnection()
   const uploadMultipleFilesMutation = useUploadMultipleFiles()
@@ -146,6 +149,7 @@ export default function DatabasesPage() {
   const createPdfSourceResourceMutation = useCreatePdfSourceResource()
   const connectorDefinitionsQuery = useConnectorDefinitions()
   const connectorDefinitions = useMemo(() => connectorDefinitionsQuery.data?.items || [], [connectorDefinitionsQuery.data?.items])
+  const datasourceById = useMemo(() => new Map((datasourcesResponse?.items || []).map(item => [item.id, item])), [datasourcesResponse?.items])
   const isCreatingAnyDatasource = createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending || createSourceResourceMutation.isPending || createPdfSourceResourceMutation.isPending
   const selectedConnectorDefinition = useMemo<ConnectorDefinition | undefined>(() => {
     const id = sourceConnectorId(selectedType)
@@ -206,67 +210,110 @@ export default function DatabasesPage() {
   }
 }
 
-  const getBadgeVariant = (type: string): "postgres" | "mongodb" | "mysql" | "sqlite" | "csv" | "default" => {
-    switch (type) {
-      case 'pg':
-        return 'postgres'
-      case 'mongo':
-        return 'mongodb'
-      case 'mysql':
-        return 'mysql'
-      case 'sqlite':
-        return 'sqlite'
-      case 'csv':
-      case 'excel':
-      case 'parquet':
-      case 'json':
-        return 'csv'
+  const isNeedsAttention = (source: SourceOverviewItem) =>
+    needsAttentionStates.has(source.attention_state) || !['Ready', 'Pending', 'Syncing', 'Analyzing'].includes(source.status)
+
+  const sourceTypeLabel = (source: SourceOverviewItem): string => {
+    if (source.resource_type) return formatDbType(source.resource_type)
+    switch (source.family) {
+      case 'documents':
+        return 'Business docs'
+      case 'warehouses':
+        return 'Warehouse'
+      case 'object_storage':
+        return 'Object storage'
       default:
-        return 'default'
+        return source.family.replace(/_/g, ' ')
     }
   }
 
-  const formatSourceStatus = (status?: string): string => {
-    switch (status) {
-      case 'ready':
-        return 'Ready'
-      case 'pending':
-        return 'Pending'
-      case 'syncing':
-        return 'Syncing'
-      case 'understanding':
-        return 'Analyzing'
-      case 'authorization_required':
-        return 'Authorization required'
-      case 'reauthorization_required':
-        return 'Reauthorization required'
-      case 'permission_lost':
-        return 'Permission lost'
-      case 'source_unavailable':
-        return 'Source unavailable'
-      case 'needs_confirmation':
-        return 'Needs confirmation'
-      case 'failed':
-        return 'Failed'
-      default:
-        return status ? status.replace(/_/g, ' ') : 'Pending'
+  const sourceOwnerLabel = (source: SourceOverviewItem): string => {
+    if (source.owner?.name) return source.owner.name
+    if (source.owner?.id) return source.owner.id.slice(0, 8)
+    return 'Workspace'
+  }
+
+  const parsedAssetsLabel = (source: SourceOverviewItem): string => {
+    const counts = source.parsed_asset_counts
+    const parts = [
+      counts.files > 0 ? `${counts.files} file${counts.files === 1 ? '' : 's'}` : null,
+      counts.tables > 0 ? `${counts.tables} table${counts.tables === 1 ? '' : 's'}` : null,
+      counts.evidence > 0 ? `${counts.evidence} evidence` : null,
+    ].filter(Boolean)
+    return parts.length > 0 ? parts.join(' · ') : 'None'
+  }
+
+  const consumerLabel = (source: SourceOverviewItem): string => {
+    const counts = source.consumer_counts
+    const parts = [
+      `${counts.semantic_models} semantic`,
+      `${counts.dashboards} dashboard`,
+      `${counts.notebooks} notebook`,
+    ]
+    return parts.join(' · ')
+  }
+
+  const statusClassName = (source: SourceOverviewItem): string => {
+    if (source.status === 'Ready') return 'bg-green-500/15 text-green-300 border-green-500/25'
+    if (source.status === 'Pending' || source.status === 'Syncing' || source.status === 'Analyzing') {
+      return 'bg-blue-500/15 text-blue-300 border-blue-500/25'
+    }
+    if (source.attention_state === 'auth' || source.attention_state === 'permission') {
+      return 'bg-red-500/15 text-red-300 border-red-500/25'
+    }
+    return 'bg-amber-500/15 text-amber-300 border-amber-500/25'
+  }
+
+  const freshnessClassName = (source: SourceOverviewItem): string => {
+    if (source.freshness_status === 'fresh') return 'text-green-300'
+    if (source.freshness_status === 'stale') return 'text-amber-300'
+    return 'text-gray-400'
+  }
+
+  const contextClassName = (source: SourceOverviewItem): string => {
+    if (source.context_index_status === 'indexed') return 'text-green-300'
+    if (source.context_index_status === 'failed') return 'text-red-300'
+    if (source.context_index_status === 'indexing' || source.context_index_status === 'pending') return 'text-blue-300'
+    return 'text-gray-500'
+  }
+
+  const datasourceForSource = (source: SourceOverviewItem): Datasource => {
+    const existing = datasourceById.get(source.id)
+    if (existing) return existing
+    return {
+      id: source.id,
+      name: source.name,
+      type: (source.resource_type || source.provider || 'duckdb') as Datasource['type'],
+      source_type: source.source_kind,
+      resource_type: source.resource_type as Datasource['resource_type'],
+      status: source.status.toLowerCase().replace(/\s+/g, '_'),
+      latest_snapshot_id: source.latest_snapshot_id,
+      projected_dataset_id: source.projected_dataset_id,
+      created_by: source.owner?.id,
+      created_at: source.updated_at || source.created_at,
+      is_public: source.visibility === 'team' || source.visibility === 'public',
     }
   }
 
-  // Filter and sort datasources
-  const displayDatasources = (datasourcesResponse?.items || [])
+  // Filter and sort sources from the commercial overview facade.
+  const displaySources = (sourceOverviewResponse?.items || [])
     .filter(datasource => {
+      if (inventoryTab === 'needs_attention' && !isNeedsAttention(datasource)) return false
       if (!searchQuery) return true
       const query = searchQuery.toLowerCase()
       return (
         (datasource.name || '').toLowerCase().includes(query) ||
-        formatDbType(datasource.type).toLowerCase().includes(query)
+        sourceTypeLabel(datasource).toLowerCase().includes(query) ||
+        datasource.provider.toLowerCase().includes(query) ||
+        datasource.status.toLowerCase().includes(query)
       )
     })
     .sort((a, b) => {
       // Sort by activity (most recent first)
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      return new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime()
     })
+  const allSourceCount = sourceOverviewResponse?.total || 0
+  const needsAttentionCount = (sourceOverviewResponse?.items || []).filter(isNeedsAttention).length
 
   // Validation for create form
   const isCreateFormValid = useMemo(() => {
@@ -540,6 +587,7 @@ export default function DatabasesPage() {
     const succeededCount = pairs.length - failures.length
     if (succeededCount > 0) {
       queryClient.invalidateQueries({ queryKey: ['datasources'] })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       showToast.success(`Created ${succeededCount} Databricks connection${succeededCount !== 1 ? 's' : ''}`)
     }
     if (failures.length === 0) {
@@ -690,6 +738,7 @@ export default function DatabasesPage() {
         setDeleteDialogOpen(false)
         setConnectionToDelete(null)
         queryClient.invalidateQueries({ queryKey: ['datasources'] })
+        queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
         showToast.success('Source resource deleted successfully')
       } catch (error: any) {
         console.error('Error deleting source resource:', error)
@@ -703,6 +752,7 @@ export default function DatabasesPage() {
         setConnectionToDelete(null)
         // Invalidate queries to refresh the list
         queryClient.invalidateQueries({ queryKey: ['datasources'] })
+        queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
         // Invalidate notebook connections so it refetch
         queryClient.invalidateQueries({ queryKey: ['notebook-connections'] })
         showToast.success('File source deleted successfully')
@@ -741,6 +791,7 @@ export default function DatabasesPage() {
     try {
       await ApiService.updateDatasourceVisibility(datasource.id, newIsPublic)
       queryClient.invalidateQueries({ queryKey: ['datasources'] })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       showToast.success(newIsPublic ? 'Source shared with team' : 'Source set to private')
     } catch (error: any) {
       console.error('Error toggling visibility:', error)
@@ -1214,7 +1265,7 @@ export default function DatabasesPage() {
                 <p className="text-gray-400 mb-6">{error.message || 'An error occurred while loading sources.'}</p>
                 <Button
                   variant="brand-primary"
-                  onClick={() => queryClient.invalidateQueries({ queryKey: ['datasources'] })}
+                  onClick={() => queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })}
                 >
                   Retry
                 </Button>
@@ -1228,7 +1279,7 @@ export default function DatabasesPage() {
           ) : (
             <>
               {/* Empty State */}
-              {displayDatasources.length === 0 ? (
+              {allSourceCount === 0 ? (
                 <div className="max-w-[850px] mx-auto">
                   <Card className="p-12 text-center bg-[#1a1a1a] border-gray-800">
                     <div className="max-w-md mx-auto">
@@ -1242,137 +1293,235 @@ export default function DatabasesPage() {
                     </div>
                   </Card>
                 </div>
+              ) : displaySources.length === 0 ? (
+                <div className="max-w-6xl mx-auto">
+                  <div className="mb-4 flex items-center gap-2">
+                    <button
+                      onClick={() => setInventoryTab('all')}
+                      className={`rounded-md px-3 py-1.5 text-sm ${inventoryTab === 'all' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}
+                    >
+                      All {allSourceCount}
+                    </button>
+                    <button
+                      onClick={() => setInventoryTab('needs_attention')}
+                      className={`rounded-md px-3 py-1.5 text-sm ${inventoryTab === 'needs_attention' ? 'bg-amber-500/15 text-amber-200' : 'text-gray-400 hover:text-white'}`}
+                    >
+                      Needs attention {needsAttentionCount}
+                    </button>
+                  </div>
+                  <Card className="p-10 text-center bg-[#1a1a1a] border-gray-800">
+                    <ShieldAlert className="w-9 h-9 text-gray-500 mx-auto mb-3" />
+                    <h3 className="text-lg font-semibold text-white mb-2">No sources match this view</h3>
+                    <p className="text-gray-400">Try a different search or switch back to all sources.</p>
+                  </Card>
+                </div>
               ) : (
-                <>
-                  {/* Connection Cards */}
-                  <div className="max-w-[850px] mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {displayDatasources.map(datasource => {
-                      const timeAgo = formatTimeAgo(datasource.created_at)
+                <div className="max-w-6xl mx-auto">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setInventoryTab('all')}
+                        className={`rounded-md px-3 py-1.5 text-sm ${inventoryTab === 'all' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}
+                      >
+                        All {allSourceCount}
+                      </button>
+                      <button
+                        onClick={() => setInventoryTab('needs_attention')}
+                        className={`rounded-md px-3 py-1.5 text-sm ${inventoryTab === 'needs_attention' ? 'bg-amber-500/15 text-amber-200' : 'text-gray-400 hover:text-white'}`}
+                      >
+                        Needs attention {needsAttentionCount}
+                      </button>
+                    </div>
+                    {sourceOverviewResponse?.counts_partial && (
+                      <span className="text-xs text-gray-500">Consumer counts are partial</span>
+                    )}
+                  </div>
+
+                  <div className="hidden overflow-x-auto rounded-lg border border-gray-800 bg-[#151515] lg:block">
+                    <table className="min-w-[1160px] w-full table-fixed text-left">
+                      <thead className="border-b border-gray-800 bg-[#1a1a1a] text-xs uppercase text-gray-500">
+                        <tr>
+                          <th className="w-[20%] px-4 py-3 font-medium">Source</th>
+                          <th className="w-[12%] px-3 py-3 font-medium">Status</th>
+                          <th className="w-[10%] px-3 py-3 font-medium">Freshness</th>
+                          <th className="w-[14%] px-3 py-3 font-medium">Parsed assets</th>
+                          <th className="w-[10%] px-3 py-3 font-medium">Context</th>
+                          <th className="w-[8%] px-3 py-3 font-medium">Semantic</th>
+                          <th className="w-[8%] px-3 py-3 font-medium">Dashboards</th>
+                          <th className="w-[8%] px-3 py-3 font-medium">Owner</th>
+                          <th className="w-[10%] px-3 py-3 text-right font-medium">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-800">
+                        {displaySources.map(source => {
+                          const datasource = datasourceForSource(source)
+                          const canEdit = datasource.source_type !== 'source_resource' && canEditDatasource(datasource.created_by)
+                          const canDelete = canDeleteDatasource(datasource.created_by)
+                          return (
+                            <tr key={source.id} className="group hover:bg-white/[0.03]">
+                              <td className="px-4 py-4 align-top">
+                                <div className="min-w-0">
+                                  <button
+                                    className="block max-w-full truncate text-left text-sm font-medium text-white hover:text-brand-orange"
+                                    onClick={() => handleEditClick(datasource)}
+                                    title={source.name}
+                                  >
+                                    {source.name}
+                                  </button>
+                                  <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
+                                    <span>{sourceTypeLabel(source)}</span>
+                                    <span>·</span>
+                                    <span>{source.family.replace(/_/g, ' ')}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-3 py-4 align-top">
+                                <span className={`inline-flex max-w-full rounded border px-2 py-1 text-xs ${statusClassName(source)}`}>
+                                  <span className="truncate">{source.status}</span>
+                                </span>
+                              </td>
+                              <td className="px-3 py-4 align-top">
+                                <div className={`text-sm capitalize ${freshnessClassName(source)}`}>{source.freshness_status}</div>
+                                <div className="mt-1 text-xs text-gray-500">
+                                  {source.last_synced_at ? formatTimeAgo(source.last_synced_at) : 'No sync'}
+                                </div>
+                              </td>
+                              <td className="px-3 py-4 align-top text-sm text-gray-300">
+                                <span className="line-clamp-2">{parsedAssetsLabel(source)}</span>
+                              </td>
+                              <td className="px-3 py-4 align-top">
+                                <span className={`text-sm capitalize ${contextClassName(source)}`}>
+                                  {source.context_index_status.replace(/_/g, ' ')}
+                                </span>
+                                <div className="mt-1 text-xs text-gray-500 capitalize">{source.parse_status}</div>
+                              </td>
+                              <td className="px-3 py-4 align-top text-sm text-gray-300">
+                                {source.consumer_counts.semantic_models}
+                              </td>
+                              <td className="px-3 py-4 align-top text-sm text-gray-300">
+                                {source.consumer_counts.dashboards}
+                              </td>
+                              <td className="px-3 py-4 align-top">
+                                <div className="truncate text-sm text-gray-300" title={sourceOwnerLabel(source)}>
+                                  {sourceOwnerLabel(source)}
+                                </div>
+                                <div className="mt-1 text-xs capitalize text-gray-500">{source.visibility}</div>
+                              </td>
+                              <td className="px-3 py-4 align-top">
+                                <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                                  {datasource.source_type !== 'source_resource' && showSharingFeatures && canEdit && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => handleQuickToggleVisibility(datasource)}
+                                      disabled={togglingVisibility === datasource.id}
+                                      className={`${datasource.is_public ? 'text-green-400 hover:text-green-300' : 'text-gray-400 hover:text-white'} hover:bg-gray-800`}
+                                      title={datasource.is_public ? 'Make private' : 'Share with team'}
+                                    >
+                                      {togglingVisibility === datasource.id ? <Loader2 className="w-4 h-4 animate-spin" /> : datasource.is_public ? <Users className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                                    </Button>
+                                  )}
+                                  {canEdit && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => handleEditClick(datasource)}
+                                      className="text-gray-400 hover:text-white hover:bg-gray-800"
+                                      title="Edit source"
+                                    >
+                                      <Pencil className="w-4 h-4" />
+                                    </Button>
+                                  )}
+                                  {datasource.source_type !== 'source_resource' && (
+                                    <Button
+                                      asChild
+                                      size="sm"
+                                      variant="ghost"
+                                      className="text-gray-400 hover:text-white hover:bg-gray-800"
+                                      title="Generate Data Model"
+                                    >
+                                      <Link to="/data-models" onClick={(e) => e.stopPropagation()}>
+                                        <Network className="w-4 h-4" />
+                                      </Link>
+                                    </Button>
+                                  )}
+                                  {canDelete && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => handleDeleteClick(datasource)}
+                                      disabled={deleteMutation.isPending}
+                                      className="text-gray-400 hover:text-red-400 hover:bg-gray-800"
+                                      title="Delete source"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 lg:hidden">
+                    {displaySources.map(source => {
+                      const datasource = datasourceForSource(source)
+                      const canEdit = datasource.source_type !== 'source_resource' && canEditDatasource(datasource.created_by)
+                      const canDelete = canDeleteDatasource(datasource.created_by)
                       return (
                         <Card
-                          key={datasource.id}
-                          className="p-6 bg-[#1a1a1a] border-gray-800 hover:border-gray-700 transition-colors cursor-pointer"
-                          onClick={() => handleEditClick(datasource)}
+                          key={source.id}
+                          className="p-5 bg-[#1a1a1a] border-gray-800"
                         >
-                          <div className="flex items-start justify-between mb-3 gap-4">
-                            <div className="flex-1 min-w-0">
-                              {/* Database Name and Type Badge */}
-                              <div className="flex items-center gap-3 mb-2 flex-wrap">
-                                <h3 className="text-lg font-normal text-white truncate" title={datasource.name}>
-                                  {datasource.name}
-                                </h3>
-                                <Badge variant={getBadgeVariant(datasource.type)} className="shrink-0">
-                                  {formatDbType(datasource.type)}
-                                </Badge>
-                                {datasource.source_type === 'dataset' && datasource.files_count && (
-                                  <span className="text-xs bg-brand-orange/20 text-brand-orange px-2 py-0.5 rounded shrink-0">
-                                    {datasource.files_count} file{datasource.files_count !== 1 ? 's' : ''}
-                                  </span>
-                                )}
-                                {datasource.source_type === 'source_resource' && (
-                                  <span className={`text-xs px-2 py-0.5 rounded shrink-0 ${
-                                    datasource.status === 'ready'
-                                      ? 'bg-green-500/20 text-green-400'
-                                      : 'bg-amber-500/20 text-amber-300'
-                                  }`}>
-                                    {formatSourceStatus(datasource.status)}
-                                  </span>
-                                )}
-                                {datasource.source_type === 'source_resource' && datasource.projected_dataset_id && (
-                                  <span className="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded shrink-0">
-                                    Dataset projected
-                                  </span>
-                                )}
-                                {showSharingFeatures && (datasource.is_public ? (
-                                  <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded shrink-0 flex items-center gap-1">
-                                    <Users className="w-3 h-3" />
-                                    Shared
-                                  </span>
-                                ) : (
-                                  <span className="text-xs bg-gray-500/20 text-gray-400 px-2 py-0.5 rounded shrink-0 flex items-center gap-1">
-                                    <Lock className="w-3 h-3" />
-                                    Private
-                                  </span>
-                                ))}
-                              </div>
-
-                              {/* Description */}
-                              <p className="text-sm text-gray-400 mb-3">
-                                {datasource.source_type === 'source_resource'
-                                  ? datasource.projected_dataset_id
-                                    ? `${formatDbType(datasource.type)} resource with Knowledge/Evidence and a DuckDB dataset projection`
-                                    : `${formatDbType(datasource.type)} knowledge resource for retrieval and evidence`
-                                  : `${datasource.source_type === 'dataset' ? 'File source' : 'Database connection'} for ${formatDbType(datasource.type)}`}
-                              </p>
-
-                              {/* Timestamp */}
-                              <p className="text-xs text-gray-500">
-                                Updated {timeAgo}
-                              </p>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <h3 className="truncate text-base font-medium text-white" title={source.name}>
+                                {source.name}
+                              </h3>
+                              <p className="mt-1 text-sm text-gray-400">{sourceTypeLabel(source)}</p>
                             </div>
-
-                            {/* Action Buttons */}
-                            <div className="flex gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                              {datasource.source_type !== 'source_resource' && showSharingFeatures && canEditDatasource(datasource.created_by) && (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleQuickToggleVisibility(datasource)}
-                                  disabled={togglingVisibility === datasource.id}
-                                  className={`${datasource.is_public ? 'text-green-400 hover:text-green-300' : 'text-gray-400 hover:text-white'} hover:bg-gray-800`}
-                                  title={datasource.is_public ? 'Make private' : 'Share with team'}
-                                >
-                                  {togglingVisibility === datasource.id ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                  ) : datasource.is_public ? (
-                                    <Users className="w-4 h-4" />
-                                  ) : (
-                                    <Lock className="w-4 h-4" />
-                                  )}
-                                </Button>
-                              )}
-                              {datasource.source_type !== 'source_resource' && canEditDatasource(datasource.created_by) && (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleEditClick(datasource)}
-                                  className="text-gray-400 hover:text-white hover:bg-gray-800"
-                                  title="Edit source"
-                                >
-                                  <Pencil className="w-4 h-4" />
-                                </Button>
-                              )}
-                              {datasource.source_type !== 'source_resource' && (
-                                <Button
-                                  asChild
-                                  size="sm"
-                                  variant="ghost"
-                                  className="text-gray-400 hover:text-white hover:bg-gray-800"
-                                  title="Generate Data Model"
-                                >
-                                  <Link to="/data-models" onClick={(e) => e.stopPropagation()}>
-                                    <Network className="w-4 h-4" />
-                                  </Link>
-                                </Button>
-                              )}
-                              {canDeleteDatasource(datasource.created_by) && (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleDeleteClick(datasource)}
-                                  disabled={deleteMutation.isPending}
-                                  className="text-gray-400 hover:text-red-400 hover:bg-gray-800"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
-                              )}
+                            <span className={`rounded border px-2 py-1 text-xs ${statusClassName(source)}`}>
+                              {source.status}
+                            </span>
+                          </div>
+                          <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                            <div>
+                              <div className="text-xs text-gray-500">Freshness</div>
+                              <div className={freshnessClassName(source)}>{source.freshness_status}</div>
                             </div>
+                            <div>
+                              <div className="text-xs text-gray-500">Context</div>
+                              <div className={contextClassName(source)}>{source.context_index_status.replace(/_/g, ' ')}</div>
+                            </div>
+                            <div className="col-span-2">
+                              <div className="text-xs text-gray-500">Parsed assets</div>
+                              <div className="text-gray-300">{parsedAssetsLabel(source)}</div>
+                            </div>
+                            <div className="col-span-2">
+                              <div className="text-xs text-gray-500">Consumers</div>
+                              <div className="text-gray-300">{consumerLabel(source)}</div>
+                            </div>
+                          </div>
+                          <div className="mt-4 flex justify-end gap-2">
+                            {canEdit && (
+                              <Button size="sm" variant="ghost" onClick={() => handleEditClick(datasource)} className="text-gray-400 hover:text-white hover:bg-gray-800">
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                            )}
+                            {canDelete && (
+                              <Button size="sm" variant="ghost" onClick={() => handleDeleteClick(datasource)} className="text-gray-400 hover:text-red-400 hover:bg-gray-800">
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            )}
                           </div>
                         </Card>
                       )
                     })}
                   </div>
-                </>
+                </div>
               )}
             </>
           )}
@@ -1645,6 +1794,7 @@ export default function DatabasesPage() {
                         disabled={isCreatingAnyDatasource}
                         onImported={() => {
                           queryClient.invalidateQueries({ queryKey: ['datasources'] })
+                          queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
                         }}
                       />
                     )}

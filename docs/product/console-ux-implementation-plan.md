@@ -224,7 +224,12 @@ Current implementation:
 - The backend service aggregates visible `Dataset`, `Connection`, `SourceResource`, `SourceSnapshot`, `KnowledgeResource`, and evidence counts into `SourceOverviewItem`.
 - Statuses are normalized to product labels such as `Ready`, `Needs confirmation`, `Authorization required`, `Permission lost`, `Source unavailable`, and `Failed`.
 - `consumer_counts.semantic_models` and notebook counts are populated from current model/notebook references where available; dashboard and MCP counts remain `0` with `counts_partial: true`.
-- Frontend API types and `useSourceOverview()` are available for the next inventory-table slice.
+- Frontend API types and `useSourceOverview()` are available.
+- `client/src/pages/Databases.tsx` now renders the Sources inventory from `SourceOverviewItem` instead of the legacy datasource card list.
+- Desktop uses a scan-oriented table with Source, Status, Freshness, Parsed assets, Context, Semantic, Dashboards, Owner, and Actions columns.
+- Narrow viewports keep a compact mobile card layout.
+- The inventory includes `All` and `Needs attention` tabs. Needs attention uses `attention_state` plus non-ready/non-processing product statuses.
+- Source mutations invalidate both legacy `datasources` queries and the `source-overview` facade so the table stays fresh after create, import, delete, and visibility changes.
 
 Acceptance:
 
