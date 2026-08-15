@@ -45,6 +45,16 @@ from server.services.source_connectors import (
 )
 from server.services.web_source_adapter import WebCapturedPage, WebSourceAdapter
 
+PROCESSING_STEPS: tuple[tuple[str, str], ...] = (
+    ("capture", "Capture"),
+    ("parse", "Parse"),
+    ("detect_tables", "Detect tables"),
+    ("normalize_dataset", "Normalize dataset"),
+    ("index_context", "Index context"),
+    ("generate_semantic_suggestions", "Generate semantic suggestions"),
+    ("ready", "Ready"),
+)
+
 
 class SourceResourceService:
     pdf_max_upload_bytes = 50 * 1024 * 1024
@@ -520,6 +530,9 @@ class SourceResourceService:
             .order_by(KnowledgeResource.created_at.desc())
             .limit(1)
         )
+        latest_snapshot = None
+        if resource.latest_snapshot_id:
+            latest_snapshot = await session.get(SourceSnapshot, resource.latest_snapshot_id)
         evidence_count = 0
         if knowledge_resource:
             evidence_count = int(
@@ -577,7 +590,115 @@ class SourceResourceService:
             "evidence_count": evidence_count,
             "connector_required": connector_required,
             "next_actions": next_actions,
+            "steps": self._processing_steps(
+                resource=resource,
+                latest_snapshot=latest_snapshot,
+                knowledge_resource=knowledge_resource,
+                evidence_count=evidence_count,
+                stage=stage,
+            ),
         }
+
+    def _processing_steps(
+        self,
+        *,
+        resource: SourceResource,
+        latest_snapshot: SourceSnapshot | None,
+        knowledge_resource: KnowledgeResource | None,
+        evidence_count: int,
+        stage: str,
+    ) -> list[dict[str, str]]:
+        snapshot_captured = resource.latest_snapshot_id is not None
+        parsed = bool(knowledge_resource and knowledge_resource.parse_status == "parsed")
+        projected_dataset_id = self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot)
+        table_detected = bool(projected_dataset_id or self._projection_payload(resource=resource, latest_snapshot=latest_snapshot))
+        context_indexed = bool(knowledge_resource and knowledge_resource.index_status == "indexed")
+        has_semantic_suggestions = table_detected or context_indexed or evidence_count > 0
+        ready = resource.status == "ready" and (context_indexed or table_detected or evidence_count > 0)
+
+        succeeded: dict[str, bool] = {
+            "capture": snapshot_captured,
+            "parse": parsed,
+            "detect_tables": table_detected,
+            "normalize_dataset": bool(projected_dataset_id),
+            "index_context": context_indexed,
+            "generate_semantic_suggestions": has_semantic_suggestions,
+            "ready": ready,
+        }
+        optional_skipped = {
+            "detect_tables": resource.status == "ready" and not table_detected and context_indexed,
+            "normalize_dataset": resource.status == "ready" and not projected_dataset_id and context_indexed,
+        }
+        failed_step = {
+            "failed": "parse",
+            "source_unavailable": "capture",
+            "permission_lost": "capture",
+            "authorization_required": "capture",
+            "reauthorization_required": "capture",
+        }.get(resource.status)
+        if resource.status == "needs_confirmation" and stage == "needs_confirmation":
+            failed_step = "capture"
+        if stage == "failed" and failed_step is None:
+            failed_step = "parse"
+
+        running_step = None
+        if stage == "waiting_for_connector":
+            running_step = "capture"
+        elif stage == "captured":
+            running_step = "parse"
+        elif knowledge_resource and knowledge_resource.index_status in {"pending", "indexing"}:
+            running_step = "index_context"
+
+        steps: list[dict[str, str]] = []
+        for step_id, label in PROCESSING_STEPS:
+            if failed_step == step_id and not succeeded.get(step_id):
+                status = "failed"
+            elif succeeded.get(step_id):
+                status = "succeeded"
+            elif optional_skipped.get(step_id):
+                status = "skipped"
+            elif running_step == step_id:
+                status = "running"
+            else:
+                status = "pending"
+            steps.append(
+                {
+                    "id": step_id,
+                    "label": label,
+                    "status": status,
+                    "message": self._processing_step_message(step_id=step_id, status=status),
+                }
+            )
+        return steps
+
+    def _processing_step_message(self, *, step_id: str, status: str) -> str:
+        if status == "succeeded":
+            return {
+                "capture": "Immutable source snapshot captured.",
+                "parse": "Parser output is available.",
+                "detect_tables": "Tabular assets were detected.",
+                "normalize_dataset": "Projected dataset is linked.",
+                "index_context": "Context index is ready.",
+                "generate_semantic_suggestions": "Modeling evidence is available.",
+                "ready": "Source is ready for the next action.",
+            }.get(step_id, "Step succeeded.")
+        if status == "skipped":
+            return {
+                "detect_tables": "No table projection is required for this context source.",
+                "normalize_dataset": "No normalized dataset is required for this context source.",
+            }.get(step_id, "Step skipped for this source.")
+        if status == "failed":
+            return {
+                "capture": "Source capture cannot proceed until setup, authorization, or upstream availability is resolved.",
+                "parse": "Parsing or indexing failed. Review the error and retry.",
+            }.get(step_id, "Step failed.")
+        if status == "running":
+            return {
+                "capture": "Waiting for source setup or connector capture.",
+                "parse": "Snapshot is captured; parse, projection, or indexing is still in progress.",
+                "index_context": "Context indexing is in progress.",
+            }.get(step_id, "Step is in progress.")
+        return "Waiting for prior steps."
 
     def _processing_failure_message(
         self,

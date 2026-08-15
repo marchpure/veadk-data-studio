@@ -128,6 +128,14 @@ const processingSteps = [
 ] as const
 
 const processingProgressIndex = (processing: SourceResourceProcessing | undefined, result: SourceResourceImportResult) => {
+  if (processing?.steps?.length) {
+    const activeIndex = processing.steps.findIndex(step => step.status === 'running' || step.status === 'failed')
+    if (activeIndex >= 0) return Math.max(activeIndex - 1, -1)
+    return processing.steps.reduce(
+      (last, step, index) => (step.status === 'succeeded' || step.status === 'skipped' ? index : last),
+      -1,
+    )
+  }
   if (result.status === 'needs_confirmation' || processing?.stage === 'needs_confirmation') return -1
   if (result.status !== 'ready' || processing?.stage === 'failed') return -1
   if (processing?.stage === 'waiting_for_connector') return 0
@@ -139,6 +147,8 @@ const processingProgressIndex = (processing: SourceResourceProcessing | undefine
 }
 
 const processingTone = (processing: SourceResourceProcessing | undefined, result: SourceResourceImportResult) => {
+  if (processing?.steps?.some(step => step.status === 'failed')) return 'failed'
+  if (processing?.steps?.some(step => step.status === 'running')) return 'processing'
   if (result.status === 'needs_confirmation' || processing?.stage === 'needs_confirmation') return 'needs_confirmation'
   if (result.status !== 'ready' || processing?.stage === 'failed') return 'failed'
   if (processing?.stage === 'indexed') return 'ready'

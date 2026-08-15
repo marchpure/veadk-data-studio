@@ -977,6 +977,12 @@ export interface SourceResourceProcessing {
   evidence_count: number
   connector_required: boolean
   next_actions: string[]
+  steps?: Array<{
+    id: string
+    label: string
+    status: 'pending' | 'running' | 'succeeded' | 'skipped' | 'failed'
+    message?: string
+  }>
 }
 
 export interface SourceParsedAssetItem {

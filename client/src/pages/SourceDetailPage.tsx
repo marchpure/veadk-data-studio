@@ -35,6 +35,8 @@ const sourceDetailSteps = [
   'Ready',
 ]
 
+type SourceProcessingStepDisplay = NonNullable<SourceResourceProcessing['steps']>[number]
+
 const typeLabel = (type?: string | null) => {
   if (!type) return 'Source'
   return type.replace(/_/g, ' ')
@@ -72,6 +74,24 @@ const processingIndex = (resource?: SourceResource, processing?: SourceResourceP
   if (resource.projected_dataset_id) return 5
   if (resource.latest_snapshot_id) return 4
   return 0
+}
+
+const processingStepsForDisplay = (
+  resource?: SourceResource,
+  processing?: SourceResourceProcessing,
+): SourceProcessingStepDisplay[] => {
+  const serverSteps = processing?.steps
+  if (serverSteps?.length) return serverSteps
+  const progressIndex = processingIndex(resource, processing)
+  return sourceDetailSteps.map((label, index) => ({
+    id: label.toLowerCase().replace(/\s+/g, '_'),
+    label,
+    status: (processing?.stage === 'failed' && index === 0)
+      ? 'failed'
+      : index <= progressIndex
+        ? 'succeeded'
+        : 'pending',
+  }))
 }
 
 const needsFeishuReauthorization = (source?: SourceOverviewItem) =>
@@ -233,11 +253,11 @@ export default function SourceDetailPage() {
   const lineage = lineageQuery.data || null
   const consumers = consumersQuery.data || null
   const evidence = knowledgeQuery.data?.items || []
-  const progressIndex = processingIndex(resource, processing)
   const parserWarnings = parsedAssets?.parser_warnings || []
   const contentSize = typeof parsedAssets?.metadata?.content_size === 'number' ? parsedAssets.metadata.content_size : null
   const fragmentHint = typeof parsedAssets?.metadata?.fragment_hint === 'string' ? parsedAssets.metadata.fragment_hint : null
   const evidenceCount = parsedAssets?.evidence_count ?? resource?.knowledge_resource?.evidence_count ?? processing?.evidence_count ?? 0
+  const displaySteps = processingStepsForDisplay(resource, processing)
 
   if (overviewQuery.isLoading || (isSourceResource && resourceQuery.isLoading)) {
     return (
@@ -392,12 +412,19 @@ export default function SourceDetailPage() {
 
         <Section title="Processing" icon={<Clock className="h-4 w-4" />}>
           <div className="grid grid-cols-7 gap-2">
-            {sourceDetailSteps.map((step, index) => {
-              const complete = index <= progressIndex && processing?.stage !== 'failed'
+            {displaySteps.map(step => {
+              const complete = step.status === 'succeeded' || step.status === 'skipped'
+              const current = step.status === 'running'
+              const failed = step.status === 'failed'
               return (
-                <div key={step} className="min-w-0">
-                  <div className={`h-2 rounded-full ${complete ? 'bg-green-500' : processing?.stage === 'failed' && index === 0 ? 'bg-red-500' : 'bg-[#444444]'}`} />
-                  <div className={`mt-1 truncate text-xs ${complete ? 'text-green-300' : 'text-gray-500'}`} title={step}>{step}</div>
+                <div key={step.id} className="min-w-0">
+                  <div className={`h-2 rounded-full ${complete ? 'bg-green-500' : current ? 'bg-brand-orange' : failed ? 'bg-red-500' : 'bg-[#444444]'}`} />
+                  <div
+                    className={`mt-1 truncate text-xs ${complete ? 'text-green-300' : current ? 'text-brand-orange' : failed ? 'text-red-300' : 'text-gray-500'}`}
+                    title={step.message || step.label}
+                  >
+                    {step.label}
+                  </div>
                 </div>
               )
             })}

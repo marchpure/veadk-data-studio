@@ -380,7 +380,7 @@ Current implementation:
 - Import results now render as processing cards instead of a flat success/failure list.
 - The cards call `GET /source-resources/{resource_id}/processing` through `ApiService.getSourceResourceProcessing()` and `useSourceResourceProcessing()`.
 - Each card shows the standard processing steps: `Capture`, `Parse`, `Detect tables`, `Normalize dataset`, `Index context`, `Generate semantic suggestions`, and `Ready`.
-- Current backend stages are mapped conservatively: `waiting_for_connector`, `captured`, `indexed`, and `failed` drive the stepper while existing `latest_snapshot_id` and `projected_dataset_id` fill in partial readiness.
+- The backend processing payload now returns structured `steps` with `pending`, `running`, `succeeded`, `skipped`, or `failed` status so import cards and Source Detail consume the same Source processing contract instead of each view guessing readiness from a single stage.
 - Failed imports keep their resource row visible with the connector error and do not hide successful capture/parse state for other selected resources.
 - Backend `next_actions` are shown as small action chips so the user sees whether to retry sync, reauthorize, attach to a notebook asset, or use knowledge retrieval.
 - Object-storage large object imports surface as `Needs confirmation` with `Review object size` and `Confirm large object sync` actions. The processing card uses a confirmation tone instead of presenting the item as a generic failed import.
@@ -444,7 +444,7 @@ Current implementation:
 - For `source_kind = connection` or `dataset`, the page renders a SourceOverview-backed detail and calls `GET /datasources/{datasource_id}/schema` to show schema/profile tables where available.
 - `SourceOverviewItem` now carries optional `connection_id` for connection-backed sources. Database and warehouse detail pages expose a non-destructive `Refresh profile` action that calls the existing connection schema refresh API, then reloads Sources overview and schema/profile detail.
 - The page shows metric cards for snapshot capture, dataset projection, context index status, and evidence count.
-- The Processing section uses the same commercial step labels as post-import processing: `Capture`, `Parse`, `Detect tables`, `Normalize dataset`, `Index context`, `Generate semantic suggestions`, and `Ready`.
+- The Processing section uses the backend `steps` contract with the same commercial labels as post-import processing: `Capture`, `Parse`, `Detect tables`, `Normalize dataset`, `Index context`, `Generate semantic suggestions`, and `Ready`.
 - Overview shows external identity, source URL, sync mode, and timestamps.
 - Lineage is backed by the support API and shows source resource, source connection, latest snapshot, knowledge resource, and projected dataset nodes with captured/indexed/projected edges.
 - Parsed content and Tables are read-only and backed by the support API. They show parser version, parser warnings, content hash, raw artifact URI, detected files, detected tables, projected dataset id, and evidence count.

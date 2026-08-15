@@ -141,6 +141,7 @@ class SourceResourceProcessingRead(BaseModel):
     evidence_count: int = 0
     connector_required: bool = False
     next_actions: list[str] = Field(default_factory=list)
+    steps: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SourceParsedAssetItem(BaseModel):

@@ -438,6 +438,19 @@ async def test_csv_file_upload_creates_source_snapshot_context_and_projection(te
     assert resource["projected_dataset_id"] == resource["latest_snapshot"]["metadata_json"]["projected_dataset_id"]
     assert resource["knowledge_resource"]["evidence_count"] == 1
 
+    processing = await test_client.get(f"/api/source-resources/{resource['id']}/processing")
+    assert processing.status_code == 200
+    steps = processing.json()["data"]["steps"]
+    assert [step["status"] for step in steps] == [
+        "succeeded",
+        "succeeded",
+        "succeeded",
+        "succeeded",
+        "succeeded",
+        "succeeded",
+        "succeeded",
+    ]
+
     search = await test_client.post("/api/knowledge/search", json={"query": "East", "limit": 5})
     assert search.status_code == 200
     assert "East" in search.json()["data"]["items"][0]["text"]
@@ -604,6 +617,13 @@ async def test_source_resource_without_connector_content_is_not_marked_ready(tes
     assert payload["message"] == "No source snapshot has been captured yet. Complete setup or add source content before indexing."
     assert payload["next_actions"] == ["Add source URL", "Review crawl policy"]
     assert payload["last_error"] is None
+    assert payload["steps"][0] == {
+        "id": "capture",
+        "label": "Capture",
+        "status": "running",
+        "message": "Waiting for source setup or connector capture.",
+    }
+    assert payload["steps"][-1]["status"] == "pending"
     _assert_product_processing_copy(payload)
 
 
@@ -642,6 +662,13 @@ async def test_processing_payload_for_captured_unindexed_source_uses_product_act
     assert payload["connector_required"] is False
     assert payload["message"] == "Snapshot is captured, but parsing, projection, or context indexing is incomplete."
     assert payload["next_actions"] == ["Retry parse from raw artifact", "Review parsed content"]
+    assert payload["steps"][0]["status"] == "succeeded"
+    assert payload["steps"][1] == {
+        "id": "parse",
+        "label": "Parse",
+        "status": "running",
+        "message": "Snapshot is captured; parse, projection, or indexing is still in progress.",
+    }
     _assert_product_processing_copy(payload)
 
 

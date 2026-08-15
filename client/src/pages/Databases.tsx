@@ -65,6 +65,14 @@ const directSourceProgressIndex = (
   resource: SourceResource,
   processing?: SourceResourceProcessing,
 ) => {
+  if (processing?.steps?.length) {
+    const activeIndex = processing.steps.findIndex(step => step.status === 'running' || step.status === 'failed')
+    if (activeIndex >= 0) return Math.max(activeIndex - 1, -1)
+    return processing.steps.reduce(
+      (last, step, index) => (step.status === 'succeeded' || step.status === 'skipped' ? index : last),
+      -1,
+    )
+  }
   if (resource.status === 'needs_confirmation' || processing?.stage === 'needs_confirmation') return -1
   if (resource.status !== 'ready' || processing?.stage === 'failed') return -1
   if (processing?.stage === 'waiting_for_connector') return 0
@@ -79,6 +87,8 @@ const directSourceProcessingTone = (
   resource: SourceResource,
   processing?: SourceResourceProcessing,
 ) => {
+  if (processing?.steps?.some(step => step.status === 'failed')) return 'failed'
+  if (processing?.steps?.some(step => step.status === 'running')) return 'processing'
   if (resource.status === 'needs_confirmation' || processing?.stage === 'needs_confirmation') return 'needs_confirmation'
   if (resource.status !== 'ready' || processing?.stage === 'failed') return 'failed'
   if (processing?.stage === 'indexed') return 'ready'
