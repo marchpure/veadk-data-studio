@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, ArrowRight, Bot, CheckCircle2, Database, Loader2, Play, Table2 } from 'lucide-react'
+import { AlertCircle, ArrowRight, Bot, CheckCircle2, Database, FileText, Globe2, HardDrive, Loader2, Play, Table2, Warehouse } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../../components/ui/dialog'
 import { DataProfileWorkspace } from '../profile/DataProfileWorkspace'
@@ -27,7 +27,10 @@ export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpen
   const setActiveModel = useDataModelingStore(state => state.setActiveModel)
   const setWorkspaceMode = useDataModelingStore(state => state.setWorkspaceMode)
 
-  const profile = profiles.find(item => item.id === draft.datasourceId) ?? profiles[0]
+  const selectedDatasource = datasourceOptions.find(item => item.id === draft.datasourceId)
+  const profile = selectedDatasource?.canLoadProfile
+    ? profiles.find(item => item.id === draft.datasourceId)
+    : undefined
 
   useEffect(() => {
     if (open) {
@@ -215,38 +218,60 @@ function DatasourceStep({
   onToggleTable: (table: string) => void
   onNext: () => void
 }) {
-  const profile = profiles.find(item => item.id === selectedId) ?? profiles[0]
+  const selectedDatasource = datasources.find(item => item.id === selectedId)
+  const profile = selectedDatasource?.canLoadProfile
+    ? profiles.find(item => item.id === selectedId)
+    : undefined
+  const canContinue = Boolean(selectedDatasource?.canLoadProfile && selectedDatasource.modelingStatus === 'supported' && profile)
+  const visibleBlockers = datasources.filter(item => item.modelingStatus !== 'supported').slice(0, 4)
 
   return (
     <div className="space-y-4">
       <Panel>
-        <PanelHeader title="Choose Data" subtitle="Select a real datasource, then inspect the live schema/profile evidence before generating a draft." />
+        <PanelHeader title="Choose Data" subtitle="Select a production-model-ready source. Other connected sources stay visible with their projection, context, or permission blocker." />
         {loading && <div className="p-4 text-sm text-[#cdd3d8]">Loading datasources...</div>}
         {!loading && error && <div className="p-4"><ErrorState title="Unable to load datasources" body={error} /></div>}
         {!loading && !error && datasources.length === 0 && (
           <div className="p-4">
-            <EmptyState title="No supported datasource found" body="Connect an Oracle, Postgres, MySQL, or SQLite datasource before generating a Semantic Model." />
+            <EmptyState title="No source found" body="Connect a database, warehouse, file, document, web, or object storage source before generating a Semantic Model." />
+          </div>
+        )}
+        {!loading && !error && datasources.length > 0 && !datasources.some(item => item.modelingStatus === 'supported') && (
+          <div className="p-4 pb-0">
+            <EmptyState
+              title="No production-model-ready source found"
+              body="Connected sources are visible below, but each needs a confirmed projection, indexed context boundary, restored permission, or relational profile before production semantic generation."
+            />
           </div>
         )}
         <div className="grid gap-3 p-4 md:grid-cols-3">
           {datasources.map(item => {
             const profiled = profiles.find(profile => profile.id === item.id)
+            const selected = selectedId === item.id
+            const Icon = iconForDatasource(item)
             return (
             <button
               key={item.id}
               type="button"
               onClick={() => onSelectDatasource(item.id)}
               className={`rounded-md border p-4 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
-                selectedId === item.id ? modelingStyles.active : 'border-[#2d3338] bg-[#181b1f] hover:border-[#46505a] hover:bg-[#20252a]'
+                selected ? modelingStyles.active : 'border-[#2d3338] bg-[#181b1f] hover:border-[#46505a] hover:bg-[#20252a]'
               }`}
             >
-              <Database className="mb-3 h-5 w-5 text-brand-orange" />
-              <div className="text-sm font-semibold text-[#f3f5f5]">{item.name}</div>
-              <div className="mt-1 text-xs uppercase text-[#7f8a93]">{item.kind} · {item.sourceType}</div>
+              <Icon className="mb-3 h-5 w-5 text-brand-orange" />
+              <div className="line-clamp-2 min-h-10 text-sm font-semibold leading-5 text-[#f3f5f5]">{item.name}</div>
+              <div className="mt-1 text-xs uppercase text-[#7f8a93]">{item.sourceFamily} · {item.modelingMode ?? item.kind}</div>
               <div className="mt-3 flex flex-wrap gap-2">
-                <StatusPill tone={profiled?.status === 'ready' ? 'ready' : item.status === 'error' ? 'blocked' : 'warning'}>{profiled?.status ?? item.status ?? 'not profiled'}</StatusPill>
+                <StatusPill tone={modelingStatusTone(item.modelingStatus)}>{modelingStatusLabel(item.modelingStatus)}</StatusPill>
+                <StatusPill tone={profiled?.status === 'ready' ? 'ready' : item.status === 'Failed' ? 'blocked' : 'neutral'}>{profiled?.status ?? item.status ?? 'not profiled'}</StatusPill>
                 {profiled && <StatusPill>{profiled.profileCoverage}% profile</StatusPill>}
               </div>
+              {item.reason && <p className="mt-3 line-clamp-3 text-xs leading-5 text-[#9aa4ac]">{item.reason}</p>}
+              {item.nextActions.length > 0 && (
+                <div className="mt-3 text-[11px] font-medium text-[#cdd3d8]">
+                  Next: {item.nextActions[0]}
+                </div>
+              )}
             </button>
           )})}
         </div>
@@ -279,8 +304,24 @@ function DatasourceStep({
           </div>
           <div>
             <div className="mb-2 text-xs font-medium text-[#9aa4ac]">Default recommendations</div>
-            <div className="grid max-h-[280px] gap-2 overflow-y-auto custom-scrollbar md:grid-cols-2">
-              {profile?.tables.map(table => (
+            {selectedDatasource && !selectedDatasource.canLoadProfile && (
+              <div className="rounded-md border border-amber-500/25 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100">
+                <div className="font-medium text-amber-100">{modelingStatusLabel(selectedDatasource.modelingStatus)}</div>
+                <div className="mt-1 text-amber-100/75">{selectedDatasource.reason}</div>
+              </div>
+            )}
+            {!selectedDatasource && visibleBlockers.length > 0 && (
+              <div className="rounded-md border border-[#2d3338] bg-[#15181b] p-3 text-sm leading-6 text-[#cdd3d8]">
+                {visibleBlockers.map(item => (
+                  <div key={item.id} className="mb-2 last:mb-0">
+                    <span className="font-medium text-[#f3f5f5]">{item.name}</span>: {item.reason}
+                  </div>
+                ))}
+              </div>
+            )}
+            {selectedDatasource?.canLoadProfile && (
+              <div className="grid max-h-[280px] gap-2 overflow-y-auto custom-scrollbar md:grid-cols-2">
+                {profile?.tables.map(table => (
                 <label key={table.name} className="flex items-center gap-3 rounded-md border border-[#2d3338] bg-[#15181b] px-3 py-2 text-sm">
                   <input
                     type="checkbox"
@@ -292,16 +333,39 @@ function DatasourceStep({
                   <span className="min-w-0 flex-1 truncate text-[#f3f5f5]">{table.name}</span>
                   <StatusPill>{table.category}</StatusPill>
                 </label>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         <div className="flex justify-end border-t border-[#30363a] p-4">
-          <Button variant="brand-primary" onClick={onNext}>Continue to Profile <ArrowRight className="h-4 w-4" /></Button>
+          <Button variant="brand-primary" onClick={onNext} disabled={!canContinue}>Continue to Profile <ArrowRight className="h-4 w-4" /></Button>
         </div>
       </Panel>
     </div>
   )
+}
+
+function modelingStatusLabel(status: DataModelingDatasource['modelingStatus']): string {
+  if (status === 'supported') return 'Supported'
+  if (status === 'needs_projection') return 'Needs projection'
+  if (status === 'context_only') return 'Context only'
+  return 'Unsupported'
+}
+
+function modelingStatusTone(status: DataModelingDatasource['modelingStatus']): 'ready' | 'warning' | 'blocked' | 'info' {
+  if (status === 'supported') return 'ready'
+  if (status === 'needs_projection') return 'warning'
+  if (status === 'context_only') return 'info'
+  return 'blocked'
+}
+
+function iconForDatasource(item: DataModelingDatasource) {
+  if (item.sourceFamily === 'warehouses') return Warehouse
+  if (item.sourceFamily === 'files' || item.sourceFamily === 'documents') return FileText
+  if (item.sourceFamily === 'web') return Globe2
+  if (item.sourceFamily === 'object_storage') return HardDrive
+  return Database
 }
 
 function GenerationStep({

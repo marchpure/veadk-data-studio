@@ -407,6 +407,40 @@ Acceptance:
 - Source detail can answer: where did this data come from, when was it captured, how was it parsed, who uses it?
 - Source detail links every blocker to the next action: reconnect, retry parse, confirm parser, retry index, regenerate semantic suggestions, or review consumers.
 
+## P1 Slice: Data Modeling Source Handoff
+
+Goal:
+
+- Make the Data Modeling source picker consume the commercial Sources contract instead of silently filtering to legacy SQL datasources.
+- Show why each connected source can or cannot produce a production semantic model.
+
+Files:
+
+- `client/src/features/data-modeling/adapters/dataModelingAdapter.ts`
+- `client/src/features/data-modeling/components/CreateModelPanel.tsx`
+- `client/src/features/data-modeling/store/useDataModelingStore.ts`
+- `client/src/features/data-modeling/types.ts`
+
+Current implementation:
+
+- `dataModelingAdapter.listDatasources()` now prefers `GET /sources/overview` and falls back to the legacy `/datasources` API only when the Sources facade is unavailable.
+- SourceOverview rows are mapped into explicit modeling handoff states:
+  - `supported` for ready relational database sources.
+  - `supported` with `warehouse` mode for ready Databricks/warehouse sources.
+  - `needs_projection` for files, object storage, Feishu Sheets/Base, extracted tables, and any source with `projected_dataset_id`.
+  - `context_only` for documents and web sources that can support definitions, policies, examples, and evidence but cannot be the production fact source for metrics.
+  - `unsupported` for permission, auth, parser, source availability, and unsupported-family blockers.
+- The Create Model picker shows every connected source with its family, modeling mode, status, next action, and blocker reason instead of only showing `No supported datasource found`.
+- Profile loading and semantic generation are guarded so only `supported` sources with a relational/warehouse profile can continue into production generation.
+- Projection and context sources stay visible but disabled for production generation until their projection or modeling contract is confirmed.
+
+Acceptance:
+
+- A workspace with only Feishu Docs/Web/PDF shows clear context/projection blockers instead of an empty SQL-only state.
+- A workspace with SQL or Databricks sources still loads schema/profile evidence and can generate a draft.
+- Token expiry, permission loss, parser failure, source unavailable, and in-progress states are visible in the picker with next action copy.
+- The picker does not call profile/generation APIs for context-only, projection-needed, planned, or unsupported source families.
+
 ## P2 Slice: Dashboards Workspace
 
 Goal:

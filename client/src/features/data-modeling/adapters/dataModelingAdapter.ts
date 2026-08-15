@@ -1,7 +1,9 @@
-import { ApiService, type Datasource, type SourceSkillCandidate, type SourceUnderstanding } from '../../../services/api'
+import { ApiService, type Datasource, type SourceOverviewItem, type SourceSkillCandidate, type SourceUnderstanding } from '../../../services/api'
 import type {
   AgentSuggestion,
   DataModelingDatasource,
+  DataModelingMode,
+  DataModelingStatus,
   DataSourceKind,
   DataSourceProfile,
   FieldRole,
@@ -186,16 +188,19 @@ export const dataModelingAdapter: DataModelingAdapter = {
   },
 
   async listDatasources() {
-    const response = await ApiService.listAllDatasources()
-    return response.items
-      .filter(item => ['oracle', 'postgres', 'pg', 'mysql', 'sqlite'].includes(String(item.database_type ?? item.db_type ?? item.type)))
-      .map(item => ({
-        id: item.id,
-        name: item.name,
-        kind: normalizeKind(item.database_type ?? item.db_type ?? item.type),
-        sourceType: item.source_type,
-        status: item.status,
-      }))
+    try {
+      const response = await ApiService.listSourcesOverview()
+      return response.items
+        .map(sourceOverviewToModelingDatasource)
+        .sort(compareModelingDatasources)
+    } catch (error) {
+      console.warn('Falling back to legacy datasource list for Data Modeling:', error)
+      const response = await ApiService.listAllDatasources()
+      return response.items
+        .filter(item => ['oracle', 'postgres', 'pg', 'mysql', 'sqlite', 'databricks'].includes(String(item.database_type ?? item.db_type ?? item.type)))
+        .map(legacyDatasourceToModelingDatasource)
+        .sort(compareModelingDatasources)
+    }
   },
 
   async loadProfile(datasourceId) {
@@ -225,6 +230,201 @@ export const dataModelingAdapter: DataModelingAdapter = {
     })
     return normalizeModel(response.model)
   },
+}
+
+export function sourceOverviewToModelingDatasource(item: SourceOverviewItem): DataModelingDatasource {
+  const base = {
+    id: item.id,
+    name: item.name,
+    kind: normalizeSourceOverviewKind(item),
+    sourceType: item.source_kind,
+    status: item.status,
+    sourceFamily: item.family,
+    provider: item.provider,
+    nextActions: item.next_actions ?? [],
+    projectedDatasetId: item.projected_dataset_id,
+    contextIndexStatus: item.context_index_status,
+    parseStatus: item.parse_status,
+  }
+  const blocked = sourceOverviewBlocker(item)
+  if (blocked) {
+    return {
+      ...base,
+      modelingStatus: 'unsupported',
+      modelingMode: modeForFamily(item),
+      reason: blocked,
+      canLoadProfile: false,
+    }
+  }
+
+  if (item.family === 'databases') {
+    return {
+      ...base,
+      modelingStatus: 'supported',
+      modelingMode: 'relational',
+      reason: 'Schema/profile evidence can be used to generate a production semantic model.',
+      canLoadProfile: true,
+    }
+  }
+
+  if (item.family === 'warehouses') {
+    return {
+      ...base,
+      modelingStatus: 'supported',
+      modelingMode: 'warehouse',
+      reason: 'Warehouse catalog/profile evidence can be used to generate a production semantic model.',
+      canLoadProfile: true,
+    }
+  }
+
+  if (isProjectionSource(item)) {
+    return {
+      ...base,
+      modelingStatus: 'needs_projection',
+      modelingMode: 'projection',
+      reason: item.projected_dataset_id
+        ? 'Review and confirm the projected dataset before production semantic modeling.'
+        : 'Detect and confirm a tabular projection before production semantic modeling.',
+      canLoadProfile: false,
+    }
+  }
+
+  if (isContextSource(item)) {
+    return {
+      ...base,
+      modelingStatus: 'context_only',
+      modelingMode: 'context_assisted',
+      reason: contextOnlyReason(item),
+      canLoadProfile: false,
+    }
+  }
+
+  return {
+    ...base,
+    modelingStatus: 'unsupported',
+    modelingMode: modeForFamily(item),
+    reason: unsupportedReasonForFamily(item),
+    canLoadProfile: false,
+  }
+}
+
+function legacyDatasourceToModelingDatasource(item: Datasource): DataModelingDatasource {
+  const kind = normalizeKind(item.database_type ?? item.db_type ?? item.type)
+  const isWarehouse = kind === 'databricks'
+  return {
+    id: item.id,
+    name: item.name,
+    kind,
+    sourceType: item.source_type,
+    status: item.status,
+    modelingStatus: 'supported',
+    modelingMode: isWarehouse ? 'warehouse' : 'relational',
+    reason: 'Legacy datasource is supported for relational semantic generation.',
+    nextActions: ['Generate semantic model'],
+    sourceFamily: isWarehouse ? 'warehouses' : 'databases',
+    provider: String(item.database_type ?? item.db_type ?? item.type ?? ''),
+    canLoadProfile: true,
+    projectedDatasetId: item.projected_dataset_id,
+  }
+}
+
+function compareModelingDatasources(left: DataModelingDatasource, right: DataModelingDatasource): number {
+  const priority: Record<DataModelingStatus, number> = {
+    supported: 0,
+    needs_projection: 1,
+    context_only: 2,
+    unsupported: 3,
+  }
+  const statusDelta = priority[left.modelingStatus] - priority[right.modelingStatus]
+  if (statusDelta !== 0) return statusDelta
+  return left.name.localeCompare(right.name)
+}
+
+function sourceOverviewBlocker(item: SourceOverviewItem): string | null {
+  const status = normalizeStatusText(item.status)
+  if (['authorization required', 'reauthorization required'].includes(status)) {
+    return 'Reauthorize this source before it can feed semantic modeling.'
+  }
+  if (status === 'permission lost') {
+    return 'Restore upstream permissions before this source can feed semantic modeling.'
+  }
+  if (status === 'source unavailable') {
+    return 'The upstream source is unavailable. Retry sync or check the upstream resource.'
+  }
+  if (status === 'failed') {
+    return item.parse_status === 'failed'
+      ? 'Parser failed. Review parser warnings and retry sync before modeling.'
+      : 'Source processing failed. Retry sync before modeling.'
+  }
+  if (status === 'needs confirmation') {
+    return 'Confirm the selected resource or projection before modeling.'
+  }
+  if (item.context_index_status === 'failed' && isContextSource(item)) {
+    return 'Context indexing failed. Retry indexing before using this source as modeling evidence.'
+  }
+  if (item.parse_status === 'failed') {
+    return 'Parsing failed. Review parser warnings and retry sync before modeling.'
+  }
+  if (['pending', 'syncing', 'analyzing'].includes(status)) {
+    return 'Source processing is still running. Wait until processing finishes before modeling.'
+  }
+  return null
+}
+
+function normalizeStatusText(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase()
+}
+
+function isProjectionSource(item: SourceOverviewItem): boolean {
+  const resourceType = String(item.resource_type ?? '')
+  return Boolean(item.projected_dataset_id)
+    || item.family === 'files'
+    || item.family === 'object_storage'
+    || ['feishu_sheet', 'feishu_base', 'extracted_table'].includes(resourceType)
+}
+
+function isContextSource(item: SourceOverviewItem): boolean {
+  if (item.family === 'documents' || item.family === 'web') return true
+  return item.context_index_status === 'indexed' && item.parsed_asset_counts.evidence > 0
+}
+
+function modeForFamily(item: SourceOverviewItem): DataModelingMode | undefined {
+  if (item.family === 'databases') return 'relational'
+  if (item.family === 'warehouses') return 'warehouse'
+  if (isProjectionSource(item)) return 'projection'
+  if (isContextSource(item)) return 'context_assisted'
+  if (item.family === 'saas' || item.family === 'api') return 'business_object'
+  return undefined
+}
+
+function unsupportedReasonForFamily(item: SourceOverviewItem): string {
+  if (item.family === 'saas' || item.family === 'api') {
+    return 'SaaS/API sources need a business object contract before production semantic modeling.'
+  }
+  return 'This source family does not yet expose a production modeling handoff contract.'
+}
+
+function contextOnlyReason(item: SourceOverviewItem): string {
+  if (item.context_index_status === 'pending') {
+    return 'Context indexing is pending. Once indexed, this source can support definitions, policies, and evidence, but not production metric facts.'
+  }
+  if (item.context_index_status === 'indexing') {
+    return 'Context indexing is still running. This source can support modeling evidence after indexing, but not production metric facts.'
+  }
+  if (item.context_index_status === 'unavailable') {
+    return 'No context index is available yet. Add context indexing before using this source as modeling evidence.'
+  }
+  return 'Indexed context can support definitions, policies, and evidence, but cannot be the production fact source for metrics.'
+}
+
+function normalizeSourceOverviewKind(item: SourceOverviewItem): DataSourceKind {
+  if (item.family === 'warehouses' || item.provider === 'databricks') return 'databricks'
+  if (item.family === 'files') return 'file'
+  if (item.family === 'documents') return 'document'
+  if (item.family === 'web') return 'web'
+  if (item.family === 'object_storage') return 'object_storage'
+  if (item.family === 'api' || item.family === 'saas') return 'api'
+  return normalizeKind(item.provider || item.resource_type)
 }
 
 export function suggestionsFromUnderstanding(understanding: SourceUnderstanding): AgentSuggestion[] {

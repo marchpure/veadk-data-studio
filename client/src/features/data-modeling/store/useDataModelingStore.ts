@@ -225,9 +225,10 @@ export const useDataModelingStore = create<DataModelingStore>()(
         try {
           const datasourceOptions = await dataModelingAdapter.listDatasources()
           const selected = get().createDraft.datasourceId
-          const nextDatasourceId = selected && datasourceOptions.some(item => item.id === selected)
+          const selectedDatasource = datasourceOptions.find(item => item.id === selected)
+          const nextDatasourceId = selectedDatasource?.canLoadProfile && selectedDatasource.modelingStatus === 'supported'
             ? selected
-            : datasourceOptions[0]?.id ?? ''
+            : datasourceOptions.find(item => item.canLoadProfile && item.modelingStatus === 'supported')?.id ?? datasourceOptions[0]?.id ?? ''
           set(state => ({
             datasourceOptions,
             datasourceLoading: false,
@@ -279,6 +280,15 @@ export const useDataModelingStore = create<DataModelingStore>()(
       updateCreateDraft(patch) {
         set(state => ({ createDraft: { ...state.createDraft, ...patch } }))
         if (patch.datasourceId) {
+          const selectedDatasource = get().datasourceOptions.find(item => item.id === patch.datasourceId)
+          if (selectedDatasource && !selectedDatasource.canLoadProfile) {
+            set(state => ({
+              selectedProfileTable: '',
+              selectedProfileField: '',
+              createDraft: { ...state.createDraft, selectedTables: [] },
+            }))
+            return
+          }
           void dataModelingAdapter.loadProfile(patch.datasourceId).then(profile => {
             set(state => ({
               profiles: mergeProfiles(state.profiles, [profile]),
@@ -286,7 +296,7 @@ export const useDataModelingStore = create<DataModelingStore>()(
               selectedProfileField: profile.tables[0]?.fields[0]?.name ?? '',
               createDraft: {
                 ...state.createDraft,
-                selectedTables: state.createDraft.selectedTables.length ? state.createDraft.selectedTables : profile.tables.slice(0, 5).map(table => table.name),
+                selectedTables: profile.tables.slice(0, 5).map(table => table.name),
               },
             }))
           }).catch(error => {
@@ -322,6 +332,15 @@ export const useDataModelingStore = create<DataModelingStore>()(
         const draft = get().createDraft
         if (!draft.datasourceId) {
           const message = 'Choose a datasource before generating a Semantic Model.'
+          set(state => ({
+            homeError: message,
+            generation: { ...state.generation, phase: 'idle', progress: 0, error: message },
+          }))
+          return
+        }
+        const selectedDatasource = get().datasourceOptions.find(item => item.id === draft.datasourceId)
+        if (selectedDatasource && (!selectedDatasource.canLoadProfile || selectedDatasource.modelingStatus !== 'supported')) {
+          const message = selectedDatasource.reason ?? 'This source is not ready for production semantic generation.'
           set(state => ({
             homeError: message,
             generation: { ...state.generation, phase: 'idle', progress: 0, error: message },

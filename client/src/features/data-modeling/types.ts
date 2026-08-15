@@ -1,4 +1,6 @@
-export type DataSourceKind = 'oracle' | 'postgres' | 'pg' | 'mysql' | 'sqlite'
+import type { SourceOverviewFamily } from '../../services/api'
+
+export type DataSourceKind = 'oracle' | 'postgres' | 'pg' | 'mysql' | 'sqlite' | 'databricks' | 'file' | 'document' | 'web' | 'object_storage' | 'api' | 'unknown'
 export type ModelStatus = 'Draft' | 'Validating' | 'Validation Failed' | 'Ready for Review' | 'Published' | 'Rejected'
 export type ReadinessLevel = 'ready' | 'warning' | 'blocked'
 export type TableCategory = 'fact' | 'dimension' | 'bridge' | 'log'
@@ -15,6 +17,8 @@ export type TimeGrain = 'day' | 'week' | 'month' | 'quarter'
 export type HomeViewMode = 'ready' | 'loading' | 'error' | 'empty' | 'permission'
 export type GenerationPhase = 'idle' | 'profile' | 'semantic' | 'validation' | 'completed'
 export type GenerationStepStatus = 'pending' | 'running' | 'done'
+export type DataModelingStatus = 'supported' | 'needs_projection' | 'context_only' | 'unsupported'
+export type DataModelingMode = 'relational' | 'warehouse' | 'projection' | 'context_assisted' | 'business_object' | 'event' | 'semantic_import'
 
 export interface DataModelingDatasource {
   id: string
@@ -22,6 +26,16 @@ export interface DataModelingDatasource {
   kind: DataSourceKind
   sourceType: 'connection' | 'dataset' | 'source_resource'
   status?: string
+  modelingStatus: DataModelingStatus
+  modelingMode?: DataModelingMode
+  reason?: string
+  nextActions: string[]
+  sourceFamily: SourceOverviewFamily
+  provider?: string
+  canLoadProfile: boolean
+  projectedDatasetId?: string | null
+  contextIndexStatus?: string
+  parseStatus?: string
 }
 
 export interface ModelConsumers {
