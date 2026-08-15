@@ -283,6 +283,41 @@ async def test_sources_overview_next_actions_cover_warehouse_and_object_storage_
     assert tos_item["next_actions"] == ["Search evidence", "Review projection"]
 
 
+async def test_sources_overview_object_storage_confirmation_uses_large_object_action(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    resource = SourceResource(
+        tenant_id=tenant.id,
+        resource_type="tos_object",
+        name="huge-export.parquet",
+        external_id="sales-bucket/raw/huge-export.parquet",
+        owner_id=tenant.owner_id,
+        visibility="workspace",
+        sync_mode="manual",
+        status="needs_confirmation",
+        sync_config_json={
+            "last_error": {
+                "code": "large_file_confirmation_required",
+                "message": "TOS object is too large; confirmation required",
+                "permanent": True,
+            }
+        },
+    )
+    test_session.add(resource)
+    await test_session.commit()
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["id"] == str(resource.id))
+    assert item["family"] == "object_storage"
+    assert item["provider"] == "volcengine_tos"
+    assert item["status"] == "Needs confirmation"
+    assert item["attention_state"] == "parse"
+    assert item["context_index_status"] == "unavailable"
+    assert item["next_actions"] == ["Review object size", "Confirm large object sync"]
+
+
 async def test_sources_overview_excludes_deleted_source_resources(test_client, test_session, monkeypatch):
     from server.services.web_source_adapter import WebCapturedPage
 

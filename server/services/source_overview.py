@@ -517,6 +517,8 @@ class SourceOverviewService:
             return ["Retry sync", "Check upstream source"]
         if status == "failed":
             return ["Review parser warning", "Retry sync"]
+        if status == "needs_confirmation" and family == "object_storage":
+            return ["Review object size", "Confirm large object sync"]
         if status == "needs_confirmation":
             return ["Confirm resource selection"]
         if knowledge_resource and knowledge_resource.index_status == "failed":

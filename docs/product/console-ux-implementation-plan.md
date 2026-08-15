@@ -378,6 +378,7 @@ Current implementation:
 - Current backend stages are mapped conservatively: `waiting_for_connector`, `captured`, `indexed`, and `failed` drive the stepper while existing `latest_snapshot_id` and `projected_dataset_id` fill in partial readiness.
 - Failed imports keep their resource row visible with the connector error and do not hide successful capture/parse state for other selected resources.
 - Backend `next_actions` are shown as small action chips so the user sees whether to retry sync, reauthorize, attach to a notebook asset, or use knowledge retrieval.
+- Object-storage large object imports surface as `Needs confirmation` with `Review object size` and `Confirm large object sync` actions. The processing card uses a confirmation tone instead of presenting the item as a generic failed import.
 - Processing state is short-polled only while the backend stage is not terminal.
 - Direct Files as Source and Web source creation in `Databases.tsx` now also keep the Add Source dialog open after create success.
 - Direct file/web results render the same standard processing steps and poll `GET /source-resources/{resource_id}/processing` through `useSourceResourceProcessing()`.

@@ -64,6 +64,7 @@ const directSourceProgressIndex = (
   resource: SourceResource,
   processing?: SourceResourceProcessing,
 ) => {
+  if (resource.status === 'needs_confirmation' || processing?.stage === 'needs_confirmation') return -1
   if (resource.status !== 'ready' || processing?.stage === 'failed') return -1
   if (processing?.stage === 'waiting_for_connector') return 0
   if (processing?.stage === 'captured') return 1
@@ -77,6 +78,7 @@ const directSourceProcessingTone = (
   resource: SourceResource,
   processing?: SourceResourceProcessing,
 ) => {
+  if (resource.status === 'needs_confirmation' || processing?.stage === 'needs_confirmation') return 'needs_confirmation'
   if (resource.status !== 'ready' || processing?.stage === 'failed') return 'failed'
   if (processing?.stage === 'indexed') return 'ready'
   return 'processing'
@@ -3477,7 +3479,7 @@ function DirectSourceProcessingPanel({
   resource: SourceResource
   onAddAnother: () => void
 }) {
-  const processingQuery = useSourceResourceProcessing(resource.id, resource.status === 'ready')
+  const processingQuery = useSourceResourceProcessing(resource.id)
   const processing = processingQuery.data
   const progressIndex = directSourceProgressIndex(resource, processing)
   const tone = directSourceProcessingTone(resource, processing)
@@ -3490,6 +3492,8 @@ function DirectSourceProcessingPanel({
       <div className="flex items-start gap-3">
         {tone === 'failed' ? (
           <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-400" />
+        ) : tone === 'needs_confirmation' ? (
+          <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-yellow-400" />
         ) : tone === 'ready' ? (
           <CheckCircle2 className="mt-0.5 h-5 w-5 flex-shrink-0 text-green-400" />
         ) : (
@@ -3508,17 +3512,19 @@ function DirectSourceProcessingPanel({
           <p className={`mt-1 text-xs ${tone === 'failed' ? 'text-red-300' : tone === 'ready' ? 'text-green-300' : 'text-gray-300'}`}>
             {tone === 'failed'
               ? errorMessage || 'Source processing failed.'
+              : tone === 'needs_confirmation'
+                ? processing?.message || errorMessage || 'Review and confirm this source before retrying sync.'
               : processing?.message || `Snapshot ${resource.latest_snapshot_id || 'created'}${resource.projected_dataset_id ? ` · dataset ${resource.projected_dataset_id}` : ''}`}
           </p>
 
           <div className="mt-4 grid grid-cols-7 gap-1">
             {directSourceProcessingSteps.map((step, index) => {
-              const complete = tone !== 'failed' && index <= progressIndex
+              const complete = tone !== 'failed' && tone !== 'needs_confirmation' && index <= progressIndex
               const current = tone === 'processing' && index === Math.max(progressIndex + 1, 0)
               return (
                 <div key={step.id} className="min-w-0">
-                  <div className={`h-1.5 rounded-full ${complete ? 'bg-green-500' : current ? 'bg-brand-orange' : tone === 'failed' && index === 0 ? 'bg-red-500' : 'bg-[#444444]'}`} />
-                  <div className={`mt-1 truncate text-[10px] ${complete ? 'text-green-300' : current ? 'text-brand-orange' : 'text-gray-500'}`} title={step.label}>
+                  <div className={`h-1.5 rounded-full ${complete ? 'bg-green-500' : current ? 'bg-brand-orange' : tone === 'failed' && index === 0 ? 'bg-red-500' : tone === 'needs_confirmation' && index === 0 ? 'bg-yellow-400' : 'bg-[#444444]'}`} />
+                  <div className={`mt-1 truncate text-[10px] ${complete ? 'text-green-300' : current ? 'text-brand-orange' : tone === 'needs_confirmation' && index === 0 ? 'text-yellow-300' : 'text-gray-500'}`} title={step.label}>
                     {step.label}
                   </div>
                 </div>

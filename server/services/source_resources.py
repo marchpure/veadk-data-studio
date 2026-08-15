@@ -48,7 +48,7 @@ from server.services.web_source_adapter import WebCapturedPage, WebSourceAdapter
 
 class SourceResourceService:
     pdf_max_upload_bytes = 50 * 1024 * 1024
-    sync_run_statuses = ("queued", "running", "succeeded", "failed", "partial", "cancelled")
+    sync_run_statuses = ("queued", "running", "succeeded", "failed", "partial", "cancelled", "needs_confirmation")
 
     connector_ready_types = {
         "file",
@@ -500,6 +500,11 @@ class SourceResourceService:
             stage = "indexed"
             message = "Resource has a captured Source Snapshot and indexed Evidence Fragments."
             next_actions = ["Use search_knowledge/read_evidence in agent runs", "Attach to a notebook asset"]
+            connector_required = False
+        elif resource.status == "needs_confirmation" and (last_error or {}).get("code") == "large_file_confirmation_required":
+            stage = "needs_confirmation"
+            message = "Object is too large for automatic sync. Review the object size and confirm large object sync before retrying."
+            next_actions = ["Review object size", "Confirm large object sync"]
             connector_required = False
         elif resource.status in {
             "failed",
@@ -1151,7 +1156,12 @@ class SourceResourceService:
         except ConnectorError as exc:
             resource.latest_snapshot_id = previous_snapshot_id
             resource.status = self._status_for_connector_error(exc)
-            self._finish_sync_run(resource=resource, sync_run=sync_run, status="failed", error=exc)
+            self._finish_sync_run(
+                resource=resource,
+                sync_run=sync_run,
+                status=self._sync_run_status_for_connector_error(exc),
+                error=exc,
+            )
             await session.flush()
             raise
         except Exception as exc:
@@ -1926,6 +1936,11 @@ class SourceResourceService:
             return "permission_lost"
         if error.code == "source_unavailable":
             return "source_unavailable"
+        if error.code == "large_file_confirmation_required":
+            return "needs_confirmation"
+        return "failed"
+
+    def _sync_run_status_for_connector_error(self, error: ConnectorError) -> str:
         if error.code == "large_file_confirmation_required":
             return "needs_confirmation"
         return "failed"

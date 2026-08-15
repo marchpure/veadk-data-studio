@@ -128,6 +128,7 @@ const processingSteps = [
 ] as const
 
 const processingProgressIndex = (processing: SourceResourceProcessing | undefined, result: SourceResourceImportResult) => {
+  if (result.status === 'needs_confirmation' || processing?.stage === 'needs_confirmation') return -1
   if (result.status !== 'ready' || processing?.stage === 'failed') return -1
   if (processing?.stage === 'waiting_for_connector') return 0
   if (processing?.stage === 'captured') return 1
@@ -138,6 +139,7 @@ const processingProgressIndex = (processing: SourceResourceProcessing | undefine
 }
 
 const processingTone = (processing: SourceResourceProcessing | undefined, result: SourceResourceImportResult) => {
+  if (result.status === 'needs_confirmation' || processing?.stage === 'needs_confirmation') return 'needs_confirmation'
   if (result.status !== 'ready' || processing?.stage === 'failed') return 'failed'
   if (processing?.stage === 'indexed') return 'ready'
   return 'processing'
@@ -961,7 +963,7 @@ function LoadingBox({ label }: { label: string }) {
 
 function ImportProcessingCard({ result }: { result: SourceResourceImportResult }) {
   const resourceId = result.resource?.id
-  const processingQuery = useSourceResourceProcessing(resourceId, result.status === 'ready')
+  const processingQuery = useSourceResourceProcessing(resourceId, Boolean(resourceId))
   const processing = processingQuery.data
   const progressIndex = processingProgressIndex(processing, result)
   const tone = processingTone(processing, result)
@@ -974,6 +976,8 @@ function ImportProcessingCard({ result }: { result: SourceResourceImportResult }
       <div className="flex items-start gap-2">
         {tone === 'failed' ? (
           <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-400" />
+        ) : tone === 'needs_confirmation' ? (
+          <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-yellow-400" />
         ) : tone === 'ready' ? (
           <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-400" />
         ) : (
@@ -989,17 +993,19 @@ function ImportProcessingCard({ result }: { result: SourceResourceImportResult }
           <div className={`mt-1 text-xs ${tone === 'failed' ? 'text-red-300' : tone === 'ready' ? 'text-green-300' : 'text-gray-300'}`}>
             {tone === 'failed'
               ? `${result.status}${errorMessage ? ` · ${errorMessage}` : ''}`
+              : tone === 'needs_confirmation'
+                ? processing?.message || errorMessage || 'Review and confirm this source before retrying sync.'
               : processing?.message || `Snapshot ${result.resource?.latest_snapshot_id || 'created'}${result.resource?.projected_dataset_id ? ` · dataset ${result.resource.projected_dataset_id}` : ''}`}
           </div>
 
           <div className="mt-3 grid grid-cols-7 gap-1">
             {processingSteps.map((step, index) => {
-              const complete = tone !== 'failed' && index <= progressIndex
+              const complete = tone !== 'failed' && tone !== 'needs_confirmation' && index <= progressIndex
               const current = tone === 'processing' && index === Math.max(progressIndex + 1, 0)
               return (
                 <div key={step.id} className="min-w-0">
-                  <div className={`h-1.5 rounded-full ${complete ? 'bg-green-500' : current ? 'bg-brand-orange' : tone === 'failed' && index === 0 ? 'bg-red-500' : 'bg-[#444444]'}`} />
-                  <div className={`mt-1 truncate text-[10px] ${complete ? 'text-green-300' : current ? 'text-brand-orange' : 'text-gray-500'}`} title={step.label}>
+                  <div className={`h-1.5 rounded-full ${complete ? 'bg-green-500' : current ? 'bg-brand-orange' : tone === 'failed' && index === 0 ? 'bg-red-500' : tone === 'needs_confirmation' && index === 0 ? 'bg-yellow-400' : 'bg-[#444444]'}`} />
+                  <div className={`mt-1 truncate text-[10px] ${complete ? 'text-green-300' : current ? 'text-brand-orange' : tone === 'needs_confirmation' && index === 0 ? 'text-yellow-300' : 'text-gray-500'}`} title={step.label}>
                     {step.label}
                   </div>
                 </div>

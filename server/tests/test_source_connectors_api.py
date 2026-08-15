@@ -1337,6 +1337,83 @@ async def test_sync_failure_keeps_previous_successful_snapshot(test_session):
     assert len(files) == 1
 
 
+async def test_tos_large_object_import_surfaces_confirmation_state(test_session):
+    tenant = await _tenant(test_session)
+    connection_service = SourceConnectionService()
+    resource_service = SourceResourceService()
+
+    class LargeObjectAdapter(FakeConnectorAdapter):
+        async def sync_resource(self, *, session, connection: SourceConnection, resource: SourceResource) -> CapturedSnapshot:
+            raise ConnectorError(
+                "TOS object is too large; confirmation required",
+                code="large_file_confirmation_required",
+                permanent=True,
+            )
+
+    connection = await connection_service.create_connection(
+        session=test_session,
+        tenant_id=tenant.id,
+        user_id=tenant.owner_id,
+        payload=SourceConnectionCreate(
+            provider="volcengine_tos",
+            auth_mode="access_key",
+            display_name="经营分析 TOS",
+            credentials={
+                "endpoint": "https://tos-cn-beijing.volces.com",
+                "region": "cn-beijing",
+                "access_key_id": "tos-ak",
+                "secret_access_key": "tos-secret",
+            },
+        ),
+        adapter=FakeConnectorAdapter(),
+    )
+
+    imported = await resource_service.import_resources(
+        session=test_session,
+        tenant_id=tenant.id,
+        user_id=tenant.owner_id,
+        payload=SourceResourceImportRequest(
+            connection_id=connection.id,
+            selections=[
+                {
+                    "external_id": "sales-bucket/raw/huge-export.parquet",
+                    "resource_type": "tos_object",
+                    "name": "huge-export.parquet",
+                    "metadata": {"bucket": "sales-bucket", "key": "raw/huge-export.parquet", "size": 209715200},
+                }
+            ],
+        ),
+        adapter=LargeObjectAdapter(),
+    )
+
+    result = imported["results"][0]
+    resource = result["resource"]
+    sync_run = resource["sync_config_json"]["latest_sync_run"]
+
+    assert imported["succeeded"] == 0
+    assert imported["failed"] == 1
+    assert result["status"] == "needs_confirmation"
+    assert result["error"]["code"] == "large_file_confirmation_required"
+    assert resource["status"] == "needs_confirmation"
+    assert resource["latest_snapshot_id"] is None
+    assert resource["sync_config_json"]["last_error"]["code"] == "large_file_confirmation_required"
+    assert sync_run["status"] == "needs_confirmation"
+    assert sync_run["error"]["code"] == "large_file_confirmation_required"
+    assert sync_run["checkpoint"] is None
+
+    resource_row = await test_session.get(SourceResource, resource["id"])
+    assert resource_row is not None
+    processing = await resource_service.processing_payload(
+        session=test_session,
+        tenant_id=tenant.id,
+        resource_id=str(resource_row.id),
+    )
+    assert processing["status"] == "needs_confirmation"
+    assert processing["stage"] == "needs_confirmation"
+    assert processing["connector_required"] is False
+    assert processing["next_actions"] == ["Review object size", "Confirm large object sync"]
+
+
 async def test_successful_source_sync_run_records_checkpoint(test_session):
     tenant = await _tenant(test_session)
     connection_service = SourceConnectionService()
@@ -1404,7 +1481,15 @@ async def test_source_sync_run_status_contract_rejects_unknown_status(test_sessi
     sync_run = service._start_sync_run(resource=resource, trigger="manual")
 
     assert sync_run["status"] == "running"
-    assert sync_run["allowed_statuses"] == ["queued", "running", "succeeded", "failed", "partial", "cancelled"]
+    assert sync_run["allowed_statuses"] == [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "partial",
+        "cancelled",
+        "needs_confirmation",
+    ]
     with pytest.raises(ValueError, match="Unsupported source sync run status"):
         service._finish_sync_run(resource=resource, sync_run=sync_run, status="mystery")
 
