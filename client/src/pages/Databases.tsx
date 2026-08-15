@@ -587,6 +587,51 @@ export default function DatabasesPage() {
     return 'text-gray-500'
   }
 
+  const modelingStatusLabel = (source: SourceOverviewItem): string => {
+    switch (source.modeling_status) {
+      case 'supported':
+        return source.modeling_mode === 'warehouse' ? 'Warehouse-ready' : 'Semantic-ready'
+      case 'needs_projection':
+        return 'Needs projection'
+      case 'context_only':
+        return 'Context only'
+      case 'permission_required':
+        return 'Permission blocked'
+      case 'reauthorization_required':
+        return 'Auth required'
+      case 'source_unavailable':
+        return 'Unavailable'
+      case 'processing':
+        return 'Processing'
+      case 'failed':
+        return 'Failed'
+      case 'planned':
+        return 'Planned'
+      case 'unsupported':
+      default:
+        return 'Unsupported'
+    }
+  }
+
+  const modelingClassName = (source: SourceOverviewItem): string => {
+    const status = source.modeling_status || 'unsupported'
+    if (status === 'supported') return 'text-green-300'
+    if (status === 'context_only') return 'text-blue-300'
+    if (status === 'failed' || status === 'permission_required' || status === 'reauthorization_required' || status === 'source_unavailable' || status === 'unsupported') {
+      return 'text-red-300'
+    }
+    return 'text-amber-300'
+  }
+
+  const modelingDetailLabel = (source: SourceOverviewItem): string => {
+    const details = [
+      source.modeling_mode?.replace(/_/g, ' '),
+      source.modeling_can_load_profile ? 'profile ready' : null,
+      source.consumer_counts.semantic_models > 0 ? `${source.consumer_counts.semantic_models} model${source.consumer_counts.semantic_models === 1 ? '' : 's'}` : null,
+    ].filter(Boolean)
+    return details.length > 0 ? details.join(' · ') : (source.modeling_next_action || primaryNextAction(source) || 'Open detail')
+  }
+
   const datasourceForSource = (source: SourceOverviewItem): Datasource => {
     const existing = datasourceById.get(source.id)
     if (existing) return existing
@@ -1753,8 +1798,16 @@ export default function DatabasesPage() {
                                 </span>
                                 <div className="mt-1 text-xs text-gray-500 capitalize">{source.parse_status}</div>
                               </td>
-                              <td className="px-3 py-4 align-top text-sm text-gray-300">
-                                {source.consumer_counts.semantic_models}
+                              <td className="px-3 py-4 align-top">
+                                <div
+                                  className={`line-clamp-2 text-sm capitalize ${modelingClassName(source)}`}
+                                  title={source.modeling_reason || source.modeling_next_action || undefined}
+                                >
+                                  {modelingStatusLabel(source)}
+                                </div>
+                                <div className="mt-1 line-clamp-2 text-xs capitalize text-gray-500">
+                                  {modelingDetailLabel(source)}
+                                </div>
                               </td>
                               <td className="px-3 py-4 align-top text-sm text-gray-300">
                                 {source.consumer_counts.dashboards}
@@ -1877,6 +1930,11 @@ export default function DatabasesPage() {
                             <div className="col-span-2">
                               <div className="text-xs text-gray-500">Parsed assets</div>
                               <div className="text-gray-300">{parsedAssetsLabel(source)}</div>
+                            </div>
+                            <div className="col-span-2">
+                              <div className="text-xs text-gray-500">Semantic</div>
+                              <div className={modelingClassName(source)}>{modelingStatusLabel(source)}</div>
+                              <div className="text-xs capitalize text-gray-500">{modelingDetailLabel(source)}</div>
                             </div>
                             <div className="col-span-2">
                               <div className="text-xs text-gray-500">Consumers</div>
