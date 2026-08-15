@@ -83,6 +83,12 @@ async def test_sources_overview_includes_ready_web_source_and_compatibility_alia
     assert item["updated_at"]
     assert item["counts_partial"] is True
     assert item["next_actions"] == ["Search evidence", "Attach to notebook"]
+    assert item["modeling_status"] == "context_only"
+    assert item["modeling_mode"] == "context_assisted"
+    assert item["modeling_reason"] == "Indexed context can support definitions, policies, and evidence, but cannot be the production fact source for metrics."
+    assert item["modeling_next_action"] == "Search evidence"
+    assert item["modeling_evidence_summary"] == "2 evidence fragments; parse parsed; context indexed"
+    assert item["modeling_can_load_profile"] is False
 
     compatibility = await test_client.get("/api/datasources/overview")
     assert compatibility.status_code == 200
@@ -126,6 +132,9 @@ async def test_sources_overview_maps_failed_and_needs_confirmation_to_product_st
     assert pending_item["context_index_status"] == "unavailable"
     assert pending_item["parse_status"] == "pending"
     assert pending_item["next_actions"] == ["Confirm resource selection"]
+    assert pending_item["modeling_status"] == "needs_projection"
+    assert pending_item["modeling_reason"] == "Confirm the selected resource before using it as modeling evidence."
+    assert pending_item["modeling_next_action"] == "Confirm resource selection"
 
 
 async def test_sources_overview_promotes_feishu_reauthorization_to_next_action(test_client, test_session):
@@ -169,6 +178,9 @@ async def test_sources_overview_promotes_feishu_reauthorization_to_next_action(t
     assert item["attention_state"] == "auth"
     assert item["freshness_status"] == "unknown"
     assert item["next_actions"] == ["Reauthorize source"]
+    assert item["modeling_status"] == "reauthorization_required"
+    assert item["modeling_mode"] == "context_assisted"
+    assert item["modeling_next_action"] == "Reauthorize source"
 
 
 async def test_sources_overview_marks_resources_after_connection_disconnect(test_client, test_session):
@@ -336,12 +348,19 @@ async def test_sources_overview_next_actions_cover_warehouse_and_object_storage_
     assert databricks_item["family"] == "warehouses"
     assert databricks_item["parsed_asset_counts"]["tables"] == 1
     assert databricks_item["next_actions"] == ["Generate semantic model", "Open warehouse catalog"]
+    assert databricks_item["modeling_status"] == "supported"
+    assert databricks_item["modeling_mode"] == "warehouse"
+    assert databricks_item["modeling_next_action"] == "Generate semantic model"
+    assert databricks_item["modeling_can_load_profile"] is True
 
     tos_item = next(item for item in items if item["id"] == tos.json()["data"]["id"])
     assert tos_item["source_kind"] == "source_resource"
     assert tos_item["family"] == "object_storage"
     assert tos_item["provider"] == "volcengine_tos"
     assert tos_item["next_actions"] == ["Search evidence", "Review projection"]
+    assert tos_item["modeling_status"] == "needs_projection"
+    assert tos_item["modeling_mode"] == "projection"
+    assert tos_item["modeling_next_action"] == "Search evidence"
 
 
 async def test_sources_overview_marks_databricks_missing_oauth_as_authorization_required(test_client, test_session):
@@ -487,6 +506,10 @@ async def test_sources_overview_marks_sql_connection_without_schema_as_pending_p
     assert item["parse_status"] == "pending"
     assert item["parsed_asset_counts"]["tables"] == 0
     assert item["next_actions"] == ["Refresh schema profile"]
+    assert item["modeling_status"] == "processing"
+    assert item["modeling_mode"] == "relational"
+    assert item["modeling_next_action"] == "Refresh schema profile"
+    assert item["modeling_can_load_profile"] is False
 
 
 async def test_sources_overview_marks_sql_connection_invalid_schema_cache_as_failed(test_client, test_session):
@@ -602,6 +625,10 @@ async def test_sources_overview_counts_multi_database_sql_schema_tables(test_cli
     assert item["parse_status"] == "parsed"
     assert item["parsed_asset_counts"]["tables"] == 3
     assert item["next_actions"] == ["Generate semantic model"]
+    assert item["modeling_status"] == "supported"
+    assert item["modeling_mode"] == "relational"
+    assert item["modeling_evidence_summary"] == "3 tables; parse parsed; context unavailable"
+    assert item["modeling_can_load_profile"] is True
 
 
 async def test_sources_overview_object_storage_confirmation_uses_large_object_action(test_client, test_session):

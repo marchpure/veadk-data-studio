@@ -859,6 +859,18 @@ export type SourceOverviewFreshnessStatus = 'fresh' | 'stale' | 'unknown'
 export type SourceOverviewContextIndexStatus = 'pending' | 'indexing' | 'indexed' | 'failed' | 'unavailable'
 export type SourceOverviewParseStatus = 'pending' | 'parsed' | 'failed'
 export type SourceOverviewVisibility = 'private' | 'workspace' | 'team' | 'public'
+export type SourceOverviewModelingStatus =
+  | 'supported'
+  | 'needs_projection'
+  | 'context_only'
+  | 'permission_required'
+  | 'reauthorization_required'
+  | 'source_unavailable'
+  | 'processing'
+  | 'failed'
+  | 'planned'
+  | 'unsupported'
+export type SourceOverviewModelingMode = 'relational' | 'warehouse' | 'projection' | 'context_assisted' | 'business_object' | 'event' | 'semantic_import'
 
 export interface SourceOverviewItem {
   id: string
@@ -895,6 +907,12 @@ export interface SourceOverviewItem {
   } | null
   visibility: SourceOverviewVisibility
   next_actions: string[]
+  modeling_status?: SourceOverviewModelingStatus
+  modeling_mode?: SourceOverviewModelingMode | null
+  modeling_reason?: string | null
+  modeling_next_action?: string | null
+  modeling_evidence_summary?: string | null
+  modeling_can_load_profile?: boolean
   created_at: string
   updated_at?: string | null
   counts_partial: boolean

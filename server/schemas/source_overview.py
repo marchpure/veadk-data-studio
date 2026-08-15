@@ -11,6 +11,27 @@ FreshnessStatus = Literal["fresh", "stale", "unknown"]
 ContextIndexStatus = Literal["pending", "indexing", "indexed", "failed", "unavailable"]
 ParseStatus = Literal["pending", "parsed", "failed"]
 SourceVisibility = Literal["private", "workspace", "team", "public"]
+ModelingStatus = Literal[
+    "supported",
+    "needs_projection",
+    "context_only",
+    "permission_required",
+    "reauthorization_required",
+    "source_unavailable",
+    "processing",
+    "failed",
+    "planned",
+    "unsupported",
+]
+ModelingMode = Literal[
+    "relational",
+    "warehouse",
+    "projection",
+    "context_assisted",
+    "business_object",
+    "event",
+    "semantic_import",
+]
 
 
 class SourceOwner(BaseModel):
@@ -54,6 +75,12 @@ class SourceOverviewItem(BaseModel):
     owner: SourceOwner | None = None
     visibility: SourceVisibility
     next_actions: list[str] = Field(default_factory=list)
+    modeling_status: ModelingStatus = "unsupported"
+    modeling_mode: ModelingMode | None = None
+    modeling_reason: str | None = None
+    modeling_next_action: str | None = None
+    modeling_evidence_summary: str | None = None
+    modeling_can_load_profile: bool = False
     created_at: str
     updated_at: str | None = None
     counts_partial: bool = True

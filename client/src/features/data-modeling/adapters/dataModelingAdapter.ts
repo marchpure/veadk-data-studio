@@ -246,6 +246,19 @@ export function sourceOverviewToModelingDatasource(item: SourceOverviewItem): Da
     contextIndexStatus: item.context_index_status,
     parseStatus: item.parse_status,
   }
+  if (item.modeling_status) {
+    return {
+      ...base,
+      modelingStatus: item.modeling_status,
+      modelingMode: item.modeling_mode ?? modeForFamily(item),
+      reason: item.modeling_reason ?? undefined,
+      evidenceSummary: item.modeling_evidence_summary ?? undefined,
+      nextActions: item.modeling_next_action
+        ? [item.modeling_next_action, ...base.nextActions.filter(action => action !== item.modeling_next_action)]
+        : base.nextActions,
+      canLoadProfile: Boolean(item.modeling_can_load_profile),
+    }
+  }
   const blocked = sourceOverviewBlocker(item)
   if (blocked) {
     return {
@@ -253,6 +266,7 @@ export function sourceOverviewToModelingDatasource(item: SourceOverviewItem): Da
       modelingStatus: blocked.status,
       modelingMode: modeForFamily(item),
       reason: blocked.reason,
+      evidenceSummary: localEvidenceSummary(item),
       canLoadProfile: false,
     }
   }
@@ -263,6 +277,7 @@ export function sourceOverviewToModelingDatasource(item: SourceOverviewItem): Da
       modelingStatus: 'supported',
       modelingMode: 'relational',
       reason: 'Schema/profile evidence can be used to generate a production semantic model.',
+      evidenceSummary: localEvidenceSummary(item),
       canLoadProfile: true,
     }
   }
@@ -273,6 +288,7 @@ export function sourceOverviewToModelingDatasource(item: SourceOverviewItem): Da
       modelingStatus: 'supported',
       modelingMode: 'warehouse',
       reason: 'Warehouse catalog/profile evidence can be used to generate a production semantic model.',
+      evidenceSummary: localEvidenceSummary(item),
       canLoadProfile: true,
     }
   }
@@ -285,6 +301,7 @@ export function sourceOverviewToModelingDatasource(item: SourceOverviewItem): Da
       reason: item.projected_dataset_id
         ? 'Review and confirm the projected dataset before production semantic modeling.'
         : 'Detect and confirm a tabular projection before production semantic modeling.',
+      evidenceSummary: localEvidenceSummary(item),
       canLoadProfile: false,
     }
   }
@@ -295,6 +312,7 @@ export function sourceOverviewToModelingDatasource(item: SourceOverviewItem): Da
       modelingStatus: 'context_only',
       modelingMode: 'context_assisted',
       reason: contextOnlyReason(item),
+      evidenceSummary: localEvidenceSummary(item),
       canLoadProfile: false,
     }
   }
@@ -304,6 +322,7 @@ export function sourceOverviewToModelingDatasource(item: SourceOverviewItem): Da
     modelingStatus: 'unsupported',
     modelingMode: modeForFamily(item),
     reason: unsupportedReasonForFamily(item),
+    evidenceSummary: localEvidenceSummary(item),
     canLoadProfile: false,
   }
 }
@@ -455,6 +474,18 @@ function isProjectionResourceType(resourceType: string): boolean {
 
 function hasParsedTables(item: SourceOverviewItem): boolean {
   return Number(item.parsed_asset_counts?.tables ?? 0) > 0
+}
+
+function localEvidenceSummary(item: SourceOverviewItem): string {
+  const counts = item.parsed_asset_counts ?? { blocks: 0, tables: 0, files: 0, evidence: 0 }
+  const parts: string[] = []
+  if (counts.tables) parts.push(`${counts.tables} table${counts.tables === 1 ? '' : 's'}`)
+  if (counts.files) parts.push(`${counts.files} file${counts.files === 1 ? '' : 's'}`)
+  if (counts.evidence) parts.push(`${counts.evidence} evidence fragment${counts.evidence === 1 ? '' : 's'}`)
+  if (parts.length === 0) parts.push('no profile or evidence yet')
+  parts.push(`parse ${item.parse_status}`)
+  parts.push(`context ${item.context_index_status}`)
+  return parts.join('; ')
 }
 
 function hasIndexedEvidence(item: SourceOverviewItem): boolean {

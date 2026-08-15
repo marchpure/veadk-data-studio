@@ -39,6 +39,7 @@ export interface DataModelingDatasource {
   modelingStatus: DataModelingStatus
   modelingMode?: DataModelingMode
   reason?: string
+  evidenceSummary?: string
   nextActions: string[]
   sourceFamily: SourceOverviewFamily
   provider?: string

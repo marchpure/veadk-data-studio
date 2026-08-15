@@ -206,6 +206,12 @@ type SourceOverviewItem = {
   }
   visibility: 'private' | 'workspace' | 'team' | 'public'
   next_actions?: string[]
+  modeling_status?: 'supported' | 'needs_projection' | 'context_only' | 'permission_required' | 'reauthorization_required' | 'source_unavailable' | 'processing' | 'failed' | 'planned' | 'unsupported'
+  modeling_mode?: 'relational' | 'warehouse' | 'projection' | 'context_assisted' | 'business_object' | 'event' | 'semantic_import'
+  modeling_reason?: string
+  modeling_next_action?: string
+  modeling_evidence_summary?: string
+  modeling_can_load_profile?: boolean
   created_at: string
   updated_at?: string
 }
@@ -228,6 +234,7 @@ Current implementation:
 - `consumer_counts.semantic_models`, notebooks, dashboards, and analysis artifacts are populated from current model/notebook references where available. Dashboard inventory counts include both legacy HTML dashboards and AnalysisArtifact-backed dashboard apps created from consuming notebooks; MCP counts remain `0` with `counts_partial: true` until tool bindings become first-class records.
 - `next_actions` is populated for connection, dataset, and source-resource rows so the inventory can point users toward reauthorization, retry, evidence search, projection review, schema refresh, or semantic model generation without opening a detail page first.
 - Source-resource rows expose `raw_artifact_uri` from the latest immutable snapshot so Source detail can verify where the captured artifact lives without expanding PostgreSQL into raw/chunk/vector storage.
+- `SourceOverviewItem` now exposes a backend-derived Data Modeling handoff: `modeling_status`, `modeling_mode`, `modeling_reason`, `modeling_next_action`, `modeling_evidence_summary`, and `modeling_can_load_profile`. The Data Modeling picker consumes these fields first and only falls back to local inference for older responses, so connectors can publish one Source contract instead of relying on page-specific family heuristics.
 - Source-resource projection counts fall back from current sync config to the latest snapshot metadata and projection manifest, so CSV/Excel/Sheet/Base/object-storage projections still show table/file counts after reindex, snapshot reuse, or metadata-only migration paths.
 - Frontend API types and `useSourceOverview()` are available.
 - `client/src/pages/Databases.tsx` now renders the Sources inventory from `SourceOverviewItem` instead of the legacy datasource card list.

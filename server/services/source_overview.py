@@ -72,6 +72,16 @@ class _ConnectionHealth:
     next_actions: list[str] | None = None
 
 
+@dataclass(frozen=True)
+class _ModelingHandoff:
+    status: str
+    mode: str | None = None
+    reason: str | None = None
+    next_action: str | None = None
+    evidence_summary: str | None = None
+    can_load_profile: bool = False
+
+
 class SourceOverviewService:
     async def list_overview(
         self,
@@ -318,7 +328,7 @@ class SourceOverviewService:
             status = health.status
             table_count = self._schema_table_count(dataset.connection.schema_cache)
             has_schema = table_count > 0
-            return SourceOverviewItem(
+            item = SourceOverviewItem(
                 id=str(dataset.id),
                 source_kind="connection",
                 connection_id=connection_id,
@@ -347,6 +357,7 @@ class SourceOverviewService:
                 created_at=self._isoformat(dataset.created_at) or "",
                 updated_at=self._isoformat(updated_at),
             )
+            return self._with_modeling_handoff(item)
 
         if dataset.type != "file":
             return None
@@ -358,7 +369,7 @@ class SourceOverviewService:
             semantic_keys={str(dataset.id)},
             notebook_ids=notebooks,
         )
-        return SourceOverviewItem(
+        item = SourceOverviewItem(
             id=str(dataset.id),
             source_kind="dataset",
             connection_id=str(dataset.connection_id) if dataset.connection_id else None,
@@ -387,6 +398,7 @@ class SourceOverviewService:
             created_at=self._isoformat(dataset.created_at) or "",
             updated_at=self._isoformat(updated_at),
         )
+        return self._with_modeling_handoff(item)
 
     def _source_resource_item(
         self,
@@ -419,7 +431,7 @@ class SourceOverviewService:
             notebook_ids=notebooks,
         )
 
-        return SourceOverviewItem(
+        item = SourceOverviewItem(
             id=str(resource.id),
             source_kind="source_resource",
             connection_id=str(resource.source_connection_id) if resource.source_connection_id else None,
@@ -456,6 +468,7 @@ class SourceOverviewService:
             created_at=self._isoformat(resource.created_at) or "",
             updated_at=self._isoformat(resource.updated_at),
         )
+        return self._with_modeling_handoff(item)
 
     def _effective_source_resource_status(
         self,
@@ -800,6 +813,238 @@ class SourceOverviewService:
         if isinstance(manifest, dict):
             projection = {**manifest, **projection}
         return projection
+
+    def _with_modeling_handoff(self, item: SourceOverviewItem) -> SourceOverviewItem:
+        handoff = self._modeling_handoff(item)
+        return item.model_copy(
+            update={
+                "modeling_status": handoff.status,
+                "modeling_mode": handoff.mode,
+                "modeling_reason": handoff.reason,
+                "modeling_next_action": handoff.next_action,
+                "modeling_evidence_summary": handoff.evidence_summary,
+                "modeling_can_load_profile": handoff.can_load_profile,
+            }
+        )
+
+    def _modeling_handoff(self, item: SourceOverviewItem) -> _ModelingHandoff:
+        blocked = self._modeling_blocker(item)
+        if blocked is not None:
+            return blocked
+
+        if item.family == "databases":
+            return _ModelingHandoff(
+                status="supported",
+                mode="relational",
+                reason="Schema/profile evidence can be used to generate a production semantic model.",
+                next_action=item.next_actions[0] if item.next_actions else "Generate semantic model",
+                evidence_summary=self._modeling_evidence_summary(item),
+                can_load_profile=True,
+            )
+        if item.family == "warehouses":
+            return _ModelingHandoff(
+                status="supported",
+                mode="warehouse",
+                reason="Warehouse catalog/profile evidence can be used to generate a production semantic model.",
+                next_action=item.next_actions[0] if item.next_actions else "Generate semantic model",
+                evidence_summary=self._modeling_evidence_summary(item),
+                can_load_profile=True,
+            )
+        if self._is_projection_source(item):
+            return _ModelingHandoff(
+                status="needs_projection",
+                mode="projection",
+                reason=(
+                    "Review and confirm the projected dataset before production semantic modeling."
+                    if item.projected_dataset_id
+                    else "Detect and confirm a tabular projection before production semantic modeling."
+                ),
+                next_action=item.next_actions[0] if item.next_actions else "Review projection",
+                evidence_summary=self._modeling_evidence_summary(item),
+                can_load_profile=False,
+            )
+        if self._is_context_source(item):
+            return _ModelingHandoff(
+                status="context_only",
+                mode="context_assisted",
+                reason=self._context_only_reason(item),
+                next_action=item.next_actions[0] if item.next_actions else "Search evidence",
+                evidence_summary=self._modeling_evidence_summary(item),
+                can_load_profile=False,
+            )
+
+        return _ModelingHandoff(
+            status="unsupported",
+            mode=self._modeling_mode_for_item(item),
+            reason=self._unsupported_modeling_reason(item),
+            next_action=item.next_actions[0] if item.next_actions else "Open source detail",
+            evidence_summary=self._modeling_evidence_summary(item),
+            can_load_profile=False,
+        )
+
+    def _modeling_blocker(self, item: SourceOverviewItem) -> _ModelingHandoff | None:
+        status = item.status.strip().lower()
+        next_action = item.next_actions[0] if item.next_actions else None
+        if status in {"authorization required", "reauthorization required"}:
+            return _ModelingHandoff(
+                status="reauthorization_required",
+                mode=self._modeling_mode_for_item(item),
+                reason=(
+                    "Reauthorize this source before it can feed semantic modeling."
+                    if status == "reauthorization required"
+                    else "Connect or reauthorize this source before it can feed semantic modeling."
+                ),
+                next_action=next_action or "Reauthorize source",
+                evidence_summary=self._modeling_evidence_summary(item),
+            )
+        if status == "permission lost":
+            return _ModelingHandoff(
+                status="permission_required",
+                mode=self._modeling_mode_for_item(item),
+                reason="Restore upstream permissions before this source can feed semantic modeling.",
+                next_action=next_action or "Review resource permissions",
+                evidence_summary=self._modeling_evidence_summary(item),
+            )
+        if status == "source unavailable":
+            return _ModelingHandoff(
+                status="source_unavailable",
+                mode=self._modeling_mode_for_item(item),
+                reason="The upstream source is unavailable. Retry sync or check the upstream resource.",
+                next_action=next_action or "Retry sync",
+                evidence_summary=self._modeling_evidence_summary(item),
+            )
+        if status == "failed":
+            return _ModelingHandoff(
+                status="failed",
+                mode=self._modeling_mode_for_item(item),
+                reason=(
+                    "Parser failed. Review parser warnings and retry sync before modeling."
+                    if item.parse_status == "failed"
+                    else "Source processing failed. Retry sync before modeling."
+                ),
+                next_action=next_action or "Retry sync",
+                evidence_summary=self._modeling_evidence_summary(item),
+            )
+        if status == "needs confirmation":
+            return _ModelingHandoff(
+                status="needs_projection",
+                mode=self._modeling_mode_for_item(item),
+                reason=self._needs_confirmation_modeling_reason(item),
+                next_action=next_action or "Confirm resource selection",
+                evidence_summary=self._modeling_evidence_summary(item),
+            )
+        if item.context_index_status == "failed" and self._is_context_source(item):
+            return _ModelingHandoff(
+                status="failed",
+                mode="context_assisted",
+                reason="Context indexing failed. Retry indexing before using this source as modeling evidence.",
+                next_action=next_action or "Retry context indexing",
+                evidence_summary=self._modeling_evidence_summary(item),
+            )
+        if item.parse_status == "failed":
+            return _ModelingHandoff(
+                status="failed",
+                mode=self._modeling_mode_for_item(item),
+                reason="Parsing failed. Review parser warnings and retry sync before modeling.",
+                next_action=next_action or "Retry sync",
+                evidence_summary=self._modeling_evidence_summary(item),
+            )
+        if status in {"pending", "syncing", "analyzing"}:
+            return _ModelingHandoff(
+                status="processing",
+                mode=self._modeling_mode_for_item(item),
+                reason=self._pending_modeling_reason(item),
+                next_action=next_action or "Wait for processing",
+                evidence_summary=self._modeling_evidence_summary(item),
+            )
+        if status == "planned" or any("request access" in action.lower() for action in item.next_actions):
+            return _ModelingHandoff(
+                status="planned",
+                mode=self._modeling_mode_for_item(item),
+                reason="This connector is not production-ready yet. Request access or use an available Source family.",
+                next_action=next_action or "Request access",
+                evidence_summary=self._modeling_evidence_summary(item),
+            )
+        return None
+
+    def _pending_modeling_reason(self, item: SourceOverviewItem) -> str:
+        actions = [action.lower() for action in item.next_actions]
+        if item.family in {"databases", "warehouses"}:
+            if any("refresh schema profile" in action for action in actions):
+                return "Refresh the schema/profile before this source can feed production semantic modeling."
+            return "Database schema/profile is not ready yet. Refresh the profile before modeling."
+        return "Source processing is still running. Wait until processing finishes before modeling."
+
+    def _needs_confirmation_modeling_reason(self, item: SourceOverviewItem) -> str:
+        actions = [action.lower() for action in item.next_actions]
+        if item.family == "object_storage" and any("confirm large object sync" in action for action in actions):
+            return "Confirm large object sync before Data Modeling can profile, project, or index this object."
+        if self._is_projection_source(item):
+            return "Confirm the projected dataset before production semantic modeling."
+        if self._is_context_source(item):
+            return "Confirm the selected resource before using it as modeling evidence."
+        return "Confirm the selected resource before modeling."
+
+    def _context_only_reason(self, item: SourceOverviewItem) -> str:
+        if item.context_index_status == "pending":
+            return "Context indexing is pending. Once indexed, this source can support definitions, policies, and evidence, but not production metric facts."
+        if item.context_index_status == "indexing":
+            return "Context indexing is still running. This source can support modeling evidence after indexing, but not production metric facts."
+        if item.context_index_status == "unavailable":
+            return "No context index is available yet. Add context indexing before using this source as modeling evidence."
+        return "Indexed context can support definitions, policies, and evidence, but cannot be the production fact source for metrics."
+
+    def _unsupported_modeling_reason(self, item: SourceOverviewItem) -> str:
+        if item.family in {"saas", "api"}:
+            return "SaaS/API sources need a business object contract before production semantic modeling."
+        return "This source family does not yet expose a production modeling handoff contract."
+
+    def _modeling_mode_for_item(self, item: SourceOverviewItem) -> str | None:
+        if item.family == "databases":
+            return "relational"
+        if item.family == "warehouses":
+            return "warehouse"
+        if self._is_projection_source(item):
+            return "projection"
+        if self._is_context_source(item):
+            return "context_assisted"
+        if item.family in {"saas", "api"}:
+            return "business_object"
+        return None
+
+    def _is_projection_source(self, item: SourceOverviewItem) -> bool:
+        return bool(item.projected_dataset_id) or item.parsed_asset_counts.tables > 0 or item.resource_type in {
+            "csv",
+            "excel",
+            "xlsx",
+            "xlsm",
+            "feishu_sheet",
+            "feishu_base",
+            "extracted_table",
+        }
+
+    def _is_context_source(self, item: SourceOverviewItem) -> bool:
+        if item.family in {"documents", "web"}:
+            return True
+        if item.resource_type in {"file", "pdf", "web", "feishu_doc", "feishu_wiki", "tos_bucket", "tos_prefix", "tos_object"}:
+            return item.context_index_status == "indexed" and item.parsed_asset_counts.evidence > 0
+        return item.context_index_status == "indexed" and item.parsed_asset_counts.evidence > 0
+
+    def _modeling_evidence_summary(self, item: SourceOverviewItem) -> str:
+        parts: list[str] = []
+        if item.parsed_asset_counts.tables:
+            parts.append(f"{item.parsed_asset_counts.tables} table{'s' if item.parsed_asset_counts.tables != 1 else ''}")
+        if item.parsed_asset_counts.files:
+            parts.append(f"{item.parsed_asset_counts.files} file{'s' if item.parsed_asset_counts.files != 1 else ''}")
+        if item.parsed_asset_counts.evidence:
+            parts.append(
+                f"{item.parsed_asset_counts.evidence} evidence fragment{'s' if item.parsed_asset_counts.evidence != 1 else ''}"
+            )
+        if not parts:
+            parts.append("no profile or evidence yet")
+        parts.append(f"parse {item.parse_status}")
+        parts.append(f"context {item.context_index_status}")
+        return "; ".join(parts)
 
     def _semantic_count(self, consumer_index: _ConsumerIndex, ids: set[str]) -> int:
         return sum(consumer_index.semantic_by_id.get(item_id, 0) for item_id in ids)

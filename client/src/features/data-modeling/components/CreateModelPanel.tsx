@@ -278,6 +278,11 @@ function DatasourceStep({
                   Next: {item.nextActions[0]}
                 </div>
               )}
+              {item.evidenceSummary && (
+                <div className="mt-2 text-[11px] text-[#7f8a93]">
+                  Evidence: {item.evidenceSummary}
+                </div>
+              )}
             </button>
           )})}
         </div>
@@ -319,6 +324,11 @@ function DatasourceStep({
                     {selectedDatasource.nextActions.length > 0 && (
                       <div className="mt-2 text-xs font-medium text-amber-100/80">
                         Next: {selectedDatasource.nextActions[0]}
+                      </div>
+                    )}
+                    {selectedDatasource.evidenceSummary && (
+                      <div className="mt-2 text-xs text-amber-100/70">
+                        Evidence: {selectedDatasource.evidenceSummary}
                       </div>
                     )}
                   </div>
