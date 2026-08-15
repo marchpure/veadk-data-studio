@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from server.models.source_connections import SourceConnection
 from server.models.source_resources import SourceResource
@@ -181,9 +182,7 @@ class SourceConnectionService:
                 ),
             )
         except ConnectorError as error:
-            if connection.provider == "feishu" and error.code == "reauthorization_required":
-                connection.status = "reauthorization_required"
-                await session.commit()
+            await self._mark_connection_error(session=session, connection=connection, error=error)
             raise
         return {
             "items": [item.to_payload() for item in result.items],
@@ -221,8 +220,12 @@ class SourceConnectionService:
         )
         already_added = frozenset(str(item) for item in existing_result.scalars().all() if item)
         adapter = adapter or FeishuConnectorAdapter()
-        access_token = await adapter.ensure_access_token(session=session, connection=connection)
-        item = await adapter.locate_resource_from_url(access_token=access_token, url=url, already_added=already_added)
+        try:
+            access_token = await adapter.ensure_access_token(session=session, connection=connection)
+            item = await adapter.locate_resource_from_url(access_token=access_token, url=url, already_added=already_added)
+        except ConnectorError as error:
+            await self._mark_connection_error(session=session, connection=connection, error=error)
+            raise
         return {
             "item": item.to_payload(),
             "connection_status": connection.status,
@@ -313,6 +316,35 @@ class SourceConnectionService:
             "created_at": connection.created_at,
             "updated_at": connection.updated_at,
         }
+
+    async def _mark_connection_error(
+        self,
+        *,
+        session: AsyncSession,
+        connection: SourceConnection,
+        error: ConnectorError,
+    ) -> None:
+        connection.status = self._connection_status_for_connector_error(error)
+        capabilities = dict(connection.capabilities_json or {})
+        capabilities["last_error"] = {
+            "code": error.code,
+            "message": str(error),
+            "permanent": error.permanent,
+            "stage": "resource_picker",
+            "recorded_at": datetime.utcnow().isoformat(),
+        }
+        connection.capabilities_json = capabilities
+        flag_modified(connection, "capabilities_json")
+        await session.commit()
+
+    def _connection_status_for_connector_error(self, error: ConnectorError) -> str:
+        if error.code in {"authorization_required", "missing_token"}:
+            return "authorization_required"
+        if error.code in {"reauthorization_required", "invalid_state"}:
+            return "reauthorization_required"
+        if error.code in {"permission_lost", "source_unavailable"}:
+            return "failed"
+        return "failed"
 
     async def decrypted_redacted_credentials(
         self,

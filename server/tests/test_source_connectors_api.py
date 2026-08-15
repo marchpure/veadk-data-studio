@@ -2020,3 +2020,60 @@ async def test_feishu_resource_listing_persists_reauthorization_required(test_se
     assert error.value.code == "reauthorization_required"
     await test_session.refresh(connection)
     assert connection.status == "reauthorization_required"
+    assert connection.capabilities_json["last_error"]["code"] == "reauthorization_required"
+    assert connection.capabilities_json["last_error"]["stage"] == "resource_picker"
+
+
+async def test_tos_resource_listing_persists_picker_permission_failure(test_session):
+    tenant = await _tenant(test_session)
+    encrypted = await CryptoService.encrypt_config(
+        {
+            "endpoint": "https://tos-cn-beijing.volces.com",
+            "region": "cn-beijing",
+            "access_key_id": "tos-ak",
+            "secret_access_key": "tos-secret",
+        },
+        test_session,
+    )
+    connection = SourceConnection(
+        tenant_id=tenant.id,
+        provider="volcengine_tos",
+        auth_mode="access_key",
+        encrypted_credentials=encrypted,
+        external_account_id="tos-account-1",
+        display_name="经营分析 TOS",
+        status="connected",
+        capabilities_json={"bucket_count": 1},
+        created_by=tenant.owner_id,
+    )
+    test_session.add(connection)
+    await test_session.commit()
+
+    class PermissionDeniedAdapter(FakeConnectorAdapter):
+        async def list_resources(self, *, session, input):
+            raise ConnectorError("TOS permission denied", code="permission_lost", permanent=True)
+
+    with pytest.raises(ConnectorError) as error:
+        await SourceConnectionService().list_resources(
+            session=test_session,
+            tenant_id=tenant.id,
+            connection_id=connection.id,
+            scope="children",
+            parent_token="sales-bucket/reports/",
+            resource_type=None,
+            query=None,
+            page_token=None,
+            page_size=50,
+            adapter=PermissionDeniedAdapter(),
+        )
+
+    assert error.value.code == "permission_lost"
+    await test_session.refresh(connection)
+    assert connection.status == "failed"
+    assert connection.capabilities_json["last_error"]["code"] == "permission_lost"
+    assert connection.capabilities_json["last_error"]["message"] == "TOS permission denied"
+    assert connection.capabilities_json["last_error"]["stage"] == "resource_picker"
+    payload = SourceConnectionService().connection_payload(connection)
+    assert payload["status"] == "failed"
+    assert payload["capabilities"]["last_error"]["code"] == "permission_lost"
+    assert payload["capabilities"]["last_error"]["stage"] == "resource_picker"
