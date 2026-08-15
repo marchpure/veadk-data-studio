@@ -530,6 +530,32 @@ export function useSyncSourceResource() {
   })
 }
 
+export function useDeleteSourceResource() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (resourceId: string): Promise<void> => {
+      return ApiService.deleteSourceResource(resourceId)
+    },
+    onSuccess: (_data, resourceId) => {
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.sourceResource(resourceId) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.processing(resourceId) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.snapshots(resourceId) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.parsedAssets(resourceId) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.lineage(resourceId) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.consumers(resourceId) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.knowledgeSearches(resourceId) })
+      queryClient.invalidateQueries({ queryKey: ['source-resources'] })
+      queryClient.invalidateQueries({ queryKey: ['datasources'] })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
+      showToast.success('Source removed from active inventory')
+    },
+    onError: (error: Error) => {
+      showToast.error(`Failed to remove source: ${error.message}`)
+    },
+  })
+}
+
 export function useRefreshSourceOverviewConnectionSchema() {
   const queryClient = useQueryClient()
 

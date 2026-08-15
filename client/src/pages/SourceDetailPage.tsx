@@ -1,10 +1,11 @@
-import { Link, useParams } from 'react-router-dom'
-import { AlertCircle, ArrowLeft, CheckCircle2, Clock, Database, FileText, Loader2, Network, RefreshCw, ShieldAlert } from 'lucide-react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { AlertCircle, ArrowLeft, CheckCircle2, Clock, Database, FileText, Loader2, Network, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Button } from '../components/ui/button'
 import { Card } from '../components/ui/card'
 import { Input } from '../components/ui/input'
 import {
+  useDeleteSourceResource,
   useKnowledgeSearch,
   useRefreshSourceOverviewConnectionSchema,
   useSourceResource,
@@ -70,9 +71,12 @@ const processingIndex = (resource?: SourceResource, processing?: SourceResourceP
 
 export default function SourceDetailPage() {
   const { sourceId } = useParams()
+  const navigate = useNavigate()
   const [evidenceQuery, setEvidenceQuery] = useState('')
+  const [removeConfirmation, setRemoveConfirmation] = useState('')
   const overviewQuery = useSourceOverviewItem(sourceId)
   const syncResourceMutation = useSyncSourceResource()
+  const deleteResourceMutation = useDeleteSourceResource()
   const refreshConnectionSchemaMutation = useRefreshSourceOverviewConnectionSchema()
   const overview = overviewQuery.data
   const isSourceResource = overview?.source_kind === 'source_resource'
@@ -175,6 +179,7 @@ export default function SourceDetailPage() {
   }
   const canRetrySync = Boolean(sourceResource.source_connection_id || (sourceResource.resource_type === 'web' && sourceResource.source_url))
   const retrySyncLabel = sourceResource.status === 'ready' ? 'Reindex source' : 'Retry sync'
+  const canRemoveSource = removeConfirmation.trim() === sourceResource.name.trim()
   const handleRetrySync = () => {
     syncResourceMutation.mutate({
       resourceId: sourceResource.id,
@@ -183,6 +188,11 @@ export default function SourceDetailPage() {
           trigger: 'source_detail_retry',
         },
       },
+    })
+  }
+  const handleRemoveSource = () => {
+    deleteResourceMutation.mutate(sourceResource.id, {
+      onSuccess: () => navigate('/sources'),
     })
   }
 
@@ -418,7 +428,32 @@ export default function SourceDetailPage() {
             <KeyValue label="Provider status" value={sourceResource.knowledge_resource?.provider_status || sourceResource.knowledge_resource?.index_status || 'Unavailable'} />
             <KeyValue label="Last indexed" value={formatDate(sourceResource.knowledge_resource?.last_indexed_at)} />
             <KeyValue label="Retrieval debug URI" value={sourceResource.knowledge_resource?.retrieval_debug_uri || '-'} />
-            <KeyValue label="Delete behavior" value="Deleting a source keeps lineage explicit and removes it from the active Sources inventory." />
+            <div className="mt-4 rounded border border-red-900/40 bg-red-950/10 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-red-100">Remove source from inventory</div>
+                  <p className="mt-1 text-xs text-red-100/70">
+                    This writes a deletion marker, preserves lineage evidence, and removes the source from the active Sources inventory.
+                  </p>
+                  <Input
+                    value={removeConfirmation}
+                    onChange={event => setRemoveConfirmation(event.target.value)}
+                    placeholder={`Type ${sourceResource.name} to confirm`}
+                    className="mt-3 border-red-900/50 bg-[#1a1a1a] text-white placeholder-red-100/35"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  disabled={!canRemoveSource || deleteResourceMutation.isPending}
+                  onClick={handleRemoveSource}
+                >
+                  {deleteResourceMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                  {deleteResourceMutation.isPending ? 'Removing...' : 'Remove source'}
+                </Button>
+              </div>
+            </div>
             <KeyValue label="Reindex behavior" value="Retry sync from the source connector to generate a new snapshot and context state." />
             {sourceResource.knowledge_resource?.provider_error && (
               <div className="mt-4 rounded border border-red-900/40 bg-red-950/20 p-3 text-sm text-red-100">
