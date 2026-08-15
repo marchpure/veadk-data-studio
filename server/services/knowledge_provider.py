@@ -16,6 +16,46 @@ from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
 
 
+NATIVE_PROVIDER_NAMES = {"byaan-native", "native", "local"}
+OPENVIKING_PROVIDER_NAMES = {"openviking", "open-viking"}
+COMMERCIAL_PROVIDER_MODES = {"commercial", "production", "prod", "enterprise"}
+
+
+def _env_truthy(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _native_provider_required_external_reason() -> str | None:
+    if _env_truthy("KNOWLEDGE_PROVIDER_ALLOW_NATIVE"):
+        return None
+
+    if _env_truthy("KNOWLEDGE_PROVIDER_REQUIRE_EXTERNAL"):
+        return "KNOWLEDGE_PROVIDER_REQUIRE_EXTERNAL is enabled"
+
+    provider_mode = os.getenv("KNOWLEDGE_PROVIDER_MODE", "").strip().lower()
+    if provider_mode in COMMERCIAL_PROVIDER_MODES:
+        return f"KNOWLEDGE_PROVIDER_MODE={provider_mode}"
+
+    app_mode = os.getenv("APP_MODE", "desktop").strip().lower()
+    if app_mode == "self-hosted":
+        return "APP_MODE=self-hosted"
+
+    return None
+
+
+def _raise_native_provider_not_allowed(reason: str) -> None:
+    raise RuntimeError(
+        "NativeKnowledgeProvider is a local/dev fallback that stores evidence text in the control database. "
+        f"It is disabled because {reason}. "
+        "Configure KNOWLEDGE_PROVIDER=openviking or another external provider for commercial ingestion. "
+        "Set KNOWLEDGE_PROVIDER_ALLOW_NATIVE=true only for explicit local diagnostics or migration drills."
+    )
+
+
+def default_knowledge_provider_name() -> str:
+    return (os.getenv("KNOWLEDGE_PROVIDER") or "byaan-native").strip().lower()
+
+
 def stable_hash(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -469,9 +509,19 @@ class OpenVikingKnowledgeProvider:
 
 
 def get_knowledge_provider(name: str | None = None) -> KnowledgeProvider:
-    selected = (name or os.getenv("KNOWLEDGE_PROVIDER") or "byaan-native").strip().lower()
-    if selected in {"openviking", "open-viking"}:
+    selected = (name or default_knowledge_provider_name()).strip().lower()
+    if selected in OPENVIKING_PROVIDER_NAMES:
         return OpenVikingKnowledgeProvider()
-    # Native is the local/dev fallback. Commercial deployments should select an
-    # external provider through KNOWLEDGE_PROVIDER rather than expanding PG-backed evidence storage.
-    return NativeKnowledgeProvider()
+
+    if selected in NATIVE_PROVIDER_NAMES:
+        required_external_reason = _native_provider_required_external_reason()
+        if required_external_reason is not None:
+            _raise_native_provider_not_allowed(required_external_reason)
+        # Native is the local/dev fallback. Commercial deployments should select an
+        # external provider through KNOWLEDGE_PROVIDER rather than expanding PG-backed evidence storage.
+        return NativeKnowledgeProvider()
+
+    raise ValueError(
+        f"Unsupported KNOWLEDGE_PROVIDER '{selected}'. "
+        "Supported providers are: byaan-native, openviking."
+    )

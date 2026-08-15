@@ -581,6 +581,8 @@ Current implementation:
 - `KnowledgeProvider.search()` and `KnowledgeProvider.read()` now return provider-neutral evidence payloads instead of ORM `EvidenceFragment` rows. The native provider still materializes local/dev fallback evidence rows, but API callers consume the provider payload shape so an external provider can return equivalent evidence without leaking storage internals.
 - `NativeKnowledgeProvider` remains the default local/dev fallback and writes `byaan-native://...` context/debug URIs plus metadata that explicitly marks control-plane text storage as local fallback behavior.
 - `OpenVikingKnowledgeProvider` exists as a provider boundary selected by `KNOWLEDGE_PROVIDER=openviking`, but it fails fast until a real OpenViking client is configured. This keeps OpenViking behind `KnowledgeProvider` and prevents accidental use of OpenViking connectors as the Add Source layer.
+- Commercial/self-hosted deployments now fail fast if they would select `byaan-native`: `APP_MODE=self-hosted`, `KNOWLEDGE_PROVIDER_REQUIRE_EXTERNAL=true`, or `KNOWLEDGE_PROVIDER_MODE=commercial|production|prod|enterprise` require an external provider unless `KNOWLEDGE_PROVIDER_ALLOW_NATIVE=true` is set for an explicit local diagnostic or migration drill.
+- Connector-captured snapshots now follow the configured default `KnowledgeProvider` instead of hardcoding native evidence storage. Snapshot metadata keeps the source connector provider such as `web`, `feishu`, or `volcengine_tos`, and records the context backend separately as `knowledge_provider`.
 - No Add Source family or connector entry exposes OpenViking to ordinary users.
 
 Acceptance:

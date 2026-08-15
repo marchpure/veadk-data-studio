@@ -24,6 +24,7 @@ from server.auth.tenant_context import get_tenant_id, set_tenant_id
 from server.models.source_connections import FeishuOAuthFlow, SourceConnection
 from server.models.source_resources import SourceResource
 from server.services.crypto_service import CryptoService
+from server.services.knowledge_provider import default_knowledge_provider_name
 from server.services.settings import SettingsService
 from server.utils.custom_logger import get_logger
 
@@ -748,7 +749,7 @@ class FeishuConnectorAdapter:
                 "external_id": resource.external_id,
                 "source_url": resource.source_url,
             },
-            provider="byaan-native",
+            provider=default_knowledge_provider_name(),
             parser_version="feishu-openapi-v1",
             raw_storage_uri=f"feishu://{resource.resource_type}/{resource.external_id}",
         )
@@ -1234,7 +1235,7 @@ class TosConnectorAdapter:
             content_text=text,
             external_revision=metadata["etag"] or metadata["last_modified"],
             metadata=metadata,
-            provider="byaan-native",
+            provider=default_knowledge_provider_name(),
             parser_version=parser_version,
             raw_storage_uri=f"tos://{bucket}/{key}",
         )
@@ -1279,7 +1280,7 @@ class TosConnectorAdapter:
                 "object_count": len(rows),
                 "region": credentials.get("region"),
             },
-            provider="byaan-native",
+            provider=default_knowledge_provider_name(),
             parser_version="tos-prefix-listing-v1",
             raw_storage_uri=f"tos://{bucket}/{prefix}",
         )

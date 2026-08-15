@@ -17,7 +17,13 @@ from server.models.semantic_models import SemanticModel
 from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
 from server.models.tenant import Tenant
-from server.services.knowledge_provider import KnowledgeEvidence, KnowledgeSearchInput, get_knowledge_provider
+from server.services.knowledge_provider import (
+    KnowledgeEvidence,
+    KnowledgeSearchInput,
+    NativeKnowledgeProvider,
+    OpenVikingKnowledgeProvider,
+    get_knowledge_provider,
+)
 
 pytestmark = __import__("pytest").mark.asyncio
 
@@ -108,6 +114,66 @@ async def test_openviking_provider_factory_is_explicit_boundary(test_session):
             session=test_session,
             input=KnowledgeSearchInput(tenant_id=uuid4(), query="收入", limit=1),
         )
+
+
+async def test_native_provider_factory_remains_default_local_dev(monkeypatch):
+    monkeypatch.delenv("APP_MODE", raising=False)
+    monkeypatch.delenv("KNOWLEDGE_PROVIDER", raising=False)
+    monkeypatch.delenv("KNOWLEDGE_PROVIDER_MODE", raising=False)
+    monkeypatch.delenv("KNOWLEDGE_PROVIDER_REQUIRE_EXTERNAL", raising=False)
+    monkeypatch.delenv("KNOWLEDGE_PROVIDER_ALLOW_NATIVE", raising=False)
+
+    provider = get_knowledge_provider()
+
+    assert isinstance(provider, NativeKnowledgeProvider)
+    assert provider.provider == "byaan-native"
+
+
+async def test_external_provider_required_rejects_native_fallback(monkeypatch):
+    monkeypatch.delenv("APP_MODE", raising=False)
+    monkeypatch.setenv("KNOWLEDGE_PROVIDER_REQUIRE_EXTERNAL", "true")
+    monkeypatch.delenv("KNOWLEDGE_PROVIDER", raising=False)
+    monkeypatch.delenv("KNOWLEDGE_PROVIDER_ALLOW_NATIVE", raising=False)
+
+    with pytest.raises(RuntimeError, match="stores evidence text in the control database"):
+        get_knowledge_provider()
+
+
+async def test_self_hosted_rejects_native_fallback_by_default(monkeypatch):
+    monkeypatch.setenv("APP_MODE", "self-hosted")
+    monkeypatch.delenv("KNOWLEDGE_PROVIDER", raising=False)
+    monkeypatch.delenv("KNOWLEDGE_PROVIDER_REQUIRE_EXTERNAL", raising=False)
+    monkeypatch.delenv("KNOWLEDGE_PROVIDER_ALLOW_NATIVE", raising=False)
+
+    with pytest.raises(RuntimeError, match="APP_MODE=self-hosted"):
+        get_knowledge_provider("byaan-native")
+
+
+async def test_native_provider_can_be_explicitly_allowed_for_migration_drill(monkeypatch):
+    monkeypatch.setenv("APP_MODE", "self-hosted")
+    monkeypatch.setenv("KNOWLEDGE_PROVIDER_ALLOW_NATIVE", "true")
+
+    provider = get_knowledge_provider("byaan-native")
+
+    assert isinstance(provider, NativeKnowledgeProvider)
+
+
+async def test_commercial_mode_allows_explicit_openviking_provider(monkeypatch):
+    monkeypatch.setenv("KNOWLEDGE_PROVIDER_MODE", "commercial")
+    monkeypatch.delenv("KNOWLEDGE_PROVIDER_ALLOW_NATIVE", raising=False)
+
+    provider = get_knowledge_provider("open-viking")
+
+    assert isinstance(provider, OpenVikingKnowledgeProvider)
+
+
+async def test_unknown_knowledge_provider_does_not_silently_fallback_to_native(monkeypatch):
+    monkeypatch.delenv("APP_MODE", raising=False)
+    monkeypatch.delenv("KNOWLEDGE_PROVIDER_REQUIRE_EXTERNAL", raising=False)
+    monkeypatch.delenv("KNOWLEDGE_PROVIDER_ALLOW_NATIVE", raising=False)
+
+    with pytest.raises(ValueError, match="Unsupported KNOWLEDGE_PROVIDER"):
+        get_knowledge_provider("typo-provider")
 
 
 async def test_native_provider_search_returns_provider_neutral_evidence(test_client, test_session):
@@ -413,6 +479,7 @@ async def test_web_source_url_fetch_creates_snapshot_knowledge_and_search(test_c
     assert resource["latest_snapshot"]["metadata_json"]["source_resource_id"] == resource["id"]
     assert resource["latest_snapshot"]["metadata_json"]["source_connection_id"] is None
     assert resource["latest_snapshot"]["metadata_json"]["provider"] == "web"
+    assert resource["latest_snapshot"]["metadata_json"]["knowledge_provider"] == "byaan-native"
     assert resource["latest_snapshot"]["metadata_json"]["content_hash"] == resource["latest_snapshot"]["content_hash"]
     assert resource["knowledge_resource"]["evidence_count"] == 2
 

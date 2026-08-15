@@ -1470,6 +1470,48 @@ async def test_feishu_picker_mapping_and_wiki_resolution_contract():
     assert adapter._split_wiki_parent_token("7043731224849907715:wiki_node") == ("7043731224849907715", "wiki_node")
 
 
+async def test_feishu_captured_snapshot_uses_configured_knowledge_provider(test_session, monkeypatch):
+    tenant = await _tenant(test_session)
+    adapter = FeishuConnectorAdapter()
+    monkeypatch.setenv("KNOWLEDGE_PROVIDER", "openviking")
+    encrypted = await CryptoService.encrypt_config({"access_token": "access-token"}, test_session)
+    connection = SourceConnection(
+        tenant_id=tenant.id,
+        provider="feishu",
+        auth_mode="oauth",
+        encrypted_credentials=encrypted,
+        external_account_id="ou_feishu_1",
+        display_name="郝行军的飞书",
+        status="connected",
+        capabilities_json={"scopes": []},
+        token_expires_at=datetime.utcnow() + timedelta(hours=1),
+        created_by=tenant.owner_id,
+    )
+    resource = SourceResource(
+        tenant_id=tenant.id,
+        source_connection_id=connection.id,
+        resource_type="feishu_doc",
+        name="经营规则说明",
+        external_id="docx_token_1",
+        visibility="workspace",
+        sync_mode="manual",
+        status="pending",
+    )
+
+    async def fake_fetch_docx(*, access_token, document_id):
+        assert access_token == "access-token"
+        assert document_id == "docx_token_1"
+        return "收入定义：已支付订单净额。", {"document": {"title": "经营规则说明"}}, "rev-1"
+
+    monkeypatch.setattr(adapter, "_fetch_docx", fake_fetch_docx)
+
+    captured = await adapter.sync_resource(session=test_session, connection=connection, resource=resource)
+
+    assert captured.provider == "openviking"
+    assert captured.metadata["provider"] == "feishu"
+    assert captured.parser_version == "feishu-openapi-v1"
+
+
 async def test_feishu_quick_locate_parses_links_and_returns_picker_item_without_creating_resource(test_session, monkeypatch):
     tenant = await _tenant(test_session)
     adapter = FeishuConnectorAdapter()
@@ -1652,6 +1694,7 @@ async def test_tos_parser_contracts_cover_supported_formats_and_actionable_error
 
 
 async def test_tos_object_sync_maps_large_missing_and_permission_errors(monkeypatch):
+    monkeypatch.setenv("KNOWLEDGE_PROVIDER", "openviking")
     resource = SourceResource(
         tenant_id=uuid4(),
         resource_type="tos_object",
@@ -1675,6 +1718,8 @@ async def test_tos_object_sync_maps_large_missing_and_permission_errors(monkeypa
     assert captured.metadata["bucket"] == "sales-bucket"
     assert captured.metadata["key"] == "reports/revenue.csv"
     assert captured.metadata["version_id"] == "version-1"
+    assert captured.provider == "openviking"
+    assert captured.metadata["provider"] == "volcengine_tos"
 
     monkeypatch.setattr(adapter, "_client", lambda credentials: _FakeTosClient(mode="missing"))
     with pytest.raises(ConnectorError) as missing:

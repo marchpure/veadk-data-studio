@@ -34,7 +34,7 @@ class SourceResourceCreate(BaseModel):
         description="Optional caller-supplied text content. External connectors are not simulated when this is absent.",
     )
     external_revision: str | None = None
-    provider: str = "byaan-native"
+    provider: str | None = None
 
 
 class SourceResourceSelection(BaseModel):
@@ -59,7 +59,7 @@ class SourceResourceSyncRequest(BaseModel):
     content: str | None = None
     external_revision: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    provider: str = "byaan-native"
+    provider: str | None = None
 
 
 class SourceSnapshotRead(BaseModel):

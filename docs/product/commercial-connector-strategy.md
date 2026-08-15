@@ -111,6 +111,7 @@ Migration path from the current native provider:
 5. Store only evidence locators, hashes, and provider references in the control plane.
 6. Backfill existing native evidence into the external provider tenant by tenant.
 7. Gate production deployments so new source ingestion defaults to the external provider.
+8. Fail fast in commercial/self-hosted deployments when `byaan-native` would be selected. `APP_MODE=self-hosted`, `KNOWLEDGE_PROVIDER_REQUIRE_EXTERNAL=true`, or `KNOWLEDGE_PROVIDER_MODE=commercial|production|prod|enterprise` must require an external `KnowledgeProvider`; `KNOWLEDGE_PROVIDER_ALLOW_NATIVE=true` is only for explicit local diagnostics or migration drills.
 
 ## Why Byaan Owns Core Connectors
 
@@ -333,6 +334,8 @@ Commercial source ingestion should write to these stores:
 | Jobs and retries | Queue/Temporal/Celery/RQ-style worker system |
 
 The current native provider stores `EvidenceFragment.text` in the database. Treat that as a local/dev fallback, not the commercial path.
+
+Commercial deployments must select the context backend through `KNOWLEDGE_PROVIDER`. Connector-captured snapshots should record both identities separately: `metadata_json.provider` remains the source connector (`web`, `feishu`, `volcengine_tos`, etc.), while `metadata_json.knowledge_provider` records the context backend that indexed the snapshot.
 
 The first `SourceOverview` backend slice keeps this boundary: it exposes product-facing `context_index_status`, parse status, snapshot ids, evidence counts, projected dataset ids, and partial consumer counts, while keeping OpenViking/provider internals out of the Add Source and inventory surface.
 

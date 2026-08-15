@@ -30,7 +30,12 @@ from server.models.source_snapshots import SourceSnapshot
 from server.schemas.source_resources import SourceResourceCreate, SourceResourceImportRequest, SourceResourceSyncRequest
 from server.services.dataset_storage import DatasetStorageService
 from server.services.file_operations import DataFrameFileService
-from server.services.knowledge_provider import KnowledgeEvidence, get_knowledge_provider, stable_hash
+from server.services.knowledge_provider import (
+    KnowledgeEvidence,
+    default_knowledge_provider_name,
+    get_knowledge_provider,
+    stable_hash,
+)
 from server.services.source_connectors import (
     CapturedSnapshot,
     ConnectorError,
@@ -283,7 +288,7 @@ class SourceResourceService:
                     "size": len(data),
                     "fragment_hint": fragment_hint,
                 },
-                provider="byaan-native",
+                provider=default_knowledge_provider_name(),
                 parser_version=parser_version,
                 raw_storage_uri="pending://local-pdf-upload",
             )
@@ -301,7 +306,7 @@ class SourceResourceService:
                     "size": len(data),
                     "parse_error": {"code": exc.code, "message": str(exc), "permanent": exc.permanent},
                 },
-                provider="byaan-native",
+                provider=default_knowledge_provider_name(),
                 parser_version="pdf-upload-parse-failed-v1",
                 raw_storage_uri="pending://local-pdf-upload",
             )
@@ -917,8 +922,9 @@ class SourceResourceService:
         content: str,
         external_revision: str | None,
         metadata: dict[str, Any],
-        provider: str,
+        provider: str | None,
     ) -> SourceSnapshot:
+        knowledge_provider = (provider or default_knowledge_provider_name()).strip().lower()
         content_hash = stable_hash(content)
         existing_snapshot = await session.scalar(
             select(SourceSnapshot)
@@ -946,7 +952,7 @@ class SourceResourceService:
             metadata_json={
                 **metadata,
                 "content_size": len(content.encode("utf-8")),
-                "provider": provider,
+                "knowledge_provider": knowledge_provider,
                 "content_preview_hash": hashlib.sha256(content[:1024].encode("utf-8")).hexdigest(),
             },
             status="captured",
@@ -955,7 +961,7 @@ class SourceResourceService:
         await session.flush()
         resource.latest_snapshot_id = snapshot.id
 
-        provider_impl = get_knowledge_provider(provider)
+        provider_impl = get_knowledge_provider(knowledge_provider)
         ingest_result = await provider_impl.ingest(
             session=session,
             resource=resource,
@@ -1065,6 +1071,7 @@ class SourceResourceService:
                 await session.flush()
                 return existing_snapshot
 
+            knowledge_provider = captured.provider or default_knowledge_provider_name()
             snapshot = SourceSnapshot(
                 tenant_id=resource.tenant_id,
                 resource_id=resource.id,
@@ -1083,12 +1090,13 @@ class SourceResourceService:
                     "raw_size": len(captured.raw_bytes),
                     "content_size": len(captured.content_text.encode("utf-8")),
                     "content_preview_hash": hashlib.sha256(captured.content_text[:1024].encode("utf-8")).hexdigest(),
+                    "knowledge_provider": knowledge_provider,
                 },
                 status="captured",
             )
             session.add(snapshot)
             await session.flush()
-            provider_impl = get_knowledge_provider(captured.provider)
+            provider_impl = get_knowledge_provider(knowledge_provider)
             ingest_result = await provider_impl.ingest(
                 session=session,
                 resource=resource,
@@ -1169,7 +1177,12 @@ class SourceResourceService:
         session.add(snapshot)
         await session.flush()
         resource.latest_snapshot_id = snapshot.id
-        provider_impl = get_knowledge_provider("byaan-native")
+        knowledge_provider = default_knowledge_provider_name()
+        snapshot.metadata_json = {
+            **(snapshot.metadata_json or {}),
+            "knowledge_provider": knowledge_provider,
+        }
+        provider_impl = get_knowledge_provider(knowledge_provider)
         ingest_result = await provider_impl.ingest(
             session=session,
             resource=resource,
@@ -1242,6 +1255,7 @@ class SourceResourceService:
         raw_path = raw_dir / f"{raw_hash}_{safe_filename}"
         async with aiofiles.open(raw_path, "wb") as outfile:
             await outfile.write(captured.raw_bytes)
+        knowledge_provider = captured.provider or default_knowledge_provider_name()
         snapshot = SourceSnapshot(
             tenant_id=resource.tenant_id,
             resource_id=resource.id,
@@ -1255,6 +1269,7 @@ class SourceResourceService:
                 "raw_size": len(captured.raw_bytes),
                 "content_size": len(captured.content_text.encode("utf-8")),
                 "content_preview_hash": hashlib.sha256(captured.content_text[:1024].encode("utf-8")).hexdigest(),
+                "knowledge_provider": knowledge_provider,
             },
             status="failed" if error else "captured",
             error_json={"code": error.code, "message": str(error), "permanent": error.permanent} if error else None,
@@ -1265,7 +1280,7 @@ class SourceResourceService:
         if error:
             await session.flush()
             return snapshot
-        provider_impl = get_knowledge_provider(captured.provider)
+        provider_impl = get_knowledge_provider(knowledge_provider)
         ingest_result = await provider_impl.ingest(
             session=session,
             resource=resource,
