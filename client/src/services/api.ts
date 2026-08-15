@@ -853,6 +853,56 @@ export interface DatasourceListResponse {
   total: number
 }
 
+export type SourceOverviewFamily = 'files' | 'documents' | 'saas' | 'databases' | 'warehouses' | 'object_storage' | 'web' | 'api'
+export type SourceOverviewAttentionState = 'none' | 'auth' | 'permission' | 'parse' | 'index' | 'stale' | 'policy'
+export type SourceOverviewFreshnessStatus = 'fresh' | 'stale' | 'unknown'
+export type SourceOverviewContextIndexStatus = 'pending' | 'indexing' | 'indexed' | 'failed' | 'unavailable'
+export type SourceOverviewParseStatus = 'pending' | 'parsed' | 'failed'
+export type SourceOverviewVisibility = 'private' | 'workspace' | 'team' | 'public'
+
+export interface SourceOverviewItem {
+  id: string
+  source_kind: 'connection' | 'dataset' | 'source_resource'
+  family: SourceOverviewFamily
+  provider: string
+  resource_type?: string | null
+  name: string
+  status: string
+  attention_state: SourceOverviewAttentionState
+  freshness_status: SourceOverviewFreshnessStatus
+  last_synced_at?: string | null
+  latest_snapshot_id?: string | null
+  projected_dataset_id?: string | null
+  context_index_status: SourceOverviewContextIndexStatus
+  parse_status: SourceOverviewParseStatus
+  parsed_asset_counts: {
+    blocks: number
+    tables: number
+    files: number
+    evidence: number
+  }
+  consumer_counts: {
+    semantic_models: number
+    dashboards: number
+    notebooks: number
+    mcp_tools: number
+  }
+  owner?: {
+    id: string
+    name?: string | null
+  } | null
+  visibility: SourceOverviewVisibility
+  created_at: string
+  updated_at?: string | null
+  counts_partial: boolean
+}
+
+export interface SourceOverviewResponse {
+  items: SourceOverviewItem[]
+  total: number
+  counts_partial: boolean
+}
+
 export interface SourceSnapshot {
   id: string
   resource_id: string
@@ -2677,6 +2727,21 @@ export class ApiService {
       return extractData<DatasourceListResponse>(responseData)
     } catch (error) {
       console.error('Error listing datasources:', error)
+      throw error
+    }
+  }
+
+  static async listSourcesOverview(): Promise<SourceOverviewResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/sources/overview`)
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
+      }
+      const responseData = await response.json()
+      return extractData<SourceOverviewResponse>(responseData)
+    } catch (error) {
+      console.error('Error listing sources overview:', error)
       throw error
     }
   }

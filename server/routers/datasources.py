@@ -21,6 +21,7 @@ from server.schemas.datasource_annotations import (
     DatasourceAnnotationResponse,
     DatasourceAnnotationUpdate,
 )
+from server.schemas.source_overview import SourceOverviewResponse
 from server.schemas.source_understanding import (
     SourceAnalyzeRequest,
     SourceSkillReviewRequest,
@@ -32,12 +33,14 @@ from server.schemas.standard_response import StandardResponse, success_response
 from server.services.dataset import DatasetService
 from server.services.query_cache import query_result_cache
 from server.services.source_analyzers import SourceUnderstandingService
+from server.services.source_overview import SourceOverviewService
 from server.utils.custom_logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter()
 source_understanding_service = SourceUnderstandingService()
+source_overview_service = SourceOverviewService()
 
 
 async def _invalidate_datasource_query_cache(datasource_id: str, session: AsyncSession) -> None:
@@ -328,7 +331,9 @@ async def list_all_datasources(
                     "latest_snapshot_id": resource.latest_snapshot_id,
                     "projected_dataset_id": projected_dataset_id,
                     "created_by": str(resource.owner_id) if resource.owner_id else None,
-                    "created_at": resource.updated_at.isoformat() if resource.updated_at else resource.created_at.isoformat(),
+                    "created_at": resource.updated_at.isoformat()
+                    if resource.updated_at
+                    else resource.created_at.isoformat(),
                     "is_public": resource.visibility in {"team", "public"},
                 }
             )
@@ -360,6 +365,34 @@ async def list_all_datasources(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to retrieve datasources: {str(e)}"
         )
+
+
+@router.get("/sources/overview", response_model=StandardResponse[SourceOverviewResponse])
+async def list_sources_overview(
+    auth: AuthContext = Depends(require_scope(Scope.DATASET_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Return the canonical commercial Sources inventory facade."""
+    data = await source_overview_service.list_overview(
+        session=session,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+    )
+    return success_response(data=data, message=f"Retrieved {data['total']} source overview item(s)")
+
+
+@router.get("/datasources/overview", response_model=StandardResponse[SourceOverviewResponse])
+async def list_datasources_overview(
+    auth: AuthContext = Depends(require_scope(Scope.DATASET_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Compatibility alias for clients still mounted under the Datasources namespace."""
+    data = await source_overview_service.list_overview(
+        session=session,
+        tenant_id=auth.tenant_id,
+        user_id=auth.user_id,
+    )
+    return success_response(data=data, message=f"Retrieved {data['total']} source overview item(s)")
 
 
 @router.get("/datasources/{datasource_id}/schema")

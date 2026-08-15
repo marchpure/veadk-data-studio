@@ -217,6 +217,15 @@ Backend source of truth for the first implementation:
 - Do not expose OpenViking internals; expose `context_index_status`, `context_uri` only in admin/debug or Source detail metadata.
 - Use this facade for `Sources`, source picker next actions, and Overview health cards.
 
+Current implementation:
+
+- `GET /sources/overview` is implemented as the canonical Sources facade.
+- `GET /datasources/overview` is implemented as a compatibility alias.
+- The backend service aggregates visible `Dataset`, `Connection`, `SourceResource`, `SourceSnapshot`, `KnowledgeResource`, and evidence counts into `SourceOverviewItem`.
+- Statuses are normalized to product labels such as `Ready`, `Needs confirmation`, `Authorization required`, `Permission lost`, `Source unavailable`, and `Failed`.
+- `consumer_counts.semantic_models` and notebook counts are populated from current model/notebook references where available; dashboard and MCP counts remain `0` with `counts_partial: true`.
+- Frontend API types and `useSourceOverview()` are available for the next inventory-table slice.
+
 Acceptance:
 
 - A mixed workspace with files, source resources, and database connections is readable without opening every item.
@@ -506,7 +515,7 @@ The three layers can move in parallel only if their contracts are explicit.
 |---|---|---|---|
 | Sources P0 rename/copy | Yes | none | `/sources` route, compatibility `/databases`, user-facing `Sources` copy. |
 | Connector catalog honesty | Yes | current catalog | `available/beta/planned` behavior and readiness gates. |
-| Source overview API | Yes | current `/datasources`, `SourceResource`, `SourceSnapshot`, `KnowledgeResource` | `SourceOverviewItem` facade for Sources and Overview health cards. |
+| Source overview API | Shipped first backend slice | current `/datasources`, `SourceResource`, `SourceSnapshot`, `KnowledgeResource` | `SourceOverviewItem` facade for Sources and Overview health cards. |
 | Add Source family picker | Yes, after P0 | current `DatabasesPage` create dialog | family -> connector -> existing forms without backend rename. |
 | OpenViking provider boundary | Yes, backend parallel | `KnowledgeProvider`, `KnowledgeResource` migration | provider metadata, external context URI, provider-neutral evidence payload. |
 | Source detail page | Yes, after overview shape | source resource/snapshot/knowledge APIs | source trust hub with snapshots, parsed assets, evidence, lineage, consumers. |

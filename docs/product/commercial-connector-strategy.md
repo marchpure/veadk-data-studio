@@ -332,6 +332,8 @@ Commercial source ingestion should write to these stores:
 
 The current native provider stores `EvidenceFragment.text` in the database. Treat that as a local/dev fallback, not the commercial path.
 
+The first `SourceOverview` backend slice keeps this boundary: it exposes product-facing `context_index_status`, parse status, snapshot ids, evidence counts, projected dataset ids, and partial consumer counts, while keeping OpenViking/provider internals out of the Add Source and inventory surface.
+
 Commercial `KnowledgeResource` should gain provider metadata:
 
 - `context_uri`

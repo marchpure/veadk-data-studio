@@ -7,6 +7,7 @@ import {
   type FileType,
   type DatasetUploadResponse,
   type DatasourceListResponse,
+  type SourceOverviewResponse,
   type SourceResource,
   type SourceResourceCreateRequest,
   type ConnectorDefinition,
@@ -55,6 +56,11 @@ export const sourceConnectorKeys = {
   ] as const,
 }
 
+export const sourceOverviewKeys = {
+  all: ['source-overview'] as const,
+  overview: () => [...sourceOverviewKeys.all, 'overview'] as const,
+}
+
 // Hook to get all database connections
 export function useDBConnections() {
   return useQuery({
@@ -79,6 +85,7 @@ export function useCreateDBConnection() {
       queryClient.invalidateQueries({ queryKey: dbConnectionsKeys.lists() })
       queryClient.invalidateQueries({ queryKey: ['all-connections'] }) // Sync with notebook creation
       queryClient.invalidateQueries({ queryKey: ['datasources'] }) // Sync unified datasources
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       showToast.success('Database connection created successfully')
     },
     onError: (error: Error) => {
@@ -99,6 +106,7 @@ export function useDeleteDBConnection() {
       queryClient.invalidateQueries({ queryKey: dbConnectionsKeys.lists() })
       queryClient.invalidateQueries({ queryKey: ['all-connections'] }) // Sync with notebook creation
       queryClient.invalidateQueries({ queryKey: ['datasources'] }) // Sync unified datasources
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       showToast.success('Database connection deleted successfully')
     },
     onError: (error: Error) => {
@@ -119,6 +127,7 @@ export function useUpdateDBConnection() {
       queryClient.invalidateQueries({ queryKey: dbConnectionsKeys.lists() })
       queryClient.invalidateQueries({ queryKey: ['all-connections'] }) // Sync with notebook creation
       queryClient.invalidateQueries({ queryKey: ['datasources'] }) // Sync unified datasources
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       showToast.success('Database connection updated successfully')
     },
     onError: (error: Error) => {
@@ -168,6 +177,7 @@ export function useUploadMultipleFiles() {
       }
       // Invalidate unified datasources list
       queryClient.invalidateQueries({ queryKey: ['datasources'] })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       // Still invalidate connections for backward compatibility
       queryClient.invalidateQueries({ queryKey: dbConnectionsKeys.lists() })
       queryClient.invalidateQueries({ queryKey: ['all-connections'] })
@@ -209,6 +219,7 @@ export function useUploadFromURL() {
       }
       // Invalidate unified datasources list
       queryClient.invalidateQueries({ queryKey: ['datasources'] })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       // Still invalidate connections for backward compatibility
       queryClient.invalidateQueries({ queryKey: dbConnectionsKeys.lists() })
       queryClient.invalidateQueries({ queryKey: ['all-connections'] })
@@ -233,6 +244,7 @@ export function useCreateSourceResource() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['datasources'] })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       queryClient.invalidateQueries({ queryKey: ['source-resources'] })
       showToast.success(data.status === 'ready' ? 'Source resource indexed' : 'Source resource created; connector content required')
     },
@@ -251,6 +263,7 @@ export function useCreatePdfSourceResource() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['datasources'] })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       queryClient.invalidateQueries({ queryKey: ['source-resources'] })
       showToast.success(data.status === 'ready' ? 'PDF source resource indexed' : 'PDF source resource captured; parsing needs attention')
     },
@@ -322,6 +335,7 @@ export function useCreateSourceConnection() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.connections() })
       queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.connections(data.provider) })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       showToast.success(`${data.display_name} connected`)
     },
     onError: (error: Error) => {
@@ -340,6 +354,7 @@ export function useRefreshSourceConnection() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.connections() })
       queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.connections(data.provider) })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       if (data.provider === 'feishu') {
         queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.feishuStatus() })
       }
@@ -361,6 +376,7 @@ export function useDeleteSourceConnection() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.all })
       queryClient.invalidateQueries({ queryKey: ['datasources'] })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       showToast.success('Source connection disconnected')
     },
     onError: (error: Error) => {
@@ -419,6 +435,7 @@ export function useImportSourceResources() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['datasources'] })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
       queryClient.invalidateQueries({ queryKey: ['source-resources'] })
       queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.all })
       if (data.failed > 0) {
@@ -462,6 +479,24 @@ export function useDatasources() {
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 10 * 60 * 1000,  // 10 minutes
+    retry: (failureCount, error) => {
+      const message = error instanceof Error ? error.message.toLowerCase() : ''
+      if (message.includes('no tenant specified') || message.includes('workspace')) {
+        return false
+      }
+      return failureCount < 3
+    },
+  })
+}
+
+export function useSourceOverview() {
+  return useQuery({
+    queryKey: sourceOverviewKeys.overview(),
+    queryFn: async (): Promise<SourceOverviewResponse> => {
+      return ApiService.listSourcesOverview()
+    },
+    staleTime: 60 * 1000,
+    gcTime: 5 * 60 * 1000,
     retry: (failureCount, error) => {
       const message = error instanceof Error ? error.message.toLowerCase() : ''
       if (message.includes('no tenant specified') || message.includes('workspace')) {
