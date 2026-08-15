@@ -367,8 +367,28 @@ export default function DatabasesPage() {
       { id: 'mssql', label: 'SQL Server', family: 'databases', icon: Server, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect SQL Server data for semantic modeling.', limitations: sqlConnector?.limitations, modelingModes: sqlConnector?.modeling_modes.map(connectorModeLabel) ?? ['Relational'], connector: sqlConnector },
       { id: 'oracle', label: 'Oracle', family: 'databases', icon: Database, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect Oracle schemas with service name or SID.', limitations: sqlConnector?.limitations, modelingModes: sqlConnector?.modeling_modes.map(connectorModeLabel) ?? ['Relational'], connector: sqlConnector },
       { id: 'sqlite', label: 'SQLite', family: 'databases', icon: HardDrive, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Use a local SQLite file for repeatable demos and local data.', limitations: sqlConnector?.limitations, modelingModes: sqlConnector?.modeling_modes.map(connectorModeLabel) ?? ['Relational'], connector: sqlConnector },
-      { id: 'mongo', label: 'MongoDB', family: 'databases', icon: Leaf, availability: 'beta', outputs: ['Dataset'], description: 'MongoDB remains a beta structured-source connector.', limitations: ['No production semantic publish gate yet.'], modelingModes: ['Business object'] },
-      { id: 'dynamodb', label: 'DynamoDB', family: 'databases', icon: Cloud, availability: 'beta', outputs: ['Dataset'], description: 'DynamoDB remains a beta NoSQL connector path.', limitations: ['No production semantic publish gate yet.'], modelingModes: ['Business object'] },
+      {
+        id: 'planned:mongo',
+        label: 'MongoDB',
+        family: 'databases',
+        icon: Leaf,
+        availability: 'planned',
+        outputs: [],
+        description: 'Roadmap NoSQL source; not part of the commercial beta connector commitment.',
+        limitations: ['Planned only. Use the SQL databases Source contract for production semantic modeling until a governed business-object adapter passes readiness gates.'],
+        modelingModes: [],
+      },
+      {
+        id: 'planned:dynamodb',
+        label: 'DynamoDB',
+        family: 'databases',
+        icon: Cloud,
+        availability: 'planned',
+        outputs: [],
+        description: 'Roadmap NoSQL source; not part of the commercial beta connector commitment.',
+        limitations: ['Planned only. Use the SQL databases Source contract for production semantic modeling until a governed business-object adapter passes readiness gates.'],
+        modelingModes: [],
+      },
     ]
     if (databricksTileVisible) {
       baseOptions.push({

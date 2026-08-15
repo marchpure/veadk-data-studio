@@ -290,7 +290,7 @@ Current implementation:
 - `client/src/pages/Databases.tsx` now renders a family-first sidebar inside `Add Source`.
 - Families are `Files`, `Business docs`, `Databases`, `Warehouses`, `Object storage`, `Web`, and `API / More`.
 - The legacy long connector list has been removed from the dialog DOM; users pick a family first, then choose the exact source option.
-- Existing setup forms are preserved behind the selected concrete option: uploads, file URL import, PDF, web page, SQL databases, MongoDB, DynamoDB, Oracle, Databricks, Feishu/Lark, and TOS.
+- Existing setup forms are preserved behind the selected concrete option: uploads, file URL import, PDF, web page, supported SQL databases, Oracle, Databricks, Feishu/Lark, and TOS. Legacy MongoDB/DynamoDB code paths remain for compatibility, but the commercial Add Source picker shows them only as planned roadmap entries and does not open setup forms for them.
 - Databricks appears under `Warehouses` and reuses the existing OAuth/catalog/schema wizard.
 - Databricks warehouse creation keeps the Add Source flow open after batch create, shows created warehouse Sources, and links users to `Open source`, `Create model`, and the Sources inventory instead of closing directly back to the list.
 - Connector catalog entries are mapped into families from `ConnectorDefinition.category`; `documents` maps to `Business docs`, `object_storage` maps to `Object storage`, `data_lake` maps to `Warehouses`, and database catalog entries map to `Databases`.
@@ -300,6 +300,7 @@ Current implementation:
 - Available entries report all commercial readiness gates as passed; planned entries report the same gate list as missing. The Add Source picker and planned connector fallback show the readiness gate summary and the first missing gates.
 - Feishu/Lark advertises an OAuth drive picker and `context_assisted` / `projection` modeling modes; TOS advertises an object-storage browser and `projection` / `context_assisted` modes.
 - Planned entries use `planned:<connector_id>` and never set `selectedType`, so they cannot open a working setup form by accident.
+- NoSQL connectors such as MongoDB and DynamoDB are planned-only in the commercial Add Source picker until a governed business-object adapter passes the same readiness gates as the six beta adapter groups.
 - Selecting a planned entry shows a read-only commercial readiness message sourced from the catalog limitations, including roadmap-only picker status and commercial readiness gates.
 - If a family only has planned entries, the dialog automatically selects the first planned entry instead of keeping the previous family's setup form visible.
 - Connector import results now carry explicit already-added state: initial imports return `resource_action = created`, repeat imports reuse the existing Source Resource with `resource_action = reused` / `already_added = true`, and the processing card labels the result as `Already in Sources` with open/reindex next actions.

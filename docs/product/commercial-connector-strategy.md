@@ -262,6 +262,7 @@ Do not put these into the v1 production commitment:
 - Dingtalk, Tencent Docs, WeCom files, Notion, Confluence/Jira, Slack/Teams, GitHub/GitLab.
 - Every domestic SQL dialect as a separate supported connector.
 - Every object storage vendor as a separate first-party adapter.
+- MongoDB, DynamoDB, and other NoSQL/business-object connectors as commercial beta commitments before a governed business-object adapter contract exists.
 - OpenViking connector imports as a substitute for Byaan source governance.
 
 These can appear as planned catalog tiles, beta adapters, SDK examples, or marketplace adapters when the UI makes support status explicit.
