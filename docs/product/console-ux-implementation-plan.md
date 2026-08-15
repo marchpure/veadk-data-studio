@@ -387,6 +387,7 @@ Current implementation:
 - The cards call `GET /source-resources/{resource_id}/processing` through `ApiService.getSourceResourceProcessing()` and `useSourceResourceProcessing()`.
 - Each card shows the standard processing steps: `Capture`, `Parse`, `Detect tables`, `Normalize dataset`, `Index context`, `Generate semantic suggestions`, and `Ready`.
 - The backend processing payload now returns structured `steps` with `pending`, `running`, `succeeded`, `skipped`, or `failed` status so import cards and Source Detail consume the same Source processing contract instead of each view guessing readiness from a single stage.
+- Connector import cards and direct Files/Web creation cards now render the backend `steps` contract directly when present, including skipped and failed steps, so stale snapshots with current authorization or permission blockers are not displayed as a generic front-end progress guess.
 - Failed imports keep their resource row visible with the connector error and do not hide successful capture/parse state for other selected resources.
 - Backend `next_actions` are shown as small action chips so the user sees whether to retry sync, reauthorize, attach to a notebook asset, or use knowledge retrieval.
 - Object-storage large object imports surface as `Needs confirmation` with `Review object size` and `Confirm large object sync` actions. The processing card uses a confirmation tone instead of presenting the item as a generic failed import.

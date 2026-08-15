@@ -127,6 +127,28 @@ const processingSteps = [
   { id: 'ready', label: 'Ready' },
 ] as const
 
+const processingStepsForDisplay = (processing: SourceResourceProcessing | undefined) => {
+  return processing?.steps?.length ? processing.steps : processingSteps
+}
+
+const processingStepClass = (status?: string, tone?: string) => {
+  if (status === 'succeeded') return 'bg-green-500'
+  if (status === 'running') return 'bg-brand-orange'
+  if (status === 'failed') return 'bg-red-500'
+  if (status === 'skipped') return 'bg-blue-500/60'
+  if (tone === 'needs_confirmation') return 'bg-yellow-400'
+  return 'bg-[#444444]'
+}
+
+const processingStepLabelClass = (status?: string, tone?: string) => {
+  if (status === 'succeeded') return 'text-green-300'
+  if (status === 'running') return 'text-brand-orange'
+  if (status === 'failed') return 'text-red-300'
+  if (status === 'skipped') return 'text-blue-300'
+  if (tone === 'needs_confirmation') return 'text-yellow-300'
+  return 'text-gray-500'
+}
+
 const processingProgressIndex = (processing: SourceResourceProcessing | undefined, result: SourceResourceImportResult) => {
   if (processing?.steps?.length) {
     const activeIndex = processing.steps.findIndex(step => step.status === 'running' || step.status === 'failed')
@@ -977,6 +999,7 @@ function ImportProcessingCard({ result }: { result: SourceResourceImportResult }
   const processing = processingQuery.data
   const progressIndex = processingProgressIndex(processing, result)
   const tone = processingTone(processing, result)
+  const displaySteps = processingStepsForDisplay(processing)
   const title = result.resource?.name || result.selection.name || result.selection.external_id
   const errorMessage = result.error?.message || processing?.last_error?.message
   const nextActions = processing?.next_actions || []
@@ -1018,13 +1041,21 @@ function ImportProcessingCard({ result }: { result: SourceResourceImportResult }
           </div>
 
           <div className="mt-3 grid grid-cols-7 gap-1">
-            {processingSteps.map((step, index) => {
-              const complete = tone !== 'failed' && tone !== 'needs_confirmation' && index <= progressIndex
-              const current = tone === 'processing' && index === Math.max(progressIndex + 1, 0)
+            {displaySteps.map((step, index) => {
+              const fallbackStatus = tone === 'failed' && index === 0
+                ? 'failed'
+                : tone === 'needs_confirmation' && index === 0
+                  ? 'failed'
+                  : tone === 'processing' && index === Math.max(progressIndex + 1, 0)
+                    ? 'running'
+                    : tone !== 'failed' && tone !== 'needs_confirmation' && index <= progressIndex
+                      ? 'succeeded'
+                      : 'pending'
+              const status = 'status' in step ? step.status : fallbackStatus
               return (
                 <div key={step.id} className="min-w-0">
-                  <div className={`h-1.5 rounded-full ${complete ? 'bg-green-500' : current ? 'bg-brand-orange' : tone === 'failed' && index === 0 ? 'bg-red-500' : tone === 'needs_confirmation' && index === 0 ? 'bg-yellow-400' : 'bg-[#444444]'}`} />
-                  <div className={`mt-1 truncate text-[10px] ${complete ? 'text-green-300' : current ? 'text-brand-orange' : tone === 'needs_confirmation' && index === 0 ? 'text-yellow-300' : 'text-gray-500'}`} title={step.label}>
+                  <div className={`h-1.5 rounded-full ${processingStepClass(status, tone)}`} />
+                  <div className={`mt-1 truncate text-[10px] ${processingStepLabelClass(status, tone)}`} title={step.label}>
                     {step.label}
                   </div>
                 </div>
