@@ -4,12 +4,12 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.auth.dependencies import AuthContext, require_scope
+from server.auth.object_authorizer import NotebookAction, authorize_notebook_action
 from server.auth.scopes import Scope
 from server.db.session import get_async_session
 from server.schemas.notebook_export import ShareNotebookJsonRequest
 from server.schemas.standard_response import success_response
 from server.services.export_service import CompiledHtmlExportService
-from server.services.notebook import NotebookService
 from server.services.notebook_export_service import NotebookExportService
 from server.services.settings import SettingsService
 from server.utils.config_loader import get_waitlist_config
@@ -75,9 +75,12 @@ async def export_pdf(
 
     from server.services.pdf_service import PDFService, PDFServiceError
 
-    notebook = await NotebookService.get_notebook(session, notebook_id)
-    if notebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found")
+    await authorize_notebook_action(
+        session=session,
+        auth=auth,
+        notebook_id=notebook_id,
+        action=NotebookAction.EXPORT,
+    )
 
     try:
         from uuid import UUID
@@ -135,9 +138,12 @@ async def export_compiled_html(
     - Can be opened in any browser
     """
     # Verify notebook exists
-    notebook = await NotebookService.get_notebook(session, notebook_id)
-    if notebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found")
+    await authorize_notebook_action(
+        session=session,
+        auth=auth,
+        notebook_id=notebook_id,
+        action=NotebookAction.EXPORT,
+    )
 
     try:
         # Generate compiled HTML with embedded data
@@ -179,7 +185,7 @@ async def share_notebook(
     version: int | None = None,
     password: str | None = None,
     update_password: bool = False,
-    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_EXPORT)),
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_SHARE)),
     session: AsyncSession = Depends(get_async_session),
 ):
     """
@@ -196,9 +202,12 @@ async def share_notebook(
     if not api_key_setting:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
-    notebook = await NotebookService.get_notebook(session, notebook_id)
-    if notebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found")
+    await authorize_notebook_action(
+        session=session,
+        auth=auth,
+        notebook_id=notebook_id,
+        action=NotebookAction.SHARE_MANAGE,
+    )
 
     try:
         worker_url = get_worker_url()
@@ -271,9 +280,12 @@ async def get_notebook_share(
     if not api_key_setting:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
-    notebook = await NotebookService.get_notebook(session, notebook_id)
-    if notebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found")
+    await authorize_notebook_action(
+        session=session,
+        auth=auth,
+        notebook_id=notebook_id,
+        action=NotebookAction.SHARE_MANAGE,
+    )
 
     try:
         worker_url = get_worker_url()
@@ -313,7 +325,7 @@ async def get_notebook_share(
 @router.delete("/notebooks/{notebook_id}/share")
 async def delete_share(
     notebook_id: str,
-    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_EXPORT)),
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_SHARE)),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Delete the share for a notebook (single share per notebook, uses notebook_id as share_id)."""
@@ -322,9 +334,12 @@ async def delete_share(
     if not api_key_setting:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
-    notebook = await NotebookService.get_notebook(session, notebook_id)
-    if notebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found")
+    await authorize_notebook_action(
+        session=session,
+        auth=auth,
+        notebook_id=notebook_id,
+        action=NotebookAction.SHARE_MANAGE,
+    )
 
     try:
         worker_url = get_worker_url()
@@ -381,9 +396,12 @@ async def export_notebook_json(
 
     The exported JSON can be shared manually or imported into another Byaan instance.
     """
-    notebook = await NotebookService.get_notebook(session, notebook_id)
-    if notebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found")
+    await authorize_notebook_action(
+        session=session,
+        auth=auth,
+        notebook_id=notebook_id,
+        action=NotebookAction.EXPORT,
+    )
 
     try:
         export_data = await NotebookExportService.export_notebook(session, notebook_id)
@@ -421,7 +439,7 @@ async def export_notebook_json(
 async def share_notebook_json(
     notebook_id: str,
     request: ShareNotebookJsonRequest | None = None,
-    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_EXPORT)),
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_SHARE)),
     session: AsyncSession = Depends(get_async_session),
 ):
     """
@@ -442,9 +460,12 @@ async def share_notebook_json(
     if not api_key_setting:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
-    notebook = await NotebookService.get_notebook(session, notebook_id)
-    if notebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found")
+    await authorize_notebook_action(
+        session=session,
+        auth=auth,
+        notebook_id=notebook_id,
+        action=NotebookAction.SHARE_MANAGE,
+    )
 
     try:
         # Export notebook to JSON format
@@ -506,9 +527,12 @@ async def list_notebook_json_shares(
     if not api_key_setting:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
-    notebook = await NotebookService.get_notebook(session, notebook_id)
-    if notebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found")
+    await authorize_notebook_action(
+        session=session,
+        auth=auth,
+        notebook_id=notebook_id,
+        action=NotebookAction.SHARE_MANAGE,
+    )
 
     try:
         worker_url = get_worker_url()
@@ -548,7 +572,7 @@ async def update_notebook_json_share_password(
     notebook_id: str,
     share_id: str,
     password: str | None = None,
-    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_EXPORT)),
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_SHARE)),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Update or remove password for a notebook JSON share."""
@@ -557,9 +581,12 @@ async def update_notebook_json_share_password(
     if not api_key_setting:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
-    notebook = await NotebookService.get_notebook(session, notebook_id)
-    if notebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found")
+    await authorize_notebook_action(
+        session=session,
+        auth=auth,
+        notebook_id=notebook_id,
+        action=NotebookAction.SHARE_MANAGE,
+    )
 
     try:
         worker_url = get_worker_url()
@@ -603,7 +630,7 @@ async def update_notebook_json_share_password(
 async def delete_notebook_json_share(
     notebook_id: str,
     share_id: str,
-    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_EXPORT)),
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_SHARE)),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Delete a JSON share."""
@@ -612,9 +639,12 @@ async def delete_notebook_json_share(
     if not api_key_setting:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
-    notebook = await NotebookService.get_notebook(session, notebook_id)
-    if notebook is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found")
+    await authorize_notebook_action(
+        session=session,
+        auth=auth,
+        notebook_id=notebook_id,
+        action=NotebookAction.SHARE_MANAGE,
+    )
 
     try:
         worker_url = get_worker_url()
