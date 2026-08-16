@@ -879,15 +879,20 @@ class DashboardService:
         success = bool(result.get("success"))
         rows = result.get("data") if success else None
         bounded_rows, row_count, pagination, bound_warnings = self._bounded_result(data_view, rows)
+        as_of = result.get("as_of") or result.get("cached_at") or datetime.utcnow().isoformat()
+        stale = bool(result.get("stale", False)) or self._is_data_view_stale(data_view, as_of)
+        status_value = "success" if success and row_count > 0 else "empty" if success else "error"
+        if success and stale:
+            status_value = "stale"
         view_result = {
             "data_view_id": data_view["id"],
-            "status": "success" if success and row_count > 0 else "empty" if success else "error",
+            "status": status_value,
             "result": bounded_rows,
             "schema": data_view.get("output_schema", []),
             "row_count": row_count,
             "cached": bool(result.get("cached", False)),
-            "stale": bool(result.get("stale", False)),
-            "as_of": result.get("as_of") or result.get("cached_at") or datetime.utcnow().isoformat(),
+            "stale": stale,
+            "as_of": as_of,
             "warnings": [f"saved_query compatibility binding: {saved_query['compatibility_reason']}", *bound_warnings],
             "evidence": data_view.get("evidence", []),
             "lineage": data_view.get("lineage") or saved_query.get("lineage", []),
@@ -1128,6 +1133,21 @@ class DashboardService:
                 return None, 0, {"cursor": None, "has_more": True, "limit": row_limit}, warnings
             return rows, 1, {"cursor": None, "has_more": False, "limit": row_limit}, warnings
         return rows, 0, {"cursor": None, "has_more": False, "limit": row_limit}, warnings
+
+    @staticmethod
+    def _is_data_view_stale(data_view: dict[str, Any], as_of: Any) -> bool:
+        freshness_policy = data_view.get("freshness_policy") or {}
+        if not freshness_policy.get("allow_stale", True):
+            return False
+        max_age_seconds = freshness_policy.get("max_age_seconds")
+        if max_age_seconds is None:
+            return False
+        try:
+            as_of_text = str(as_of).replace("Z", "+00:00")
+            as_of_dt = datetime.fromisoformat(as_of_text).replace(tzinfo=None)
+            return (datetime.utcnow() - as_of_dt).total_seconds() > int(max_age_seconds)
+        except (TypeError, ValueError):
+            return False
 
     @staticmethod
     def _blocked_view_result(

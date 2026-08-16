@@ -321,7 +321,7 @@ export default function DashboardWorkspacePage() {
   }
 
   return (
-    <div className="flex min-h-full bg-[#0d0f11] text-[#f3f5f5]">
+    <div data-dashboard-workspace="true" className="flex min-h-full bg-[#0d0f11] text-[#f3f5f5]">
       <aside className="hidden w-[360px] shrink-0 border-r border-[#293037] bg-[#121518] lg:flex lg:flex-col">
         <div className="border-b border-[#293037] p-4">
           <div className="flex items-center gap-2">
@@ -380,6 +380,46 @@ export default function DashboardWorkspacePage() {
               <span>{error}</span>
             </div>
           )}
+
+          <section className="lg:hidden">
+            <div className="rounded-md border border-[#293037] bg-[#14181c] p-3">
+              <div className="flex items-center gap-2">
+                <LayoutDashboard className="h-4 w-4 text-brand-orange" />
+                <h1 className="text-sm font-semibold">Dashboards</h1>
+              </div>
+              <div className="relative mt-3">
+                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[#7f8a93]" />
+                <Input
+                  value={query}
+                  onChange={event => setQuery(event.target.value)}
+                  placeholder="Search governed assets"
+                  className="h-9 border-[#303940] bg-[#0e1114] pl-9 text-sm text-[#eef2f3]"
+                  aria-label="Search Dashboards"
+                />
+              </div>
+              <div className="mt-3 flex gap-2 overflow-x-auto custom-scrollbar">
+                {filteredAssets.map(asset => (
+                  <Link
+                    key={asset.id}
+                    to={`/dashboard-assets/${asset.id}`}
+                    className={cn(
+                      'min-w-[240px] rounded-md border p-3',
+                      asset.id === assetId ? 'border-brand-orange/60 bg-brand-orange/10' : 'border-[#293037] bg-[#101316]',
+                    )}
+                  >
+                    <div className="truncate text-sm font-semibold">{asset.name}</div>
+                    <div className="mt-1 truncate text-xs text-[#818c95]">{asset.slug}</div>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      <StatusPill status={asset.lifecycle} />
+                      <Badge>{formatInventoryFreshness(asset)}</Badge>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <InventoryEvidenceTable assets={filteredAssets} selectedAssetId={assetId} />
 
           {!selectedAsset && !loadingDetail && (
             <EmptyPanel title="Open a governed Dashboard" body="Select a structured Dashboard asset from the inventory to inspect manifest-bound tiles, data, freshness, evidence, and lineage." />
@@ -510,6 +550,62 @@ function extractSemanticDiff(source: DashboardVersion | DashboardAssetDetail | n
   return isRecord(diff) ? diff as DashboardSemanticDiff : null
 }
 
+function InventoryEvidenceTable({ assets, selectedAssetId }: { assets: DashboardAsset[]; selectedAssetId?: string }) {
+  if (assets.length === 0) return null
+  return (
+    <section className="rounded-md border border-[#293037] bg-[#14181c]">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#293037] px-3 py-2">
+        <div>
+          <h2 className="text-sm font-semibold">Inventory</h2>
+          <p className="mt-0.5 text-xs text-[#818c95]">Governed asset readiness, versions, model pins, freshness, owner, and update state.</p>
+        </div>
+        <Badge>{assets.length} assets</Badge>
+      </div>
+      <div className="overflow-x-auto custom-scrollbar">
+        <table className="min-w-[980px] text-left text-xs">
+          <thead className="bg-[#101316] text-[#9aa4ac]">
+            <tr>
+              <th className="px-3 py-2 font-medium">Asset</th>
+              <th className="px-3 py-2 font-medium">Owner</th>
+              <th className="px-3 py-2 font-medium">Published / Draft Version</th>
+              <th className="px-3 py-2 font-medium">Model / Version</th>
+              <th className="px-3 py-2 font-medium">Freshness</th>
+              <th className="px-3 py-2 font-medium">Readiness / Warnings</th>
+              <th className="px-3 py-2 font-medium">Last Update</th>
+            </tr>
+          </thead>
+          <tbody>
+            {assets.map(asset => (
+              <tr key={asset.id} className={cn('border-t border-[#242b31]', asset.id === selectedAssetId ? 'bg-brand-orange/5' : '')}>
+                <td className="max-w-[220px] px-3 py-2">
+                  <Link to={`/dashboard-assets/${asset.id}`} className="font-medium text-[#f3f5f5] hover:text-brand-orange">
+                    {asset.name}
+                  </Link>
+                  <div className="truncate text-[#818c95]">{asset.slug}</div>
+                </td>
+                <td className="px-3 py-2 text-[#d6dde2]">{shortId(asset.owner_id)}</td>
+                <td className="px-3 py-2 text-[#d6dde2]">
+                  <div>Published {shortId(asset.published_version_id)}</div>
+                  <div className="text-[#818c95]">Draft {shortId(asset.current_draft_version_id)}</div>
+                </td>
+                <td className="px-3 py-2 text-[#d6dde2]">{formatInventoryModel(asset)}</td>
+                <td className="px-3 py-2 text-[#d6dde2]">{formatInventoryFreshness(asset)}</td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-wrap gap-1">
+                    <StatusPill status={asset.lifecycle} />
+                    <Badge tone={asset.lifecycle === 'legacy_unstructured' ? 'warning' : 'ready'}>{formatInventoryWarnings(asset)}</Badge>
+                  </div>
+                </td>
+                <td className="px-3 py-2 text-[#d6dde2]">{asset.updated_at ? formatDate(asset.updated_at) : 'No timestamp'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -594,7 +690,10 @@ function DashboardTileCard({ tile, view, dataView, loading }: { tile: DashboardT
         {loading ? (
           <div className="h-11 w-32 animate-pulse rounded bg-[#20262b]" />
         ) : status === 'error' || status === 'blocked' || status === 'permission_denied' ? (
-          <div className="rounded border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">{view?.error?.message || 'Dashboard view is blocked'}</div>
+          <div className="rounded border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
+            <div>{view?.error?.message || 'Dashboard view is blocked'}</div>
+            <div className="mt-2 text-xs text-red-100/80">{view?.as_of ? `as of ${formatDate(view.as_of)}` : 'No run timestamp'}</div>
+          </div>
         ) : rows.length === 0 && tile.tile_type !== 'text' ? (
           <div className="rounded border border-[#303940] bg-[#151a1f] p-3 text-sm text-[#a4adb5]">No rows returned</div>
         ) : tile.tile_type === 'table' ? (
@@ -609,7 +708,8 @@ function DashboardTileCard({ tile, view, dataView, loading }: { tile: DashboardT
 
       <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-[#8f9aa3]">
         {view?.cached && <Badge>Cached</Badge>}
-        {view?.stale && <Badge tone="warning">Stale</Badge>}
+        {view?.stale && <Badge tone="warning">Stale data</Badge>}
+        {runStateIsPartial(status) && <Badge tone="warning">Partial failure</Badge>}
         {dataView?.sensitivity && <Badge>{dataView.sensitivity}</Badge>}
         {view?.row_count !== undefined && <Badge>{view.row_count} rows</Badge>}
       </div>
@@ -901,6 +1001,10 @@ function tileIcon(type: string) {
   return <LayoutDashboard className="h-4 w-4 text-brand-orange" />
 }
 
+function runStateIsPartial(status: string): boolean {
+  return status === 'error' || status === 'partial'
+}
+
 function coerceFilterValue(filter: DashboardFilter, value: string): unknown {
   if (filter.filter_type === 'number' || filter.filter_type === 'integer') return Number(value)
   if (filter.filter_type === 'boolean') return value === 'true'
@@ -914,6 +1018,31 @@ function shortId(value?: string | null) {
 
 function shortHash(value: string) {
   return value.replace('sha256:', '').slice(0, 10)
+}
+
+function formatInventoryModel(asset: DashboardAsset): string {
+  const modelVersions = asset.health_summary.model_versions ?? asset.health_summary.semantic_models
+  if (isRecord(modelVersions)) {
+    const first = Object.entries(modelVersions)[0]
+    if (first) return `${first[0]} / ${String(first[1])}`
+  }
+  const model = asset.health_summary.model_slug ?? asset.health_summary.model
+  const version = asset.health_summary.model_version ?? asset.health_summary.version
+  if (model || version) return `${String(model ?? 'model')} / ${String(version ?? 'version pending')}`
+  return 'Model pending / version pending'
+}
+
+function formatInventoryFreshness(asset: DashboardAsset): string {
+  const freshness = asset.health_summary.freshness ?? asset.health_summary.overall_freshness
+  if (freshness) return String(freshness)
+  return asset.lifecycle === 'published' ? 'Freshness ready' : 'Freshness pending'
+}
+
+function formatInventoryWarnings(asset: DashboardAsset): string {
+  const warnings = asset.health_summary.warnings
+  if (Array.isArray(warnings) && warnings.length > 0) return `${warnings.length} warnings`
+  if (asset.lifecycle === 'legacy_unstructured') return 'Needs structured review'
+  return 'Ready'
 }
 
 function formatDate(value: string) {
