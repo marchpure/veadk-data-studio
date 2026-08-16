@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.evaluation import (
+    EvaluationAssessment,
     EvaluationAuditEvent,
+    EvaluationCase,
+    EvaluationCaseRun,
     EvaluationRun,
     EvaluationSuiteVersion,
     EvaluationTargetSnapshot,
@@ -30,6 +34,57 @@ class EvaluationRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def get_run(
+        self,
+        *,
+        tenant_id: str | UUID,
+        run_id: str | UUID,
+    ) -> EvaluationRun | None:
+        result = await self._session.execute(
+            select(EvaluationRun).where(
+                EvaluationRun.tenant_id == tenant_id,
+                EvaluationRun.id == run_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_next_claimable_run(
+        self,
+        *,
+        tenant_id: str | UUID,
+        now: datetime,
+    ) -> EvaluationRun | None:
+        result = await self._session.execute(
+            select(EvaluationRun)
+            .where(
+                EvaluationRun.tenant_id == tenant_id,
+                EvaluationRun.preflight_blockers_json == [],
+                (
+                    (EvaluationRun.status == "queued")
+                    | ((EvaluationRun.status == "running") & (EvaluationRun.lease_expires_at < now))
+                ),
+            )
+            .order_by(EvaluationRun.created_at, EvaluationRun.id)
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_cases_for_suite_version(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_version_id: str | UUID,
+    ) -> list[EvaluationCase]:
+        result = await self._session.execute(
+            select(EvaluationCase)
+            .where(
+                EvaluationCase.tenant_id == tenant_id,
+                EvaluationCase.suite_version_id == suite_version_id,
+            )
+            .order_by(EvaluationCase.case_key)
+        )
+        return list(result.scalars().all())
 
     async def create_target_snapshot(
         self,
@@ -80,6 +135,65 @@ class EvaluationRepository:
         self._session.add(run)
         await self._session.flush()
         return run
+
+    async def create_case_run(
+        self,
+        *,
+        tenant_id: str | UUID,
+        run_id: str | UUID,
+        case_id: str | UUID,
+        status: str,
+        attempt: int,
+        input_digest: str,
+        output_digest: str,
+        result_json: dict,
+        error_json: dict,
+        immutable: bool,
+        started_at: datetime,
+        completed_at: datetime,
+    ) -> EvaluationCaseRun:
+        case_run = EvaluationCaseRun(
+            tenant_id=tenant_id,
+            run_id=run_id,
+            case_id=case_id,
+            status=status,
+            attempt=attempt,
+            input_digest=input_digest,
+            output_digest=output_digest,
+            result_json=result_json,
+            error_json=error_json,
+            immutable=immutable,
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+        self._session.add(case_run)
+        await self._session.flush()
+        return case_run
+
+    async def create_assessment(
+        self,
+        *,
+        tenant_id: str | UUID,
+        case_run_id: str | UUID,
+        category: str,
+        status: str,
+        score: str | None,
+        hard_fail: bool,
+        details_json: dict,
+    ) -> EvaluationAssessment:
+        assessment = EvaluationAssessment(
+            tenant_id=tenant_id,
+            case_run_id=case_run_id,
+            category=category,
+            status=status,
+            score=score,
+            hard_fail=hard_fail,
+            details_json=details_json,
+            immutable=True,
+        )
+        self._session.add(assessment)
+        await self._session.flush()
+        return assessment
 
     async def create_audit_event(
         self,

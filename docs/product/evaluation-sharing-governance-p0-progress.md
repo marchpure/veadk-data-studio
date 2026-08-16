@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 1 — Evaluation 权威模型 complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型. Current slice: ready to enter Phase 2. Next slice: Phase 2 DB-backed Evaluation runner and grader gate.
+CURRENT_PHASE: Phase 2 — DB-backed Evaluation runner and grader gate. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer. Current slice: extend runner with heartbeat/stop, idempotent retry/resume, artifact capture, and promotion gate wiring. Next slice: Phase 2 runner resumability and promotion blocking.
 
 ## Phase 0 Slice Checklist
 
@@ -268,3 +268,24 @@ Phase 2 next steps:
 - Implement DB-backed Evaluation runner leasing, run/case-run execution state transitions, heartbeat/stop behavior, idempotency, artifact capture, and resumability.
 - Wire grader gate evaluation over stored case results with security hard-fail semantics from `gate_policy_json`.
 - Add regression coverage for runner retry/idempotency, immutable suite version execution, and promotion blocking when verification/regression gates fail.
+
+## 2026-08-16 17:45 CST - Phase 2 Evaluation Runner Lease And Gate Tracer
+
+Scope:
+
+- Added DB-backed runner claim flow for queued Evaluation runs, including lease holder, lease expiry, heartbeat timestamp, running status, and audit event.
+- Added run completion flow that persists immutable case runs and assessments for every suite case in a published suite version.
+- Added gate summary calculation from stored case outcomes plus `gate_policy_json`, including security hard-fail semantics and overall pass-rate enforcement.
+- Added regression coverage proving a second worker cannot steal an active lease, case results are persisted as immutable DB rows, hard-fail assessments are recorded, and the run finishes failed when the gate policy demands it.
+
+Evidence:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_evaluation_runner_service.py -q` -> `1 passed, 11 warnings`.
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_evaluation_runner_service.py tests/test_migration_chain_hardening.py -q` -> `15 passed, 12 warnings`.
+- `cd server && uv run ruff check repositories/evaluation.py services/evaluation.py tests/test_evaluation_runner_service.py tests/test_evaluation_service.py` -> passed with the existing removed-rule warning.
+
+Remaining Phase 2 work:
+
+- Add heartbeat refresh, stop-request handling, expired-lease reclaim, and retry/resume idempotency semantics.
+- Persist evaluation artifacts for runner inputs/outputs and grader diagnostics.
+- Wire promotion decisions so advisor/promote flows are blocked unless verification and regression Evaluation runs satisfy gate policy.
