@@ -853,7 +853,7 @@ export interface DatasourceListResponse {
   total: number
 }
 
-export type SourceOverviewFamily = 'files' | 'documents' | 'saas' | 'databases' | 'warehouses' | 'object_storage' | 'web' | 'api'
+export type SourceOverviewFamily = 'files' | 'documents' | 'saas' | 'databases' | 'nosql' | 'warehouses' | 'object_storage' | 'web' | 'api'
 export type SourceOverviewAttentionState = 'none' | 'auth' | 'permission' | 'parse' | 'index' | 'stale' | 'policy'
 export type SourceOverviewFreshnessStatus = 'fresh' | 'stale' | 'unknown'
 export type SourceOverviewContextIndexStatus = 'pending' | 'indexing' | 'indexed' | 'failed' | 'unavailable'
@@ -870,7 +870,7 @@ export type SourceOverviewModelingStatus =
   | 'failed'
   | 'planned'
   | 'unsupported'
-export type SourceOverviewModelingMode = 'relational' | 'warehouse' | 'projection' | 'context_assisted' | 'business_object' | 'event' | 'semantic_import'
+export type SourceOverviewModelingMode = 'relational' | 'warehouse' | 'projection' | 'document_projection' | 'context_assisted' | 'business_object' | 'event' | 'semantic_import'
 
 export interface SourceOverviewItem {
   id: string

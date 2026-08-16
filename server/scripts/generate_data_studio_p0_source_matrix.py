@@ -9,7 +9,11 @@ from typing import Any
 from server.models.connections import ALLOWED_CONN_TYPES
 from server.models.source_resources import SOURCE_RESOURCE_TYPES
 from server.services.connector_catalog import CONNECTOR_CATALOG, ConnectorDefinition
-from server.services.source_analyzers import DATABASE_ANALYZER_VERSION, DATABASE_CONNECTION_TYPES
+from server.services.source_analyzers import (
+    DATABASE_ANALYZER_VERSION,
+    DATABASE_CONNECTION_TYPES,
+    SOURCE_UNDERSTANDING_CONNECTION_TYPES,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_PATH = REPO_ROOT / "docs" / "product" / "data-studio-p0-source-matrix.md"
@@ -72,7 +76,7 @@ def build_matrix_rows() -> list[MatrixRow]:
     sql = _connector("sql_databases")
     tos = _connector("volcengine_tos")
     databricks = _connector("databricks")
-    analyzer_types = sorted({_normalize_database_type(item) for item in DATABASE_CONNECTION_TYPES})
+    relational_analyzer_types = sorted({_normalize_database_type(item) for item in DATABASE_CONNECTION_TYPES})
     rows = [
         MatrixRow(
             source_type="local_file_csv",
@@ -251,7 +255,7 @@ def build_matrix_rows() -> list[MatrixRow]:
             auth_config_contract="connection string/fields stored encrypted in Connection; schema refresh via ConnectionService",
             browse_select_import_contract="Database connection form and schema/profile refresh; no SourceConnection picker",
             snapshot_raw_artifact="SourceAnalyzer creates database_catalog/schema/table SourceSnapshot rows with db:// raw_storage_uri",
-            parser_profile_contract=f"{DATABASE_ANALYZER_VERSION} produces schema/profile/relationship/metric candidates for {', '.join(analyzer_types)}",
+            parser_profile_contract=f"{DATABASE_ANALYZER_VERSION} produces schema/profile/relationship/metric candidates for {', '.join(relational_analyzer_types)}",
             modeling_mode="structured_data_modeler",
             fixture="server/tests/test_source_understanding_api.py and test_semantic_modeling_api.py",
             api_journey="/connections -> /datasources -> /datasources/{id}/understanding/analyze -> semantic-model-draft -> data-models publish/MCP",
@@ -267,16 +271,16 @@ def build_matrix_rows() -> list[MatrixRow]:
             availability="available",
             auth_config_contract="connection string stored encrypted in Connection",
             browse_select_import_contract="Database connection form and schema refresh",
-            snapshot_raw_artifact="No SourceResource snapshot/projection contract",
-            parser_profile_contract="Mongo schema/query support exists; no tabular projection manifest for Data Modeling",
-            modeling_mode="blocked_tabular_projection",
-            fixture="server/tests/test_mongo_connector.py and write detection tests; no Source Matrix fixture",
-            api_journey="/connections and raw query tools work; no governed Source import/modeling handoff",
-            ui_journey="Databases labels MongoDB as planned in source catalog list even though connection form exists",
-            lineage_evidence="Connection schema_cache only",
+            snapshot_raw_artifact="SourceAnalyzer creates database_catalog/schema/table SourceSnapshot rows from sampled collection schema_cache",
+            parser_profile_contract="Mongo sampled fields/nested schema profile; semantic candidates intentionally disabled until reviewed tabular projection exists",
+            modeling_mode="document_projection",
+            fixture="server/tests/test_source_understanding_api.py Mongo NoSQL profile coverage plus mongo query/write detection tests",
+            api_journey="/connections -> /datasources -> /datasources/{id}/understanding/analyze -> sources overview needs_projection",
+            ui_journey="Databases MongoDB connection form and Data Modeling projection-needed handoff",
+            lineage_evidence="SourceUnderstandingRun, database_* SourceResources, EvidenceFragment locators with nosql source_family",
             retry_revoke="refresh schema/delete connection",
-            final_status="blocked",
-            blocker_reason="Can connect/query MongoDB, but no Source snapshot/projection/modeling contract exists",
+            final_status="beta",
+            blocker_reason="Source profile snapshots/evidence exist; reviewed tabular projection, projection dataset materialization, and semantic draft generation remain beta hardening",
         ),
         MatrixRow(
             source_type="dynamodb",
@@ -284,16 +288,16 @@ def build_matrix_rows() -> list[MatrixRow]:
             availability="available",
             auth_config_contract="AWS-style credentials stored encrypted in Connection",
             browse_select_import_contract="Database connection form and schema refresh",
-            snapshot_raw_artifact="No SourceResource snapshot/projection contract",
-            parser_profile_contract="DynamoDB schema/query support exists; no tabular projection manifest for Data Modeling",
-            modeling_mode="blocked_tabular_projection",
-            fixture="server/tests/test_dynamodb_write_detection.py; no Source/modeling fixture",
-            api_journey="/connections and raw query tools work; no governed Source import/modeling handoff",
-            ui_journey="Databases labels DynamoDB as planned in source catalog list even though connection form exists",
-            lineage_evidence="Connection schema_cache only",
+            snapshot_raw_artifact="SourceAnalyzer creates database_catalog/schema/table SourceSnapshot rows from key schema, attributes, GSI, and sampled item schema_cache",
+            parser_profile_contract="DynamoDB key/attribute/sample profile; semantic candidates intentionally disabled until reviewed tabular projection exists",
+            modeling_mode="document_projection",
+            fixture="server/tests/test_source_understanding_api.py DynamoDB NoSQL profile coverage plus write detection tests",
+            api_journey="/connections -> /datasources -> /datasources/{id}/understanding/analyze -> sources overview needs_projection",
+            ui_journey="Databases DynamoDB connection form and Data Modeling projection-needed handoff",
+            lineage_evidence="SourceUnderstandingRun, database_* SourceResources, EvidenceFragment locators with nosql source_family",
             retry_revoke="refresh schema/delete connection",
-            final_status="blocked",
-            blocker_reason="Can connect/query DynamoDB, but no Source snapshot/projection/modeling contract exists",
+            final_status="beta",
+            blocker_reason="Source profile snapshots/evidence exist; reviewed tabular projection, projection dataset materialization, and semantic draft generation remain beta hardening",
         ),
         MatrixRow(
             source_type="databricks",
@@ -338,7 +342,10 @@ def matrix_payload() -> dict[str, Any]:
         "connector_ids": [connector.id for connector in CONNECTOR_CATALOG],
         "allowed_connection_types": list(ALLOWED_CONN_TYPES),
         "source_resource_types": list(SOURCE_RESOURCE_TYPES),
-        "database_analyzer_types": sorted({_normalize_database_type(item) for item in DATABASE_CONNECTION_TYPES}),
+        "database_analyzer_types": sorted(
+            {_normalize_database_type(item) for item in SOURCE_UNDERSTANDING_CONNECTION_TYPES}
+        ),
+        "relational_analyzer_types": sorted({_normalize_database_type(item) for item in DATABASE_CONNECTION_TYPES}),
     }
 
 
@@ -357,7 +364,8 @@ def render_markdown() -> str:
         f"- Allowed connection types: `{_join(payload['allowed_connection_types'])}`",
         f"- SourceResource types: `{_join(payload['source_resource_types'])}`",
         f"- Database analyzer version: `{DATABASE_ANALYZER_VERSION}`",
-        f"- Database analyzer types: `{_join(payload['database_analyzer_types'])}`",
+        f"- Source Understanding analyzer types: `{_join(payload['database_analyzer_types'])}`",
+        f"- Relational semantic-candidate analyzer types: `{_join(payload['relational_analyzer_types'])}`",
         "",
         "## Status Summary",
         "",
@@ -370,9 +378,9 @@ def render_markdown() -> str:
         "| mode | current rows | coverage note |",
         "|---|---|---|",
         "| Structured Data Modeler | `sql_pg_mysql_sqlite_oracle_mssql`, `databricks` | Schema/profile, Source Understanding, semantic draft, publish/reload, and MCP metric preview exist for the listed beta rows. |",
-        "| Tabular Projection Modeler | local CSV/Excel/Parquet/JSON/JSONL, Feishu Sheets/Base, TOS tabular objects | Projection manifests, raw snapshots, field/profile evidence, and projected datasets exist; review/confirmation remains beta. |",
+        "| Tabular Projection Modeler | local CSV/Excel/Parquet/JSON/JSONL, Feishu Sheets/Base, TOS tabular objects, MongoDB/DynamoDB document profiles | Projection manifests, raw snapshots, field/profile evidence, and projected datasets exist for file/SaaS/object rows; NoSQL rows have source profile snapshots and require reviewed projection materialization. |",
         "| Context & Policy Modeler | local PDF/DOCX/PPTX, Web URL, Feishu Docs/Wiki, TOS context objects | Context evidence and lineage exist; OpenHuman-compatible extraction adapter provenance is not yet verified in runtime metadata. |",
-        "| Blocked projection/modeling | MongoDB, DynamoDB | Current query or connection capability exists, but governed source snapshot/projection/modeling handoff is incomplete. |",
+        "| Blocked projection/modeling | none | Current matrix has no blocked rows; beta rows still list hardening gaps individually. |",
         "",
         "## OpenHuman Provenance",
         "",
@@ -419,7 +427,7 @@ def render_markdown() -> str:
             "",
             "- Local Parquet/JSON/JSONL now enter the governed `SourceResource` upload contract with snapshots, evidence, projected datasets, and projection manifests; nested/semi-structured JSON projection review remains beta hardening.",
             "- SQL Server now enters the structured Source Understanding path from cached/refreshable schema evidence; live-driver E2E credentials and dialect-specific profiling remain beta hardening.",
-            "- MongoDB and DynamoDB can be represented as connections/query sources, but they do not yet satisfy the P0 source snapshot/projection/modeling handoff contract.",
+            "- MongoDB and DynamoDB now create Source Understanding profile snapshots and evidence with a `document_projection` handoff; reviewed projection materialization and semantic drafts remain beta hardening.",
             "- Planned catalog tiles are intentionally read-only roadmap entries until adapter, auth, picker, snapshot, parser/profile, fixture, and UI journey evidence exists.",
             "- Semi-structured context extraction records native KnowledgeProvider evidence today; OpenHuman algorithm version/license/source-code verification is not wired into runtime metadata.",
             "",

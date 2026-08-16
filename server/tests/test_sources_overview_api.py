@@ -85,7 +85,10 @@ async def test_sources_overview_includes_ready_web_source_and_compatibility_alia
     assert item["next_actions"] == ["Search evidence", "Attach to notebook"]
     assert item["modeling_status"] == "context_only"
     assert item["modeling_mode"] == "context_assisted"
-    assert item["modeling_reason"] == "Indexed context can support definitions, policies, and evidence, but cannot be the production fact source for metrics."
+    assert (
+        item["modeling_reason"]
+        == "Indexed context can support definitions, policies, and evidence, but cannot be the production fact source for metrics."
+    )
     assert item["modeling_next_action"] == "Search evidence"
     assert item["modeling_evidence_summary"] == "2 evidence fragments; parse parsed; context indexed"
     assert item["modeling_can_load_profile"] is False
@@ -631,6 +634,122 @@ async def test_sources_overview_counts_multi_database_sql_schema_tables(test_cli
     assert item["modeling_can_load_profile"] is True
 
 
+async def test_sources_overview_marks_mongo_connection_as_nosql_projection_handoff(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    connection = Connection(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="mongo",
+        name="Mongo customer docs",
+        connection_obj_encrypted=json.dumps(
+            {"connection_string": "mongodb://readonly:secret@mongo.local/customer_docs"}
+        ),
+        schema_cache=json.dumps(
+            {
+                "database_type": "mongo",
+                "database_name": "customer_docs",
+                "schema": {
+                    "orders": {
+                        "sample_fields": ["_id", "customer_id", "status", "total_amount"],
+                        "nested_schema": {
+                            "type": "object",
+                            "properties": {
+                                "_id": {"type": "objectId"},
+                                "customer_id": {"type": "string"},
+                                "status": {"type": "string"},
+                                "total_amount": {"type": "number"},
+                            },
+                        },
+                    }
+                },
+            }
+        ),
+        schema_updated_at=datetime.utcnow(),
+        is_public=True,
+    )
+    test_session.add(connection)
+    await test_session.flush()
+    test_session.add(
+        Dataset(
+            tenant_id=tenant.id,
+            created_by=tenant.owner_id,
+            type="connection",
+            name="Mongo customer docs",
+            connection_id=connection.id,
+            is_public=True,
+        )
+    )
+    await test_session.commit()
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["connection_id"] == str(connection.id))
+
+    assert item["provider"] == "mongo"
+    assert item["family"] == "nosql"
+    assert item["status"] == "Ready"
+    assert item["parsed_asset_counts"]["tables"] == 1
+    assert item["next_actions"] == ["Review document projection", "Refresh document profile"]
+    assert item["modeling_status"] == "needs_projection"
+    assert item["modeling_mode"] == "document_projection"
+    assert item["modeling_next_action"] == "Review document projection"
+    assert item["modeling_can_load_profile"] is True
+    assert "review a tabular projection" in item["modeling_reason"]
+
+
+async def test_sources_overview_marks_dynamodb_without_profile_as_pending_document_profile(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    connection = Connection(
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        type="dynamodb",
+        name="Dynamo without profile",
+        connection_obj_encrypted=json.dumps(
+            {
+                "region": "us-east-1",
+                "access_key_id": "AKIA_TEST",
+                "secret_access_key": "secret",
+                "query_mode": "partiql",
+            }
+        ),
+        schema_cache=None,
+        schema_updated_at=None,
+        is_public=True,
+    )
+    test_session.add(connection)
+    await test_session.flush()
+    test_session.add(
+        Dataset(
+            tenant_id=tenant.id,
+            created_by=tenant.owner_id,
+            type="connection",
+            name="Dynamo without profile",
+            connection_id=connection.id,
+            is_public=True,
+        )
+    )
+    await test_session.commit()
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["connection_id"] == str(connection.id))
+
+    assert item["provider"] == "dynamodb"
+    assert item["family"] == "nosql"
+    assert item["status"] == "Pending"
+    assert item["parsed_asset_counts"]["tables"] == 0
+    assert item["next_actions"] == ["Refresh document profile"]
+    assert item["modeling_status"] == "processing"
+    assert item["modeling_mode"] == "document_projection"
+    assert item["modeling_next_action"] == "Refresh document profile"
+    assert item["modeling_can_load_profile"] is False
+    assert item["modeling_reason"] == "Refresh the document profile before projection review."
+
+
 async def test_sources_overview_object_storage_confirmation_uses_large_object_action(test_client, test_session):
     tenant = (await test_session.execute(select(Tenant))).scalars().first()
     assert tenant is not None
@@ -689,7 +808,7 @@ async def test_sources_overview_uses_snapshot_projection_manifest_for_asset_coun
         resource_id=resource.id,
         external_revision="etag-targets",
         content_hash="sha256:targets",
-        raw_storage_uri=f"tos://sales-bucket/projections/targets.xlsx",
+        raw_storage_uri="tos://sales-bucket/projections/targets.xlsx",
         captured_at=datetime.utcnow(),
         parser_version="xlsx-parser-v1",
         metadata_json={
@@ -766,7 +885,11 @@ async def test_sources_overview_counts_tos_prefix_manifest_files(test_client, te
                         "filename": "revenue.csv",
                         "file_type": "csv",
                         "status": "listed",
-                        "source_locator": {"kind": "tos_object", "bucket": "sales-bucket", "key": "reports/revenue.csv"},
+                        "source_locator": {
+                            "kind": "tos_object",
+                            "bucket": "sales-bucket",
+                            "key": "reports/revenue.csv",
+                        },
                     },
                     {
                         "filename": "cost.csv",

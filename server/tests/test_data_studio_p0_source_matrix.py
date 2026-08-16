@@ -51,5 +51,9 @@ def test_data_studio_p0_source_matrix_covers_connector_catalog_and_statuses() ->
     summary = matrix_summary(rows)
     assert summary["beta"] >= 1
     assert summary["planned"] >= 1
-    assert summary["blocked"] >= 1
+    assert summary["blocked"] == 0
     assert set(summary) == {"ready", "beta", "planned", "blocked"}
+    assert row_by_source["mongo"].final_status == "beta"
+    assert row_by_source["mongo"].modeling_mode == "document_projection"
+    assert row_by_source["dynamodb"].final_status == "beta"
+    assert row_by_source["dynamodb"].modeling_mode == "document_projection"

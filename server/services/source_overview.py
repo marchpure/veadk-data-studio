@@ -53,6 +53,8 @@ SOURCE_STATUS_LABELS = {
     "disconnected": "Authorization required",
 }
 
+NOSQL_CONNECTION_TYPES = {"mongo", "dynamodb"}
+
 
 @dataclass
 class _ConsumerIndex:
@@ -332,7 +334,7 @@ class SourceOverviewService:
                 id=str(dataset.id),
                 source_kind="connection",
                 connection_id=connection_id,
-                family="warehouses" if provider == "databricks" else "databases",
+                family=self._connection_family(provider),
                 provider=provider,
                 resource_type=provider,
                 name=dataset.connection.name or "Database Connection",
@@ -412,7 +414,9 @@ class SourceOverviewService:
         latest_snapshot = context.get("latest_snapshot")
         knowledge_resource = context.get("knowledge_resource")
         evidence_count = int(context.get("evidence_count") or 0)
-        snapshot_metadata = latest_snapshot.metadata_json if latest_snapshot and isinstance(latest_snapshot.metadata_json, dict) else {}
+        snapshot_metadata = (
+            latest_snapshot.metadata_json if latest_snapshot and isinstance(latest_snapshot.metadata_json, dict) else {}
+        )
         projected_dataset_id = (resource.sync_config_json or {}).get("projected_dataset_id") or snapshot_metadata.get(
             "projected_dataset_id"
         )
@@ -638,9 +642,21 @@ class SourceOverviewService:
                 parse_status="pending",
                 next_actions=["Reconnect database"],
             )
+        if connection.type in NOSQL_CONNECTION_TYPES:
+            return self._schema_profile_health(
+                connection=connection,
+                refresh_action="Refresh document profile",
+                parser_error_action="Review document profile parser error",
+            )
         return self._schema_profile_health(connection=connection)
 
-    def _schema_profile_health(self, *, connection: Connection) -> _ConnectionHealth:
+    def _schema_profile_health(
+        self,
+        *,
+        connection: Connection,
+        refresh_action: str = "Refresh schema profile",
+        parser_error_action: str = "Review schema parser error",
+    ) -> _ConnectionHealth:
         schema_state = self._schema_profile_state(connection.schema_cache)
         if schema_state == "ready":
             return _ConnectionHealth()
@@ -650,14 +666,14 @@ class SourceOverviewService:
                 attention_state="parse",
                 freshness_status="stale" if connection.schema_updated_at else "unknown",
                 parse_status="failed",
-                next_actions=["Refresh schema profile", "Review schema parser error"],
+                next_actions=[refresh_action, parser_error_action],
             )
         return _ConnectionHealth(
             status="pending",
             attention_state="parse",
             freshness_status="unknown",
             parse_status="pending",
-            next_actions=["Refresh schema profile"],
+            next_actions=[refresh_action],
         )
 
     def _schema_profile_state(self, schema_cache: str | None) -> str:
@@ -679,7 +695,9 @@ class SourceOverviewService:
         except (TypeError, ValueError):
             return None
 
-    def _connection_next_actions(self, *, provider: str, status: str, has_schema: bool, semantic_count: int) -> list[str]:
+    def _connection_next_actions(
+        self, *, provider: str, status: str, has_schema: bool, semantic_count: int
+    ) -> list[str]:
         if status in {"authorization_required", "reauthorization_required", "disconnected"}:
             if provider == "databricks":
                 return ["Reauthorize Databricks"]
@@ -687,11 +705,15 @@ class SourceOverviewService:
         if status == "source_unavailable":
             return ["Retry sync", "Check upstream source"]
         if not has_schema:
+            if provider in NOSQL_CONNECTION_TYPES:
+                return ["Refresh document profile"]
             return ["Refresh schema profile"]
         if provider == "databricks":
             if semantic_count == 0:
                 return ["Generate semantic model", "Open warehouse catalog"]
             return ["Review warehouse consumers", "Refresh schema profile"]
+        if provider in NOSQL_CONNECTION_TYPES:
+            return ["Review document projection", "Refresh document profile"]
         if semantic_count == 0:
             return ["Generate semantic model"]
         return ["Review semantic consumers", "Refresh schema profile"]
@@ -841,6 +863,15 @@ class SourceOverviewService:
                 evidence_summary=self._modeling_evidence_summary(item),
                 can_load_profile=True,
             )
+        if item.family == "nosql":
+            return _ModelingHandoff(
+                status="needs_projection",
+                mode="document_projection",
+                reason="Sampled document/key-value schema evidence is available; review a tabular projection before production semantic modeling.",
+                next_action=item.next_actions[0] if item.next_actions else "Review document projection",
+                evidence_summary=self._modeling_evidence_summary(item),
+                can_load_profile=True,
+            )
         if item.family == "warehouses":
             return _ModelingHandoff(
                 status="supported",
@@ -969,6 +1000,10 @@ class SourceOverviewService:
 
     def _pending_modeling_reason(self, item: SourceOverviewItem) -> str:
         actions = [action.lower() for action in item.next_actions]
+        if item.family == "nosql":
+            if any("refresh document profile" in action for action in actions):
+                return "Refresh the document profile before projection review."
+            return "NoSQL document/key-value profile is not ready yet. Refresh the profile before projection review."
         if item.family in {"databases", "warehouses"}:
             if any("refresh schema profile" in action for action in actions):
                 return "Refresh the schema/profile before this source can feed production semantic modeling."
@@ -991,7 +1026,9 @@ class SourceOverviewService:
         if item.context_index_status == "indexing":
             return "Context indexing is still running. This source can support modeling evidence after indexing, but not production metric facts."
         if item.context_index_status == "unavailable":
-            return "No context index is available yet. Add context indexing before using this source as modeling evidence."
+            return (
+                "No context index is available yet. Add context indexing before using this source as modeling evidence."
+            )
         return "Indexed context can support definitions, policies, and evidence, but cannot be the production fact source for metrics."
 
     def _unsupported_modeling_reason(self, item: SourceOverviewItem) -> str:
@@ -1002,6 +1039,8 @@ class SourceOverviewService:
     def _modeling_mode_for_item(self, item: SourceOverviewItem) -> str | None:
         if item.family == "databases":
             return "relational"
+        if item.family == "nosql":
+            return "document_projection"
         if item.family == "warehouses":
             return "warehouse"
         if self._is_projection_source(item):
@@ -1013,27 +1052,45 @@ class SourceOverviewService:
         return None
 
     def _is_projection_source(self, item: SourceOverviewItem) -> bool:
-        return bool(item.projected_dataset_id) or item.parsed_asset_counts.tables > 0 or item.resource_type in {
-            "csv",
-            "excel",
-            "xlsx",
-            "xlsm",
-            "feishu_sheet",
-            "feishu_base",
-            "extracted_table",
-        }
+        if item.family == "nosql":
+            return True
+        return (
+            bool(item.projected_dataset_id)
+            or item.parsed_asset_counts.tables > 0
+            or item.resource_type
+            in {
+                "csv",
+                "excel",
+                "xlsx",
+                "xlsm",
+                "feishu_sheet",
+                "feishu_base",
+                "extracted_table",
+            }
+        )
 
     def _is_context_source(self, item: SourceOverviewItem) -> bool:
         if item.family in {"documents", "web"}:
             return True
-        if item.resource_type in {"file", "pdf", "web", "feishu_doc", "feishu_wiki", "tos_bucket", "tos_prefix", "tos_object"}:
+        if item.resource_type in {
+            "file",
+            "pdf",
+            "web",
+            "feishu_doc",
+            "feishu_wiki",
+            "tos_bucket",
+            "tos_prefix",
+            "tos_object",
+        }:
             return item.context_index_status == "indexed" and item.parsed_asset_counts.evidence > 0
         return item.context_index_status == "indexed" and item.parsed_asset_counts.evidence > 0
 
     def _modeling_evidence_summary(self, item: SourceOverviewItem) -> str:
         parts: list[str] = []
         if item.parsed_asset_counts.tables:
-            parts.append(f"{item.parsed_asset_counts.tables} table{'s' if item.parsed_asset_counts.tables != 1 else ''}")
+            parts.append(
+                f"{item.parsed_asset_counts.tables} table{'s' if item.parsed_asset_counts.tables != 1 else ''}"
+            )
         if item.parsed_asset_counts.files:
             parts.append(f"{item.parsed_asset_counts.files} file{'s' if item.parsed_asset_counts.files != 1 else ''}")
         if item.parsed_asset_counts.evidence:
@@ -1048,6 +1105,13 @@ class SourceOverviewService:
 
     def _semantic_count(self, consumer_index: _ConsumerIndex, ids: set[str]) -> int:
         return sum(consumer_index.semantic_by_id.get(item_id, 0) for item_id in ids)
+
+    def _connection_family(self, provider: str) -> str:
+        if provider == "databricks":
+            return "warehouses"
+        if provider in NOSQL_CONNECTION_TYPES:
+            return "nosql"
+        return "databases"
 
     def _consumer_counts(
         self,

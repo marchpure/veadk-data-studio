@@ -57,6 +57,8 @@ const sourceFamilyLabel = (family: SourceOverviewItem['family']): string => {
       return 'Business docs'
     case 'warehouses':
       return 'Warehouses'
+    case 'nosql':
+      return 'NoSQL'
     case 'object_storage':
       return 'Object storage'
     case 'api':
@@ -174,6 +176,8 @@ const connectorModeLabel = (mode: string): string => {
       return 'Context-assisted'
     case 'projection':
       return 'Projection'
+    case 'document_projection':
+      return 'Document projection'
     case 'relational':
       return 'Relational'
     case 'warehouse':
@@ -395,26 +399,26 @@ export default function DatabasesPage() {
       { id: 'oracle', label: 'Oracle', family: 'databases', icon: Database, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Connect Oracle schemas with service name or SID.', limitations: sqlConnector?.limitations, modelingModes: sqlConnector?.modeling_modes.map(connectorModeLabel) ?? ['Relational'], connector: sqlConnector },
       { id: 'sqlite', label: 'SQLite', family: 'databases', icon: HardDrive, availability: 'available', outputs: ['Dataset', 'Semantic-ready', 'Dashboard-ready'], description: 'Use a local SQLite file for repeatable demos and local data.', limitations: sqlConnector?.limitations, modelingModes: sqlConnector?.modeling_modes.map(connectorModeLabel) ?? ['Relational'], connector: sqlConnector },
       {
-        id: 'planned:mongo',
+        id: 'mongo',
         label: 'MongoDB',
         family: 'databases',
         icon: Leaf,
-        availability: 'planned',
-        outputs: [],
-        description: 'Roadmap NoSQL source; not part of the commercial beta connector commitment.',
-        limitations: ['Planned only. Use the SQL databases Source contract for production semantic modeling until a governed business-object adapter passes readiness gates.'],
-        modelingModes: [],
+        availability: 'beta',
+        outputs: ['Dataset'],
+        description: 'Connect MongoDB for sampled document profile snapshots and projection review.',
+        limitations: ['Requires reviewed tabular projection before production semantic modeling; no automatic metric candidates are generated.'],
+        modelingModes: ['Document projection'],
       },
       {
-        id: 'planned:dynamodb',
+        id: 'dynamodb',
         label: 'DynamoDB',
         family: 'databases',
         icon: Cloud,
-        availability: 'planned',
-        outputs: [],
-        description: 'Roadmap NoSQL source; not part of the commercial beta connector commitment.',
-        limitations: ['Planned only. Use the SQL databases Source contract for production semantic modeling until a governed business-object adapter passes readiness gates.'],
-        modelingModes: [],
+        availability: 'beta',
+        outputs: ['Dataset'],
+        description: 'Connect DynamoDB for key schema, sampled item profile snapshots and projection review.',
+        limitations: ['Requires reviewed tabular projection before production semantic modeling; no automatic metric candidates are generated.'],
+        modelingModes: ['Document projection'],
       },
     ]
     if (databricksTileVisible) {

@@ -407,6 +407,7 @@ function iconForDatasource(item: DataModelingDatasource) {
   if (item.sourceFamily === 'files' || item.sourceFamily === 'documents') return FileText
   if (item.sourceFamily === 'web') return Globe2
   if (item.sourceFamily === 'object_storage') return HardDrive
+  if (item.sourceFamily === 'nosql') return Table2
   return Database
 }
 

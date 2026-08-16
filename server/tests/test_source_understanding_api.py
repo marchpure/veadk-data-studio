@@ -183,6 +183,78 @@ MSSQL_SALES_SCHEMA = {
 }
 
 
+MONGO_PROFILE_SCHEMA = {
+    "database_type": "mongo",
+    "database_name": "customer_docs",
+    "schema": {
+        "orders": {
+            "sample_fields": ["_id", "customer_id", "status", "total_amount", "paid_at", "shipping"],
+            "nested_schema": {
+                "type": "object",
+                "properties": {
+                    "_id": {"type": "objectId"},
+                    "customer_id": {"type": "string"},
+                    "status": {"type": "string"},
+                    "total_amount": {"type": "number"},
+                    "paid_at": {"type": "date"},
+                    "shipping": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                    },
+                },
+            },
+        },
+        "customers": {
+            "sample_fields": ["_id", "email", "tier"],
+            "nested_schema": {
+                "type": "object",
+                "properties": {
+                    "_id": {"type": "objectId"},
+                    "email": {"type": "string"},
+                    "tier": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
+
+DYNAMODB_PROFILE_SCHEMA = {
+    "database_type": "dynamodb",
+    "database_name": "DynamoDB (us-east-1)",
+    "query_mode": "partiql",
+    "schema": {
+        "orders": {
+            "key_schema": [
+                {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "sk", "KeyType": "RANGE"},
+            ],
+            "attribute_definitions": [
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "sk", "AttributeType": "S"},
+                {"AttributeName": "status", "AttributeType": "S"},
+            ],
+            "global_secondary_indexes": [
+                {
+                    "IndexName": "status-index",
+                    "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}],
+                }
+            ],
+            "sample_fields": ["pk", "sk", "status", "total_amount"],
+            "nested_schema": {
+                "type": "object",
+                "properties": {
+                    "pk": {"type": "string"},
+                    "sk": {"type": "string"},
+                    "status": {"type": "string"},
+                    "total_amount": {"type": "number"},
+                },
+            },
+        }
+    },
+}
+
+
 async def _create_connection_dataset(
     test_session,
     tenant_id,
@@ -473,6 +545,102 @@ async def test_mssql_source_understanding_creates_snapshots_evidence_and_semanti
     assert any(entity["table"] == "orders" for entity in model["entities"])
     assert any(metric["id"] == "orders_net_amount" for metric in model["metrics"])
     assert any(relationship["fromEntity"] == "orders" for relationship in model["relationships"])
+
+
+async def test_mongo_source_understanding_creates_profile_snapshots_without_semantic_candidates(
+    test_client, test_session
+):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+    _, dataset = await _create_connection_dataset(
+        test_session,
+        tenant.id,
+        tenant.owner_id,
+        schema=MONGO_PROFILE_SCHEMA,
+        connection_type="mongo",
+        name="Mongo Customer Docs",
+        connection_obj={"connection_string": "mongodb://readonly:secret@mongo.local/customer_docs"},
+    )
+
+    analyze_response = await test_client.post(f"/api/datasources/{dataset.id}/understanding/analyze", json={})
+
+    assert analyze_response.status_code == 200
+    understanding = analyze_response.json()["data"]
+    assert understanding["datasource_type"] == "mongo"
+    assert understanding["latest_run"]["status"] == "completed"
+    assert understanding["latest_run"]["summary_json"]["modeling_mode"] == "document_projection"
+    assert understanding["profile"]["table_count"] == 2
+    assert understanding["profile"]["relationship_count"] == 0
+    assert understanding["profile"]["candidate_counts"] == {}
+    assert understanding["candidates"] == []
+    assert understanding["overview"]["candidate_count"] == 0
+    assert understanding["overview"]["readiness"] < 75
+
+    resources = (await test_session.execute(select(SourceResource))).scalars().all()
+    snapshots = (await test_session.execute(select(SourceSnapshot))).scalars().all()
+    evidence = (await test_session.execute(select(EvidenceFragment))).scalars().all()
+    assert {resource.resource_type for resource in resources} >= {
+        "database_catalog",
+        "database_schema",
+        "database_table",
+    }
+    assert len(snapshots) == 4
+    assert len(evidence) >= 8
+    assert any(item.locator_json.get("source_family") == "nosql" for item in evidence)
+    table_snapshot = next(
+        snapshot for snapshot in snapshots if snapshot.metadata_json and snapshot.metadata_json.get("table") == "orders"
+    )
+    assert table_snapshot.metadata_json["projection_manifest"]["mode"] == "document_projection"
+    assert table_snapshot.metadata_json["projection_manifest"]["status"] == "needs_review"
+
+
+async def test_dynamodb_source_understanding_creates_profile_snapshots_without_semantic_candidates(
+    test_client, test_session
+):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+    _, dataset = await _create_connection_dataset(
+        test_session,
+        tenant.id,
+        tenant.owner_id,
+        schema=DYNAMODB_PROFILE_SCHEMA,
+        connection_type="dynamodb",
+        name="Dynamo Orders",
+        connection_obj={
+            "region": "us-east-1",
+            "access_key_id": "AKIA_TEST",
+            "secret_access_key": "secret",
+            "query_mode": "partiql",
+        },
+    )
+
+    analyze_response = await test_client.post(f"/api/datasources/{dataset.id}/understanding/analyze", json={})
+
+    assert analyze_response.status_code == 200
+    understanding = analyze_response.json()["data"]
+    assert understanding["datasource_type"] == "dynamodb"
+    assert understanding["latest_run"]["status"] == "completed"
+    assert understanding["latest_run"]["summary_json"]["modeling_mode"] == "document_projection"
+    assert understanding["profile"]["table_count"] == 1
+    assert understanding["profile"]["relationship_count"] == 0
+    assert understanding["profile"]["candidate_counts"] == {}
+    assert understanding["candidates"] == []
+
+    resources = (await test_session.execute(select(SourceResource))).scalars().all()
+    snapshots = (await test_session.execute(select(SourceSnapshot))).scalars().all()
+    evidence = (await test_session.execute(select(EvidenceFragment))).scalars().all()
+    assert {resource.resource_type for resource in resources} >= {
+        "database_catalog",
+        "database_schema",
+        "database_table",
+    }
+    assert len(snapshots) == 3
+    assert any(item.locator_json.get("source_family") == "nosql" for item in evidence)
+    table_snapshot = next(
+        snapshot for snapshot in snapshots if snapshot.metadata_json and snapshot.metadata_json.get("table") == "orders"
+    )
+    assert table_snapshot.metadata_json["primary_key"] == ["pk", "sk"]
+    assert table_snapshot.metadata_json["projection_manifest"]["mode"] == "document_projection"
 
 
 async def test_source_understanding_detects_drift_and_marks_previous_verified_candidates_stale(

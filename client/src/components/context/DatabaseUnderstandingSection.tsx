@@ -128,7 +128,12 @@ export const DatabaseUnderstandingSection: React.FC<DatabaseUnderstandingSection
   const normalizedDatabaseType = selectedDatabaseTypeKey === 'postgresql' || selectedDatabaseTypeKey === 'postgres'
     ? 'pg'
     : selectedDatabaseTypeKey;
-  const canUseSourceUnderstanding = selectedDatasource?.source_type === 'connection' && !!normalizedDatabaseType && ['oracle', 'pg', 'mysql'].includes(normalizedDatabaseType);
+  const canUseSourceUnderstanding =
+    selectedDatasource?.source_type === 'connection' &&
+    !!normalizedDatabaseType &&
+    ['oracle', 'pg', 'mysql', 'sqlite', 'mssql', 'mongo', 'dynamodb'].includes(normalizedDatabaseType);
+  const canCreateSemanticDraftFromUnderstanding =
+    !!normalizedDatabaseType && !['mongo', 'dynamodb'].includes(normalizedDatabaseType);
   const verifiedSourceCandidates = sourceUnderstanding?.candidates.filter(candidate => candidate.review_status === 'verified') || [];
 
   const filteredTables = useMemo(() => {
@@ -304,7 +309,13 @@ export const DatabaseUnderstandingSection: React.FC<DatabaseUnderstandingSection
   };
 
   const handleCreateSemanticDraft = async () => {
-    if (!selectedDatasourceId || !selectedDatasource || verifiedSourceCandidates.length === 0) return;
+    if (
+      !selectedDatasourceId ||
+      !selectedDatasource ||
+      verifiedSourceCandidates.length === 0 ||
+      !canCreateSemanticDraftFromUnderstanding
+    )
+      return;
     setIsCreatingSemanticDraft(true);
     try {
       const response = await ApiService.createSemanticModelDraftFromSourceUnderstanding(selectedDatasourceId, {
@@ -662,13 +673,19 @@ export const DatabaseUnderstandingSection: React.FC<DatabaseUnderstandingSection
                 disabled={isAnalyzingUnderstanding || !enableEditing || !canEditDatasource(selectedDatasource.created_by)}
                 className="h-8 text-xs text-gray-400 hover:text-white"
               >
-                Refresh schema + analyze
+                {['mongo', 'dynamodb'].includes(normalizedDatabaseType || '') ? 'Refresh document profile' : 'Refresh schema + analyze'}
               </Button>
               <Button
                 size="sm"
                 variant="brand-primary"
                 onClick={handleCreateSemanticDraft}
-                disabled={isCreatingSemanticDraft || verifiedSourceCandidates.length === 0 || !enableEditing || !canEditDatasource(selectedDatasource.created_by)}
+                disabled={
+                  isCreatingSemanticDraft ||
+                  verifiedSourceCandidates.length === 0 ||
+                  !canCreateSemanticDraftFromUnderstanding ||
+                  !enableEditing ||
+                  !canEditDatasource(selectedDatasource.created_by)
+                }
                 className="h-8 text-xs"
               >
                 {isCreatingSemanticDraft ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
@@ -780,6 +797,11 @@ export const DatabaseUnderstandingSection: React.FC<DatabaseUnderstandingSection
 
               {understandingTab === 'skills' && (
                 <div className="space-y-2">
+                  {sourceUnderstanding.candidates.length === 0 && (
+                    <div className="rounded-md border border-gray-800 bg-[#101010] p-3 text-xs text-gray-500">
+                      This source has profile snapshots and evidence, but no semantic candidates. Review a projection before creating production metrics.
+                    </div>
+                  )}
                   {sourceUnderstanding.candidates.map(candidate => (
                     <CandidateCard
                       key={candidate.id}

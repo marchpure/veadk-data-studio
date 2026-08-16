@@ -227,6 +227,8 @@ const modelingModeLabel = (mode?: SourceOverviewItem['modeling_mode'] | null) =>
       return 'Warehouse'
     case 'projection':
       return 'Projection review'
+    case 'document_projection':
+      return 'Document projection'
     case 'context_assisted':
       return 'Context-assisted'
     case 'business_object':
@@ -995,7 +997,7 @@ function OverviewSourceDetail({
 }) {
   const schemaTables = sourceSchemaTables(schema)
   const progressIndex = overviewProgressIndex(source)
-  const icon = source.family === 'warehouses' || source.family === 'databases'
+  const icon = source.family === 'warehouses' || source.family === 'databases' || source.family === 'nosql'
     ? <Database className="h-5 w-5 text-brand-orange" />
     : <FileText className="h-5 w-5 text-brand-orange" />
 
@@ -1236,7 +1238,7 @@ function OverviewSourceDetail({
             )}
             <KeyValue label="Delete behavior" value="Delete is handled from the Sources inventory and keeps downstream impact explicit." />
             <KeyValue label="Refresh behavior" value={source.source_kind === 'connection' ? 'Refresh schema/profile before regenerating semantic suggestions.' : 'Re-profile the dataset or source projection before publishing dependent models.'} />
-            <KeyValue label="Production modeling" value={source.family === 'databases' || source.family === 'warehouses' ? 'Supported through schema/profile evidence.' : 'Requires projection or context-assisted handoff.'} />
+            <KeyValue label="Production modeling" value={source.family === 'databases' || source.family === 'warehouses' ? 'Supported through schema/profile evidence.' : source.family === 'nosql' ? 'Requires reviewed document projection before semantic modeling.' : 'Requires projection or context-assisted handoff.'} />
           </Section>
         </div>
       </div>
@@ -1312,6 +1314,9 @@ function overviewReadinessMessage(source: SourceOverviewItem): string {
   }
   if (source.family === 'databases' || source.family === 'warehouses') {
     return 'Schema/profile evidence is available for semantic model generation.'
+  }
+  if (source.family === 'nosql') {
+    return 'Sampled document profile evidence is available. Review a tabular projection before semantic model generation.'
   }
   if (source.projected_dataset_id) {
     return 'A projected dataset exists. Review projection shape before production semantic modeling.'

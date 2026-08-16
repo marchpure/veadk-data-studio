@@ -282,6 +282,17 @@ export function sourceOverviewToModelingDatasource(item: SourceOverviewItem): Da
     }
   }
 
+  if (item.family === 'nosql') {
+    return {
+      ...base,
+      modelingStatus: 'needs_projection',
+      modelingMode: 'document_projection',
+      reason: 'Sampled document/key-value schema evidence is available; review a tabular projection before production semantic modeling.',
+      evidenceSummary: localEvidenceSummary(item),
+      canLoadProfile: true,
+    }
+  }
+
   if (item.family === 'warehouses') {
     return {
       ...base,
@@ -444,6 +455,12 @@ function normalizeStatusText(value: unknown): string {
 
 function pendingSourceReason(item: SourceOverviewItem): string {
   const actions = (item.next_actions ?? []).map(normalizeStatusText)
+  if (item.family === 'nosql') {
+    if (actions.some(action => action.includes('refresh document profile'))) {
+      return 'Refresh the document profile before projection review.'
+    }
+    return 'NoSQL document/key-value profile is not ready yet. Refresh the profile before projection review.'
+  }
   if (item.family === 'databases' || item.family === 'warehouses') {
     if (actions.some(action => action.includes('refresh schema profile'))) {
       return 'Refresh the schema/profile before this source can feed production semantic modeling.'
@@ -455,6 +472,7 @@ function pendingSourceReason(item: SourceOverviewItem): string {
 
 function isProjectionSource(item: SourceOverviewItem): boolean {
   const resourceType = String(item.resource_type ?? '')
+  if (item.family === 'nosql') return true
   return Boolean(item.projected_dataset_id)
     || hasParsedTables(item)
     || isProjectionResourceType(resourceType)
@@ -514,6 +532,7 @@ function isContextSource(item: SourceOverviewItem): boolean {
 
 function modeForFamily(item: SourceOverviewItem): DataModelingMode | undefined {
   if (item.family === 'databases') return 'relational'
+  if (item.family === 'nosql') return 'document_projection'
   if (item.family === 'warehouses') return 'warehouse'
   if (isProjectionSource(item)) return 'projection'
   if (isContextSource(item)) return 'context_assisted'
@@ -561,6 +580,7 @@ function normalizeSourceOverviewKind(item: SourceOverviewItem): DataSourceKind {
   if (item.family === 'documents') return 'document'
   if (item.family === 'web') return 'web'
   if (item.family === 'object_storage') return 'object_storage'
+  if (item.family === 'nosql') return normalizeKind(item.provider || item.resource_type)
   if (item.family === 'api' || item.family === 'saas') return 'api'
   return normalizeKind(item.provider || item.resource_type)
 }
@@ -767,7 +787,7 @@ function displayValue(value: unknown): string {
 function normalizeKind(value: unknown): DataSourceKind {
   const kind = String(value ?? 'pg')
   if (kind === 'postgres') return 'pg'
-  if (['oracle', 'pg', 'mysql', 'sqlite'].includes(kind)) return kind as DataSourceKind
+  if (['oracle', 'pg', 'mysql', 'sqlite', 'mongo', 'dynamodb', 'databricks'].includes(kind)) return kind as DataSourceKind
   return 'pg'
 }
 

@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 SourceKind = Literal["connection", "dataset", "source_resource"]
-SourceFamily = Literal["files", "documents", "saas", "databases", "warehouses", "object_storage", "web", "api"]
+SourceFamily = Literal["files", "documents", "saas", "databases", "nosql", "warehouses", "object_storage", "web", "api"]
 AttentionState = Literal["none", "auth", "permission", "parse", "index", "stale", "policy"]
 FreshnessStatus = Literal["fresh", "stale", "unknown"]
 ContextIndexStatus = Literal["pending", "indexing", "indexed", "failed", "unavailable"]
@@ -27,6 +27,7 @@ ModelingMode = Literal[
     "relational",
     "warehouse",
     "projection",
+    "document_projection",
     "context_assisted",
     "business_object",
     "event",

@@ -33,8 +33,11 @@ from server.services.semantic_model_service import SemanticModelService
 
 DATABASE_ANALYZER_VERSION = "database-source-analyzer-v1"
 DATABASE_CONNECTION_TYPES = {"oracle", "pg", "postgres", "postgresql", "mysql", "sqlite", "mssql"}
+NOSQL_CONNECTION_TYPES = {"mongo", "dynamodb"}
+SOURCE_UNDERSTANDING_CONNECTION_TYPES = DATABASE_CONNECTION_TYPES | NOSQL_CONNECTION_TYPES
 SOURCE_SKILL_CANDIDATE_VERSION = 1
 SOURCE_SKILL_GENERATOR = f"{DATABASE_ANALYZER_VERSION}:metadata-profile"
+NOSQL_SOURCE_SKILL_GENERATOR = f"{DATABASE_ANALYZER_VERSION}:document-profile"
 
 
 def _json_dump(value: Any) -> str:
@@ -140,7 +143,7 @@ class SourceAnalyzer(Protocol):
 
 class DatabaseSourceAnalyzer:
     provider = "database"
-    supported_connection_types = DATABASE_CONNECTION_TYPES
+    supported_connection_types = SOURCE_UNDERSTANDING_CONNECTION_TYPES
 
     async def analyze(self, *, session: AsyncSession, request: SourceAnalyzerRequest) -> dict[str, Any]:
         return await SourceUnderstandingService().analyze_database(
@@ -171,6 +174,13 @@ class SourceUnderstandingService:
             str(evidence_id) for candidate in candidates for evidence_id in (candidate.evidence_ids_json or [])
         }
         evidence = await self._evidence_by_ids(session=session, evidence_ids=evidence_ids, tenant_id=tenant_id)
+        resource_evidence = await self._evidence_for_resources(
+            session=session,
+            resource_ids={resource.id for resource in resources},
+            tenant_id=tenant_id,
+        )
+        evidence_by_key = {str(item.id): item for item in [*evidence, *resource_evidence]}
+        evidence = list(evidence_by_key.values())
         evidence_by_id = {str(item.id): item for item in evidence}
 
         return {
@@ -213,9 +223,19 @@ class SourceUnderstandingService:
         scope: list[str] | None = None,
     ) -> dict[str, Any]:
         connection = await self.resolve_connection(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
-        if _normalize_connection_type(connection.type) not in DATABASE_CONNECTION_TYPES:
+        normalized_connection_type = _normalize_connection_type(connection.type)
+        if normalized_connection_type in NOSQL_CONNECTION_TYPES:
+            return await self.analyze_nosql_database(
+                session=session,
+                datasource_id=datasource_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                refresh_schema=refresh_schema,
+                scope=scope,
+            )
+        if normalized_connection_type not in DATABASE_CONNECTION_TYPES:
             raise ValueError(
-                "Source Understanding currently supports Oracle, PostgreSQL, MySQL, SQLite, and SQL Server connections"
+                "Source Understanding currently supports Oracle, PostgreSQL, MySQL, SQLite, SQL Server, MongoDB, and DynamoDB connections"
             )
 
         schema = await self._load_schema(session=session, connection=connection, refresh_schema=refresh_schema)
@@ -384,6 +404,211 @@ class SourceUnderstandingService:
         run.completed_at = datetime.utcnow()
         run.source_snapshot_ids_json = snapshot_ids
         run.summary_json = self._summary_payload(normalized, candidates)
+        run.drift_json = {
+            "status": "drift_detected" if drift_events else "stable",
+            "events": drift_events,
+            "resource_count": len(snapshot_ids),
+            "checked_at": datetime.utcnow().isoformat(),
+        }
+        await session.commit()
+
+        return await self.get_understanding(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
+
+    async def analyze_nosql_database(
+        self,
+        *,
+        session: AsyncSession,
+        datasource_id: str,
+        tenant_id: UUID,
+        user_id: UUID | None,
+        refresh_schema: bool = False,
+        scope: list[str] | None = None,
+    ) -> dict[str, Any]:
+        connection = await self.resolve_connection(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
+        datasource_type = _normalize_connection_type(connection.type)
+        if datasource_type not in NOSQL_CONNECTION_TYPES:
+            raise ValueError("NoSQL Source Understanding currently supports MongoDB and DynamoDB connections")
+
+        schema = await self._load_schema(session=session, connection=connection, refresh_schema=refresh_schema)
+        normalized = self._normalize_nosql_schema(connection=connection, schema=schema, scope=scope or [])
+
+        run = SourceUnderstandingRun(
+            tenant_id=tenant_id,
+            connection_id=connection.id,
+            datasource_id=datasource_id,
+            provider="database",
+            status="running",
+            analyzer_version=DATABASE_ANALYZER_VERSION,
+            source_snapshot_ids_json=[],
+            summary_json={},
+            drift_json={},
+            created_at=datetime.utcnow(),
+        )
+        session.add(run)
+        await session.flush()
+
+        drift_events: list[dict[str, Any]] = []
+        snapshot_ids: list[str] = []
+
+        catalog_resource, catalog_snapshot = await self._snapshot_resource(
+            session=session,
+            tenant_id=tenant_id,
+            connection_id=connection.id,
+            resource_type="database_catalog",
+            external_id=f"database:{connection.id}:catalog:{normalized.catalog}",
+            name=normalized.catalog,
+            owner_id=user_id,
+            payload={
+                "catalog": normalized.catalog,
+                "datasource_type": normalized.datasource_type,
+                "source_family": "nosql",
+                "modeling_handoff": "document_projection",
+                "collections": [table.name for table in normalized.tables],
+                "tables": [table.name for table in normalized.tables],
+            },
+            drift_events=drift_events,
+        )
+        snapshot_ids.append(str(catalog_snapshot.id))
+
+        schema_resource, schema_snapshot = await self._snapshot_resource(
+            session=session,
+            tenant_id=tenant_id,
+            connection_id=connection.id,
+            resource_type="database_schema",
+            external_id=f"database:{connection.id}:schema:{normalized.schema}",
+            name=f"{normalized.catalog}.{normalized.schema}",
+            owner_id=user_id,
+            payload={
+                "catalog": normalized.catalog,
+                "schema": normalized.schema,
+                "source_family": "nosql",
+                "modeling_handoff": "document_projection",
+                "table_count": len(normalized.tables),
+            },
+            drift_events=drift_events,
+        )
+        snapshot_ids.append(str(schema_snapshot.id))
+
+        await self._create_knowledge_and_evidence(
+            session=session,
+            tenant_id=tenant_id,
+            resource=catalog_resource,
+            snapshot=catalog_snapshot,
+            fragments=[
+                {
+                    "fragment_type": "database_catalog",
+                    "title_path": [normalized.catalog],
+                    "text": f"NoSQL catalog {normalized.catalog} contains {len(normalized.tables)} sampled collections or tables.",
+                    "locator_json": {
+                        "kind": "database_catalog",
+                        "datasource_id": datasource_id,
+                        "connection_id": str(connection.id),
+                        "catalog": normalized.catalog,
+                        "source_family": "nosql",
+                    },
+                    "confidence": "medium",
+                }
+            ],
+            provider="nosql_profile",
+        )
+        await self._create_knowledge_and_evidence(
+            session=session,
+            tenant_id=tenant_id,
+            resource=schema_resource,
+            snapshot=schema_snapshot,
+            fragments=[
+                {
+                    "fragment_type": "database_schema",
+                    "title_path": [normalized.catalog, normalized.schema],
+                    "text": f"NoSQL schema profile {normalized.schema} has {len(normalized.tables)} sampled collections or tables.",
+                    "locator_json": {
+                        "kind": "database_schema",
+                        "datasource_id": datasource_id,
+                        "connection_id": str(connection.id),
+                        "catalog": normalized.catalog,
+                        "schema": normalized.schema,
+                        "source_family": "nosql",
+                    },
+                    "confidence": "medium",
+                }
+            ],
+            provider="nosql_profile",
+        )
+
+        for table in normalized.tables:
+            table_resource, table_snapshot = await self._snapshot_resource(
+                session=session,
+                tenant_id=tenant_id,
+                connection_id=connection.id,
+                resource_type="database_table",
+                external_id=f"database:{connection.id}:table:{table.schema}.{table.name}",
+                name=f"{table.schema}.{table.name}",
+                owner_id=user_id,
+                payload={
+                    **self._table_snapshot_payload(table),
+                    "source_family": "nosql",
+                    "modeling_handoff": "document_projection",
+                    "projection_status": "needs_review",
+                    "projection_manifest": {
+                        "status": "needs_review",
+                        "mode": "document_projection",
+                        "source_locator": {
+                            "kind": datasource_type,
+                            "catalog": table.catalog,
+                            "schema": table.schema,
+                            "collection": table.name,
+                        },
+                        "fields": [
+                            {
+                                "name": column.name,
+                                "type": column.data_type,
+                                "role": column.role,
+                                "projection": "candidate_field",
+                            }
+                            for column in table.columns
+                        ],
+                    },
+                },
+                drift_events=drift_events,
+            )
+            snapshot_ids.append(str(table_snapshot.id))
+            await self._create_knowledge_and_evidence(
+                session=session,
+                tenant_id=tenant_id,
+                resource=table_resource,
+                snapshot=table_snapshot,
+                fragments=self._table_evidence_fragments(
+                    datasource_id=datasource_id,
+                    connection_id=connection.id,
+                    table=table,
+                    source_family="nosql",
+                ),
+                provider="nosql_profile",
+            )
+
+        if drift_events:
+            await self._mark_previous_verified_stale(
+                session=session,
+                tenant_id=tenant_id,
+                datasource_id=datasource_id,
+                current_run_id=run.id,
+            )
+
+        run.status = "completed"
+        run.completed_at = datetime.utcnow()
+        run.source_snapshot_ids_json = snapshot_ids
+        run.summary_json = self._summary_payload(normalized, [])
+        run.summary_json.update(
+            {
+                "modeling_mode": "document_projection",
+                "projection_status": "needs_review",
+                "candidate_counts": {},
+                "readiness": min(70, 35 + len(normalized.tables) * 5),
+                "warnings": [
+                    "Document shape has source snapshots and evidence, but no reviewed tabular projection or relational semantic candidates yet."
+                ],
+            }
+        )
         run.drift_json = {
             "status": "drift_detected" if drift_events else "stable",
             "events": drift_events,
@@ -683,6 +908,192 @@ class SourceUnderstandingService:
             tables=tuple(with_relationships),
             raw_schema=root,
         )
+
+    def _normalize_nosql_schema(
+        self,
+        *,
+        connection: Connection,
+        schema: dict[str, Any],
+        scope: list[str],
+    ) -> NormalizedDatabaseSchema:
+        root = schema if isinstance(schema, dict) else {}
+        raw_tables = root.get("schema") if isinstance(root.get("schema"), dict) else {}
+        datasource_type = _normalize_connection_type(
+            str(root.get("datasource_type") or root.get("database_type") or connection.type)
+        )
+        datasource_name = str(
+            root.get("datasource_name") or root.get("database_name") or connection.name or connection.type
+        )
+        catalog = str(root.get("database_name") or root.get("datasource_name") or connection.name or connection.id)
+        default_schema = "document"
+        wanted = {item.upper() for item in scope if item}
+
+        tables: list[NormalizedTable] = []
+        for table_name, table_info in sorted(raw_tables.items(), key=lambda item: str(item[0]).lower()):
+            if wanted and str(table_name).upper() not in wanted:
+                continue
+            if not isinstance(table_info, dict):
+                table_info = {}
+            sample_rows = tuple(
+                row
+                for row in table_info.get("sample_rows")
+                or table_info.get("sample_items")
+                or table_info.get("sample_data")
+                or []
+                if isinstance(row, dict)
+            )
+            columns = self._normalize_nosql_columns(
+                datasource_type=datasource_type,
+                table_info=table_info,
+                sample_rows=sample_rows,
+            )
+            primary_key = tuple(self._normalize_nosql_primary_key(datasource_type, table_info, columns))
+            tables.append(
+                NormalizedTable(
+                    catalog=catalog,
+                    schema=default_schema,
+                    name=str(table_name),
+                    table_type="document_collection" if datasource_type == "mongo" else "key_value_table",
+                    category="document",
+                    description=str(
+                        table_info.get("description")
+                        or (
+                            "Sampled MongoDB collection profile."
+                            if datasource_type == "mongo"
+                            else "Sampled DynamoDB table profile."
+                        )
+                    ),
+                    row_count=self._coerce_int(
+                        table_info.get("row_count")
+                        or table_info.get("item_count")
+                        or table_info.get("ItemCount")
+                        or (table_info.get("profile") or {}).get("row_count")
+                    ),
+                    primary_key=primary_key,
+                    columns=tuple(columns),
+                    foreign_keys=(),
+                    indexes=tuple(self._normalize_nosql_indexes(datasource_type, table_info)),
+                    sample_rows=sample_rows,
+                )
+            )
+
+        return NormalizedDatabaseSchema(
+            datasource_name=datasource_name,
+            datasource_type=datasource_type,
+            catalog=catalog,
+            schema=default_schema,
+            tables=tuple(tables),
+            raw_schema=root,
+        )
+
+    def _normalize_nosql_columns(
+        self,
+        *,
+        datasource_type: str,
+        table_info: dict[str, Any],
+        sample_rows: tuple[dict[str, Any], ...],
+    ) -> list[NormalizedColumn]:
+        field_names: list[str] = []
+        sample_fields = table_info.get("sample_fields")
+        if isinstance(sample_fields, list):
+            field_names.extend(str(item) for item in sample_fields if item)
+        for row in sample_rows:
+            field_names.extend(str(key) for key in row)
+
+        nested_properties = self._nested_schema_properties(table_info.get("nested_schema"))
+        field_names.extend(nested_properties)
+
+        if datasource_type == "dynamodb":
+            for attribute in table_info.get("attribute_definitions") or []:
+                if isinstance(attribute, dict) and attribute.get("AttributeName"):
+                    field_names.append(str(attribute["AttributeName"]))
+            for key in table_info.get("key_schema") or []:
+                if isinstance(key, dict) and key.get("AttributeName"):
+                    field_names.append(str(key["AttributeName"]))
+
+        deduped = sorted(set(field_names), key=str.lower)
+        columns: list[NormalizedColumn] = []
+        for field_name in deduped:
+            columns.append(
+                NormalizedColumn(
+                    name=field_name,
+                    data_type=self._nosql_field_type(field_name, nested_properties, table_info, sample_rows),
+                    nullable=True,
+                    role=self._classify_column(
+                        field_name, self._nosql_field_type(field_name, nested_properties, table_info, sample_rows)
+                    ),
+                    description="Sampled document field; requires projection review before semantic modeling.",
+                    profile=self._normalize_column_profile(
+                        raw_profile={},
+                        column_name=field_name,
+                        sample_rows=sample_rows,
+                        row_count=None,
+                    ),
+                )
+            )
+        return columns
+
+    def _normalize_nosql_primary_key(
+        self,
+        datasource_type: str,
+        table_info: dict[str, Any],
+        columns: list[NormalizedColumn],
+    ) -> list[str]:
+        if datasource_type == "mongo" and any(column.name == "_id" for column in columns):
+            return ["_id"]
+        if datasource_type != "dynamodb":
+            return []
+        keys = []
+        for key in table_info.get("key_schema") or []:
+            if isinstance(key, dict) and key.get("AttributeName"):
+                keys.append(str(key["AttributeName"]))
+        return keys
+
+    def _normalize_nosql_indexes(self, datasource_type: str, table_info: dict[str, Any]) -> list[dict[str, Any]]:
+        if datasource_type != "dynamodb":
+            return []
+        indexes: list[dict[str, Any]] = []
+        for index in table_info.get("global_secondary_indexes") or []:
+            if not isinstance(index, dict):
+                continue
+            columns = [
+                str(key["AttributeName"])
+                for key in index.get("KeySchema") or []
+                if isinstance(key, dict) and key.get("AttributeName")
+            ]
+            indexes.append({"name": index.get("IndexName") or "unnamed_gsi", "columns": columns, "unique": False})
+        return indexes
+
+    def _nested_schema_properties(self, nested_schema: Any) -> dict[str, str]:
+        if not isinstance(nested_schema, dict):
+            return {}
+        properties = nested_schema.get("properties")
+        if not isinstance(properties, dict):
+            return {}
+        return {
+            str(name): str(schema.get("type") or "unknown") if isinstance(schema, dict) else "unknown"
+            for name, schema in properties.items()
+        }
+
+    def _nosql_field_type(
+        self,
+        field_name: str,
+        nested_properties: dict[str, str],
+        table_info: dict[str, Any],
+        sample_rows: tuple[dict[str, Any], ...],
+    ) -> str:
+        if field_name in nested_properties:
+            return nested_properties[field_name]
+        for attribute in table_info.get("attribute_definitions") or []:
+            if isinstance(attribute, dict) and attribute.get("AttributeName") == field_name:
+                attr_type = attribute.get("AttributeType") or "unknown"
+                return f"dynamodb:{attr_type}"
+        observed = [self._sample_value(row, field_name) for row in sample_rows]
+        observed = [value for value in observed if value is not None]
+        if not observed:
+            return "unknown"
+        type_names = {type(value).__name__ for value in observed}
+        return type_names.pop() if len(type_names) == 1 else "mixed"
 
     def _normalize_columns(
         self,
@@ -1302,13 +1713,15 @@ class SourceUnderstandingService:
         resource: SourceResource,
         snapshot: SourceSnapshot,
         fragments: list[dict[str, Any]],
+        provider: str = "database",
     ) -> dict[str, Any]:
         knowledge_resource = KnowledgeResource(
             tenant_id=tenant_id,
             resource_id=resource.id,
             snapshot_id=snapshot.id,
-            provider="database",
+            provider=provider,
             provider_resource_id=resource.external_id,
+            provider_metadata_json={"source_family": provider},
             parse_status="parsed",
             index_status="indexed",
             completeness_score=0.9,
@@ -1348,6 +1761,7 @@ class SourceUnderstandingService:
         datasource_id: str,
         connection_id: UUID,
         table: NormalizedTable,
+        source_family: str = "database",
     ) -> list[dict[str, Any]]:
         base_locator = {
             "datasource_id": datasource_id,
@@ -1355,12 +1769,14 @@ class SourceUnderstandingService:
             "catalog": table.catalog,
             "schema": table.schema,
             "table": table.name,
+            "source_family": source_family,
         }
+        object_label = "collection" if source_family == "nosql" else "table"
         fragments = [
             {
                 "fragment_type": "database_table",
                 "title_path": [table.catalog, table.schema, table.name],
-                "text": f"Table {table.name} has {len(table.columns)} columns, category {table.category}, and primary key {', '.join(table.primary_key) or 'not detected'}.",
+                "text": f"{object_label.title()} {table.name} has {len(table.columns)} sampled fields, category {table.category}, and primary key {', '.join(table.primary_key) or 'not detected'}.",
                 "locator_json": {"kind": "database_table", **base_locator},
                 "confidence": "high" if table.primary_key else "medium",
             }
@@ -1370,7 +1786,7 @@ class SourceUnderstandingService:
                 {
                     "fragment_type": "database_column",
                     "title_path": [table.catalog, table.schema, table.name, column.name],
-                    "text": f"Column {table.name}.{column.name} type {column.data_type}, nullable={column.nullable}, role={column.role}.",
+                    "text": f"Field {table.name}.{column.name} type {column.data_type}, nullable={column.nullable}, role={column.role}.",
                     "locator_json": {"kind": "database_column", **base_locator, "column": column.name},
                     "confidence": "high" if column.role in {"id", "time", "amount", "pii"} else "medium",
                 }
@@ -1555,6 +1971,25 @@ class SourceUnderstandingService:
             return []
         result = await session.execute(
             select(EvidenceFragment).where(EvidenceFragment.tenant_id == tenant_id, EvidenceFragment.id.in_(parsed))
+        )
+        return list(result.scalars().all())
+
+    async def _evidence_for_resources(
+        self,
+        *,
+        session: AsyncSession,
+        resource_ids: set[UUID],
+        tenant_id: UUID,
+    ) -> list[EvidenceFragment]:
+        if not resource_ids:
+            return []
+        result = await session.execute(
+            select(EvidenceFragment)
+            .join(KnowledgeResource, EvidenceFragment.knowledge_resource_id == KnowledgeResource.id)
+            .where(
+                EvidenceFragment.tenant_id == tenant_id,
+                KnowledgeResource.resource_id.in_(resource_ids),
+            )
         )
         return list(result.scalars().all())
 

@@ -1,6 +1,6 @@
 import type { SourceOverviewFamily } from '../../services/api'
 
-export type DataSourceKind = 'oracle' | 'postgres' | 'pg' | 'mysql' | 'sqlite' | 'databricks' | 'file' | 'document' | 'web' | 'object_storage' | 'api' | 'unknown'
+export type DataSourceKind = 'oracle' | 'postgres' | 'pg' | 'mysql' | 'sqlite' | 'mongo' | 'dynamodb' | 'databricks' | 'file' | 'document' | 'web' | 'object_storage' | 'api' | 'unknown'
 export type ModelStatus = 'Draft' | 'Validating' | 'Validation Failed' | 'Ready for Review' | 'Published' | 'Rejected'
 export type ReadinessLevel = 'ready' | 'warning' | 'blocked'
 export type TableCategory = 'fact' | 'dimension' | 'bridge' | 'log'
@@ -28,7 +28,7 @@ export type DataModelingStatus =
   | 'failed'
   | 'planned'
   | 'unsupported'
-export type DataModelingMode = 'relational' | 'warehouse' | 'projection' | 'context_assisted' | 'business_object' | 'event' | 'semantic_import'
+export type DataModelingMode = 'relational' | 'warehouse' | 'projection' | 'document_projection' | 'context_assisted' | 'business_object' | 'event' | 'semantic_import'
 
 export interface DataModelingDatasource {
   id: string
