@@ -294,6 +294,16 @@ async def test_dashboard_asset_rest_lifecycle_query_state_lineage_and_audit(
     )
     assert unknown_view_response.status_code == 403
 
+    unknown_filter_response = await test_client.post(
+        f"/api/dashboard-assets/{asset['id']}/query",
+        json={
+            "filters": {"region": "AMER", "raw_sql": "select * from other_tenant.secret"},
+            "data_view_ids": ["dv-saved-revenue"],
+        },
+    )
+    assert unknown_filter_response.status_code == 403
+    assert "filters are not available" in unknown_filter_response.json()["message"]
+
     export_response = await test_client.get(f"/api/dashboard-assets/{asset['id']}/export/html")
     assert export_response.status_code == 200
     assert "text/html" in export_response.headers["content-type"]

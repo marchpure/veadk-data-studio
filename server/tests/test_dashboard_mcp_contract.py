@@ -377,6 +377,22 @@ async def test_dashboard_mcp_query_rejects_unknown_view_and_cursor_before_execut
     assert unknown_view_payload["status_code"] == 403
     assert executed is False
 
+    unknown_filter_payload = json.loads(
+        await query_dashboard_wrapper(
+            dashboard["id"],
+            ["dv-saved-revenue"],
+            {"raw_sql": "select * from other_tenant.secret"},
+            "",
+            20,
+            ids["tenant_id"],
+            ids["user_id"],
+        )
+    )
+    assert unknown_filter_payload["success"] is False
+    assert unknown_filter_payload["status_code"] == 403
+    assert "filters are not available" in unknown_filter_payload["error"]
+    assert executed is False
+
     cursor_payload = json.loads(
         await query_dashboard_wrapper(
             dashboard["id"],

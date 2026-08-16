@@ -560,7 +560,7 @@ class DashboardService:
 
         manifest = self.validate_manifest_payload(version.manifest_json)
         selected_data_views = self._select_data_views(manifest, data_view_ids)
-        normalized_filters = self._normalize_filters(filters or {})
+        normalized_filters = self._normalize_filters(manifest, selected_data_views, filters or {})
         policy_blockers = self._manifest_policy_blockers(manifest)
         filter_digest = self.digest_payload(normalized_filters)
         execution_plan_digest = self.digest_payload(
@@ -685,7 +685,7 @@ class DashboardService:
 
         manifest = self.validate_manifest_payload(version.manifest_json)
         selected_data_views = self._select_data_views(manifest, data_view_ids)
-        normalized_filters = self._normalize_filters(filters or {})
+        normalized_filters = self._normalize_filters(manifest, selected_data_views, filters or {})
         policy_blockers = self._manifest_policy_blockers(manifest)
         filter_digest = self.digest_payload(normalized_filters)
         execution_plan_digest = self.digest_payload(
@@ -784,9 +784,122 @@ class DashboardService:
             )
         return [views_by_id[data_view_id] for data_view_id in data_view_ids]
 
+    def _normalize_filters(
+        self,
+        manifest: dict[str, Any],
+        selected_data_views: list[dict[str, Any]],
+        filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        selected_ids = {data_view["id"] for data_view in selected_data_views}
+        selected_filter_fields: set[str] = set()
+        for data_view in selected_data_views:
+            selected_filter_fields.update(str(field) for field in data_view.get("filter_fields") or [])
+        allowed_filters = [
+            dashboard_filter
+            for dashboard_filter in manifest.get("filters", [])
+            if self._filter_applies_to_selected_views(dashboard_filter, selected_ids)
+            and dashboard_filter.get("field") in selected_filter_fields
+        ]
+        filters_by_key: dict[str, dict[str, Any]] = {}
+        for dashboard_filter in allowed_filters:
+            filters_by_key[str(dashboard_filter["id"])] = dashboard_filter
+            filters_by_key[str(dashboard_filter["field"])] = dashboard_filter
+        unknown_filters = sorted(str(filter_id) for filter_id in filters if filter_id not in filters_by_key)
+        if unknown_filters:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="One or more filters are not available for this dashboard data view",
+            )
+
+        normalized: dict[str, Any] = {}
+        for dashboard_filter in allowed_filters:
+            value_present, raw_value = self._filter_value(dashboard_filter, filters)
+            if self._has_conflicting_filter_values(dashboard_filter, filters):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="One or more dashboard filters have invalid values",
+                )
+            if not value_present:
+                default_value = dashboard_filter.get("default_value")
+                if default_value is not None:
+                    normalized[str(dashboard_filter["field"])] = self._validate_filter_value(dashboard_filter, default_value)
+                    continue
+                if dashboard_filter.get("required"):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="One or more required dashboard filters are missing",
+                    )
+                continue
+            normalized[str(dashboard_filter["field"])] = self._validate_filter_value(dashboard_filter, raw_value)
+        return {key: normalized[key] for key in sorted(normalized)}
+
     @staticmethod
-    def _normalize_filters(filters: dict[str, Any]) -> dict[str, Any]:
-        return {key: filters[key] for key in sorted(filters)}
+    def _filter_applies_to_selected_views(dashboard_filter: dict[str, Any], selected_ids: set[str]) -> bool:
+        affected_ids = set(dashboard_filter.get("affected_data_view_ids") or [])
+        return not affected_ids or bool(selected_ids.intersection(affected_ids))
+
+    @staticmethod
+    def _filter_value(dashboard_filter: dict[str, Any], filters: dict[str, Any]) -> tuple[bool, Any]:
+        filter_id = str(dashboard_filter["id"])
+        field = str(dashboard_filter["field"])
+        if filter_id in filters:
+            return True, filters[filter_id]
+        if field in filters:
+            return True, filters[field]
+        return False, None
+
+    @staticmethod
+    def _has_conflicting_filter_values(dashboard_filter: dict[str, Any], filters: dict[str, Any]) -> bool:
+        filter_id = str(dashboard_filter["id"])
+        field = str(dashboard_filter["field"])
+        return filter_id != field and filter_id in filters and field in filters and filters[filter_id] != filters[field]
+
+    def _validate_filter_value(self, dashboard_filter: dict[str, Any], value: Any) -> Any:
+        filter_type = str(dashboard_filter.get("filter_type") or "")
+        if self._is_empty_filter_value(value):
+            if dashboard_filter.get("required"):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="One or more required dashboard filters are missing",
+                )
+            return value
+
+        if not self._filter_value_matches_type(filter_type, value):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="One or more dashboard filters have invalid values",
+            )
+        domain = dashboard_filter.get("domain")
+        if domain is not None:
+            values = value if isinstance(value, list) else [value]
+            if any(item not in domain for item in values):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="One or more dashboard filters have invalid values",
+                )
+        return value
+
+    @staticmethod
+    def _is_empty_filter_value(value: Any) -> bool:
+        return value is None or value == "" or value == []
+
+    @staticmethod
+    def _filter_value_matches_type(filter_type: str, value: Any) -> bool:
+        if filter_type in {"string", "date", "datetime"}:
+            return isinstance(value, str)
+        if filter_type == "enum":
+            if isinstance(value, list):
+                return all(isinstance(item, (str, int, float, bool)) for item in value)
+            return isinstance(value, (str, int, float, bool))
+        if filter_type == "boolean":
+            return isinstance(value, bool)
+        if filter_type == "integer":
+            return isinstance(value, int) and not isinstance(value, bool)
+        if filter_type == "number":
+            return isinstance(value, int | float) and not isinstance(value, bool)
+        if filter_type == "date_range":
+            return isinstance(value, dict) and set(value).issubset({"start", "end"}) and bool(value)
+        return True
 
     @staticmethod
     def _manifest_policy_blockers(manifest: dict[str, Any]) -> dict[str, list[str]]:

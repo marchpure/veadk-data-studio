@@ -11,6 +11,7 @@ from server.models.dashboard import DashboardAuditEvent, DashboardRun
 from server.models.notebooks import Notebook
 from server.models.tenant import Tenant
 from server.models.user import User
+from server.schemas.query import QueryFilter as SavedQueryFilter
 from server.services.dashboard import DashboardService
 
 
@@ -376,7 +377,7 @@ async def test_query_dashboard_executes_manifest_bound_semantic_metric(
         asset_id=ids["asset_id"],
         actor_id=str(ids["user_id"]),
         actor_type="agent",
-        filters={"region": "AMER", "ignored": "nope"},
+        filters={"region": "AMER"},
         data_view_ids=["dv-paid-revenue"],
         correlation_id="semantic-metric",
     )
@@ -533,6 +534,277 @@ async def test_query_dashboard_rejects_unknown_data_view_before_execution(
         )
 
     assert exc.value.status_code == 403
+    assert executed is False
+
+
+@pytest.mark.asyncio
+async def test_query_dashboard_rejects_unknown_manifest_filter_before_execution(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    query_id = str(uuid4())
+    ids = await _seed_published_saved_query_dashboard(test_session, query_id)
+    executed = False
+
+    async def fake_execute_saved_query(*_args, **_kwargs):
+        nonlocal executed
+        executed = True
+        return {"success": True, "data": [{"revenue": 42}]}
+
+    monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
+
+    with pytest.raises(HTTPException) as exc:
+        await DashboardService().query_dashboard(
+            session=test_session,
+            tenant_id=ids["tenant_id"],
+            asset_id=ids["asset_id"],
+            actor_id=str(ids["user_id"]),
+            actor_type="agent",
+            filters={"region": "AMER", "raw_sql": "select * from other_tenant.secret"},
+            data_view_ids=["dv-saved-revenue"],
+        )
+
+    assert exc.value.status_code == 403
+    assert "filters are not available" in str(exc.value.detail)
+    assert executed is False
+
+
+@pytest.mark.asyncio
+async def test_query_dashboard_rejects_filter_outside_selected_data_view_before_execution(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    query_id = str(uuid4())
+    payload = _manifest_payload(query_id)
+    payload["data_views"].append(
+        {
+            "id": "dv-margin",
+            "kind": "saved_query",
+            "question": "What margin did the saved query return?",
+            "output_schema": [{"name": "margin", "data_type": "number"}],
+            "filter_fields": ["segment"],
+            "saved_query": {
+                "query_id": query_id,
+                "compatibility_reason": "legacy reviewed dashboard query",
+                "filter_contract": {},
+            },
+        }
+    )
+    payload["filters"].append(
+        {
+            "id": "segment",
+            "label": "Segment",
+            "source": "saved_query_contract",
+            "field": "segment",
+            "filter_type": "enum",
+            "operators": ["eq"],
+            "affected_data_view_ids": ["dv-margin"],
+        }
+    )
+    ids = await _seed_published_dashboard(test_session, payload, slug_suffix=f"filter-scope-{uuid4()}")
+    executed = False
+
+    async def fake_execute_saved_query(*_args, **_kwargs):
+        nonlocal executed
+        executed = True
+        return {"success": True, "data": [{"revenue": 42}]}
+
+    monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
+
+    with pytest.raises(HTTPException) as exc:
+        await DashboardService().query_dashboard(
+            session=test_session,
+            tenant_id=ids["tenant_id"],
+            asset_id=ids["asset_id"],
+            actor_id=str(ids["user_id"]),
+            actor_type="agent",
+            filters={"segment": "enterprise"},
+            data_view_ids=["dv-saved-revenue"],
+        )
+
+    assert exc.value.status_code == 403
+    assert executed is False
+
+
+@pytest.mark.asyncio
+async def test_query_dashboard_rejects_filter_not_declared_by_data_view_before_execution(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    query_id = str(uuid4())
+    payload = _manifest_payload(query_id)
+    payload["filters"].append(
+        {
+            "id": "country",
+            "label": "Country",
+            "source": "saved_query_contract",
+            "field": "country",
+            "filter_type": "enum",
+            "operators": ["eq"],
+            "affected_data_view_ids": ["dv-saved-revenue"],
+        }
+    )
+    ids = await _seed_published_dashboard(test_session, payload, slug_suffix=f"filter-field-scope-{uuid4()}")
+    executed = False
+
+    async def fake_execute_saved_query(*_args, **_kwargs):
+        nonlocal executed
+        executed = True
+        return {"success": True, "data": [{"revenue": 42}]}
+
+    monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
+
+    with pytest.raises(HTTPException) as exc:
+        await DashboardService().query_dashboard(
+            session=test_session,
+            tenant_id=ids["tenant_id"],
+            asset_id=ids["asset_id"],
+            actor_id=str(ids["user_id"]),
+            actor_type="agent",
+            filters={"country": "US"},
+            data_view_ids=["dv-saved-revenue"],
+        )
+
+    assert exc.value.status_code == 403
+    assert "filters are not available" in str(exc.value.detail)
+    assert executed is False
+
+
+@pytest.mark.asyncio
+async def test_query_dashboard_normalizes_filter_id_to_manifest_field(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    query_id = str(uuid4())
+    payload = _manifest_payload(query_id)
+    payload["filters"][0]["id"] = "region-filter"
+    ids = await _seed_published_dashboard(test_session, payload, slug_suffix=f"filter-id-field-{uuid4()}")
+    captured: dict[str, object] = {}
+
+    async def fake_execute_saved_query(session, query_id_arg, filters=None, viewer_user_id=None):
+        captured["filters"] = filters
+        return {
+            "success": True,
+            "data": [{"revenue": 42}],
+            "query_name": "Revenue query",
+            "query_id": query_id_arg,
+        }
+
+    monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
+
+    run = await DashboardService().query_dashboard(
+        session=test_session,
+        tenant_id=ids["tenant_id"],
+        asset_id=ids["asset_id"],
+        actor_id=str(ids["user_id"]),
+        actor_type="agent",
+        filters={"region-filter": "AMER"},
+        data_view_ids=["dv-saved-revenue"],
+    )
+
+    assert run["normalized_filters"] == {"region": "AMER"}
+    assert captured["filters"] == [SavedQueryFilter(field="region", operator="eq", value="AMER")]
+
+
+@pytest.mark.asyncio
+async def test_query_dashboard_rejects_required_filter_missing_before_execution(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    query_id = str(uuid4())
+    payload = _manifest_payload(query_id)
+    payload["filters"][0]["required"] = True
+    ids = await _seed_published_dashboard(test_session, payload, slug_suffix=f"filter-required-{uuid4()}")
+    executed = False
+
+    async def fake_execute_saved_query(*_args, **_kwargs):
+        nonlocal executed
+        executed = True
+        return {"success": True, "data": [{"revenue": 42}]}
+
+    monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
+
+    with pytest.raises(HTTPException) as exc:
+        await DashboardService().query_dashboard(
+            session=test_session,
+            tenant_id=ids["tenant_id"],
+            asset_id=ids["asset_id"],
+            actor_id=str(ids["user_id"]),
+            actor_type="agent",
+            filters={},
+            data_view_ids=["dv-saved-revenue"],
+        )
+
+    assert exc.value.status_code == 403
+    assert "required dashboard filters" in str(exc.value.detail)
+    assert executed is False
+
+
+@pytest.mark.asyncio
+async def test_query_dashboard_rejects_filter_value_outside_manifest_domain_before_execution(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    query_id = str(uuid4())
+    payload = _manifest_payload(query_id)
+    payload["filters"][0]["domain"] = ["AMER", "EMEA"]
+    ids = await _seed_published_dashboard(test_session, payload, slug_suffix=f"filter-domain-{uuid4()}")
+    executed = False
+
+    async def fake_execute_saved_query(*_args, **_kwargs):
+        nonlocal executed
+        executed = True
+        return {"success": True, "data": [{"revenue": 42}]}
+
+    monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
+
+    with pytest.raises(HTTPException) as exc:
+        await DashboardService().query_dashboard(
+            session=test_session,
+            tenant_id=ids["tenant_id"],
+            asset_id=ids["asset_id"],
+            actor_id=str(ids["user_id"]),
+            actor_type="agent",
+            filters={"region": "APAC"},
+            data_view_ids=["dv-saved-revenue"],
+        )
+
+    assert exc.value.status_code == 403
+    assert "invalid values" in str(exc.value.detail)
+    assert executed is False
+
+
+@pytest.mark.asyncio
+async def test_query_dashboard_rejects_conflicting_filter_id_and_field_values_before_execution(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    query_id = str(uuid4())
+    payload = _manifest_payload(query_id)
+    payload["filters"][0]["id"] = "region-filter"
+    ids = await _seed_published_dashboard(test_session, payload, slug_suffix=f"filter-conflict-{uuid4()}")
+    executed = False
+
+    async def fake_execute_saved_query(*_args, **_kwargs):
+        nonlocal executed
+        executed = True
+        return {"success": True, "data": [{"revenue": 42}]}
+
+    monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
+
+    with pytest.raises(HTTPException) as exc:
+        await DashboardService().query_dashboard(
+            session=test_session,
+            tenant_id=ids["tenant_id"],
+            asset_id=ids["asset_id"],
+            actor_id=str(ids["user_id"]),
+            actor_type="agent",
+            filters={"region-filter": "AMER", "region": "EMEA"},
+            data_view_ids=["dv-saved-revenue"],
+        )
+
+    assert exc.value.status_code == 403
+    assert "invalid values" in str(exc.value.detail)
     assert executed is False
 
 

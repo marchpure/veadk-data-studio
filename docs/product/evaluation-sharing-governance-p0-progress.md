@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration worktree init, dashboard merge integration gates, focused migration/security gates, share/manage secret redaction, worker-backed notebook share/export object authorization, viewer session governed-asset binding. Next slice: enforce structured dashboard query manifest `data_view_id` validation.
+CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration worktree init, dashboard merge integration gates, focused migration/security gates, share/manage secret redaction, worker-backed notebook share/export object authorization, viewer session governed-asset binding, structured dashboard manifest data-view and filter validation. Next slice: prevent errors/logs/audit from leaking password, token, verifier, credentials, cross-tenant objects, or unauthorized SQL.
 
 ## Phase 0 Slice Checklist
 
@@ -8,7 +8,7 @@ CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration w
 - [x] `ShareModal.tsx` removes display/copy of saved passwords; password is input-only during create/rotate and is never read back.
 - [~] share/create/delete/rotate/export use correct share/export action scope and unified object authorization for tenant, owner/grant, asset, version, and action. Worker-backed notebook share/export/manage endpoints now enforce tenant + owner + action scope through `server.auth.object_authorizer`; folder share/version manage and future canonical grant checks remain.
 - [x] viewer sessions bind and validate issuer, audience, user, tenant, grant, asset, version, token id, issued-at, not-before, expiry, and revocation/rotation identity.
-- [ ] structured dashboard query only accepts immutable manifest `data_view_id` plus validated filters; legacy path is tenant/dashboard-version/notebook bound.
+- [x] structured dashboard query only accepts immutable manifest `data_view_id` plus validated filters; legacy path is tenant/dashboard-version/notebook bound.
 - [ ] errors, logs, and audit events never leak password, token, verifier, credentials, cross-tenant objects, or unauthorized SQL.
 
 ## Environment Side-Effect Registration
@@ -148,7 +148,7 @@ Evidence:
 
 ## 2026-08-16 14:58 CST - Dashboard Full Validation And Preview Route Fix
 
-Commit: pending at time of entry.
+Commit: `c070788514189038d776dd316d82ee0db237c16d`.
 
 Scope:
 
@@ -166,4 +166,22 @@ Evidence:
 - `cd client && pnpm lint` -> passed with existing `0 errors, 357 warnings`.
 - `cd client && pnpm build:check` -> passed with existing CSS/chunk warnings.
 - Temporary full browser smoke on `127.0.0.1:15173` frontend + `127.0.0.1:18080` backend + fresh SQLite DB -> `ok: true`, `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`; screenshots retained under `/tmp/byaan-dashboard-full-verify-1786862803/screens-after-fix-4`.
+- `git diff --check` -> passed.
+
+## 2026-08-16 15:24 CST - Phase 0 Structured Dashboard Query Manifest Filters
+
+Commit: pending at time of entry.
+
+Scope:
+
+- Structured dashboard query and preview now resolve requested `data_view_ids` from the selected immutable manifest and validate filters before any saved-query, semantic metric, or context execution.
+- Filter payloads are accepted only when the key matches an applicable manifest filter `id` or `field`, the filter is scoped to the selected data view, and the field is declared in that data view's `filter_fields`.
+- Accepted filters are normalized into manifest field names for `DashboardRun.normalized_filters`, filter digest, saved-query filter compilation, REST responses, and MCP compact runs.
+- Required filters, conflicting `id`/`field` aliases, basic type mismatches, and values outside manifest `domain` are rejected before execution.
+- REST and MCP regression coverage now proves unknown raw filters such as `raw_sql` are rejected before query execution. The legacy viewer batch path remains covered by `test_dashboard_security_regressions.py` for same-tenant/dashboard-notebook binding.
+
+Evidence:
+
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest server/tests/test_dashboard_execution_service.py server/tests/test_dashboard_rest_api.py server/tests/test_dashboard_mcp_contract.py server/tests/test_dashboard_security_regressions.py -q` -> `29 passed, 79 warnings`.
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check server/services/dashboard.py server/tests/test_dashboard_execution_service.py server/tests/test_dashboard_rest_api.py server/tests/test_dashboard_mcp_contract.py` -> passed with existing removed-rule warning.
 - `git diff --check` -> passed.
