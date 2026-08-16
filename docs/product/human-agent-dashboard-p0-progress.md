@@ -157,6 +157,33 @@ Commit:
 
 - `ad4f6f3` `dashboard: persist governed asset foundation`
 
+### Phase 1 Lifecycle Slice: Validation, ETag, Publish Primitives
+
+Status: implemented.
+
+Allowlist:
+
+- `server/repositories/dashboard.py`
+- `server/services/dashboard.py`
+- `server/tests/test_dashboard_lifecycle_service.py`
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Behavior:
+
+- Added `DashboardService` as the shared lifecycle entry point for later REST/MCP wrappers.
+- Supports strict manifest validation, stable canonical digests, structured draft creation, ETag conflict rejection, draft patching as new version rows, validation summaries, immutable publish state, pinned model/source extraction, and audit events.
+- Keeps legacy HTML/version rows intact. P0 structured draft creation currently requires `notebook_id` to satisfy the existing non-null version relation; notebookless assets remain a later migration/service extension.
+
+Tests:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_lifecycle_service.py` -> passed, `3 passed`.
+- `cd server && uv run ruff check repositories/dashboard.py services/dashboard.py tests/test_dashboard_lifecycle_service.py` -> passed.
+- `git diff --check` -> passed.
+
+Commit:
+
+- Pending.
+
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
@@ -165,6 +192,7 @@ Commit:
 | `033b526` | `dashboard: enforce viewer query binding` | Phase 2 security slice | `pytest tests/test_dashboard_security_regressions.py` -> 5 passed; `ruff check routers/folders.py tests/test_dashboard_security_regressions.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `be5e4a7` | `dashboard: add manifest run schemas` | Phase 1 schema slice | `pytest tests/test_dashboard_contract_schemas.py` -> 7 passed; `ruff check schemas/dashboard.py tests/test_dashboard_contract_schemas.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `ad4f6f3` | `dashboard: persist governed asset foundation` | Phase 1 persistence slice | `pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> 6 passed; `ruff check models/dashboard.py models/__init__.py migrations/versions/add_governed_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed; `alembic heads` -> `add_governed_dashboard_assets` | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| Pending | `dashboard: add lifecycle service primitives` | Phase 1 lifecycle slice | `pytest tests/test_dashboard_lifecycle_service.py` -> 3 passed; `ruff check repositories/dashboard.py services/dashboard.py tests/test_dashboard_lifecycle_service.py` -> passed | Pending |
 
 ## Acceptance Evidence
 
