@@ -608,7 +608,7 @@ async function runExplicitLegacyAssetScene(page, assetId) {
   await page.goto(`${baseURL}/dashboard-assets/${assetId}`, { waitUntil: 'networkidle' })
   await page.getByRole('heading', { name: 'Black Friday Demographic Buying Pattern Analysis', exact: true }).waitFor()
   await page.getByText('legacy_unstructured').first().waitFor()
-  await page.getByText('legacy HTML dashboard requires structured manifest review before agent-ready publish').waitFor()
+  await page.getByText('legacy HTML dashboard requires structured manifest review before agent-ready publish').first().waitFor()
   await page.getByText('Legacy HTML fallback').waitFor()
   await page.getByText('not agent-ready').first().waitFor()
   await page.getByRole('link', { name: /Open legacy preview/i }).waitFor()
