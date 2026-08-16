@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.evaluation import (
@@ -19,9 +20,17 @@ from server.models.evaluation import (
 )
 from server.models.tenant import Tenant
 from server.models.user import User
+from server.repositories.evaluation import _has_no_preflight_blockers
 from server.services.evaluation import EvaluationService
 
 pytestmark = pytest.mark.asyncio
+
+
+def test_claimable_run_filter_compiles_for_postgres_json_columns() -> None:
+    compiled = str(select(EvaluationRun).where(_has_no_preflight_blockers()).compile(dialect=postgresql.dialect()))
+
+    assert "json_array_length" in compiled
+    assert "preflight_blockers_json =" not in compiled
 
 
 async def _seed_published_suite_version_with_cases(test_session: AsyncSession) -> tuple[str, str]:

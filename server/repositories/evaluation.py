@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.evaluation import (
@@ -20,6 +20,10 @@ from server.models.evaluation import (
     EvaluationTargetSnapshot,
     PromotionDecision,
 )
+
+
+def _has_no_preflight_blockers():
+    return func.json_array_length(EvaluationRun.preflight_blockers_json) == 0
 
 
 class EvaluationRepository:
@@ -291,7 +295,7 @@ class EvaluationRepository:
             select(EvaluationRun)
             .where(
                 EvaluationRun.tenant_id == tenant_id,
-                EvaluationRun.preflight_blockers_json == [],
+                _has_no_preflight_blockers(),
                 (
                     (EvaluationRun.status == "queued")
                     | ((EvaluationRun.status == "running") & (EvaluationRun.lease_expires_at < now))
