@@ -467,7 +467,7 @@ Commit:
 
 ### Phase 6 Acceptance Slice: Browser Workspace Smoke
 
-Status: implemented, evidence captured, commit pending.
+Status: implemented, evidence captured, and pushed in `b5c679e`.
 
 Allowlist:
 
@@ -516,7 +516,7 @@ Commit:
 
 ### Phase 6 Acceptance Slice: Focused Backend, MCP, Security, Migration Evidence
 
-Status: evidence recorded, commit pending.
+Status: evidence recorded and pushed in `3e39d3d`.
 
 Allowlist:
 
@@ -576,7 +576,7 @@ Browser workspace evidence captured under `docs/product/dashboard-browser-smoke/
 
 ## Final Integration Handoff
 
-Status: final handoff recorded, commit pending.
+Status: final handoff recorded and pushed in `1b5a348`.
 
 Final branch state before this handoff doc commit:
 
@@ -586,7 +586,7 @@ Final branch state before this handoff doc commit:
 - Integration source observed only: `veadk-data-studio/agent/data-studio-p0` at `9718bf6431c177c0b48e6fc21c36626a9057c47a`
 - Merge base with integration source: `24c6b69a1f816a831ee6ce94d8515817b4752913`
 - Migration head on Dashboard branch: `backfill_legacy_dashboard_assets`
-- Final handoff SHA: pending
+- Final handoff SHA: `1b5a34835c163b03228721cc3a28c07f86075745`
 
 Ordered Dashboard commits:
 
