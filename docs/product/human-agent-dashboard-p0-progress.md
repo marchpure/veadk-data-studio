@@ -485,8 +485,8 @@ Allowlist:
 Behavior:
 
 - Added a reproducible `pnpm smoke:dashboard` script backed by a local `playwright` dev dependency.
-- The smoke seeds real fixtures through REST APIs, then visits real governed Dashboard workspace routes in Chromium at `1440x900` and `390x844`.
-- The journey covers structured published data, Data tab, Lineage/Evidence tab, unresolved policy permission-denied state, and legacy-review fallback state.
+- The initial smoke seeded real fixtures through REST APIs, then visited governed Dashboard workspace routes in Chromium at `1440x900` and `390x844`.
+- The initial journey covered structured published data, Data tab, Lineage/Evidence tab, unresolved policy permission-denied state, and legacy-review fallback state. The later acceptance breadth follow-up below is the authoritative scene x viewport matrix for inventory, view, edit/review, stale/partial, permission-denied, and legacy.
 - The runner asserts zero page errors, console errors, failed requests, and HTTP 5xx responses; it also checks horizontal overflow and desktop interactive-element overlap.
 - Tightened the Dashboard workspace to dedupe repeated manifest/run lineage and evidence display, preventing React duplicate-key console errors without changing canonical IDs.
 - Legacy fallback now renders when the selected version migration state is `legacy_unstructured`, so review drafts visibly preserve rollback/legacy status even if the stable asset lifecycle is `draft`.
@@ -494,8 +494,8 @@ Behavior:
 Evidence:
 
 - Screenshot directory: `docs/product/dashboard-browser-smoke/`
-- Captured `dashboard-data-1440.png`, `dashboard-lineage-1440.png`, `dashboard-permission-denied-1440.png`, `dashboard-legacy-1440.png`, and `dashboard-mobile-390.png`.
-- `sips -g pixelWidth -g pixelHeight docs/product/dashboard-browser-smoke/*.png` -> desktop screenshots are `1440x900`; mobile screenshot is `390x844`.
+- Initial captured files were `dashboard-data-1440.png`, `dashboard-lineage-1440.png`, `dashboard-permission-denied-1440.png`, `dashboard-legacy-1440.png`, and `dashboard-mobile-390.png`; the follow-up matrix below supersedes this limited list.
+- Initial `sips -g pixelWidth -g pixelHeight docs/product/dashboard-browser-smoke/*.png` confirmed desktop screenshots at `1440x900` and the mobile screenshot at `390x844`; the follow-up matrix below records per-scene viewport evidence.
 
 Commands and results:
 
@@ -710,7 +710,7 @@ Acceptance evidence summary:
 - REST/MCP parity: same tenant principal, dashboard version, filters, digests, values, schema, cache/freshness, `as_of`, warnings, evidence, and lineage covered in `tests/test_dashboard_rest_api.py` and `tests/test_dashboard_mcp_contract.py`.
 - Lifecycle: draft creation, JSON Patch allowlist, stale ETag `409`, validate, preview, publish, reload review draft, export, audit, lineage, and state covered by focused tests.
 - Migration/legacy: additive Dashboard tables/columns, legacy HTML preservation, backfill/downgrade, and SQLite Dashboard upgrade/downgrade evidence recorded above.
-- UI/browser: real API/UI smoke on `8123`/`5179`, screenshots at `1440x900` and `390x844`, and zero page errors/console errors/request failures/HTTP 5xx.
+- UI/browser: initial real API/UI smoke on `8123`/`5179` plus follow-up real API/UI smoke on `8125`/`5181`; the explicit scene x viewport screenshot/assertion matrix below replaces the earlier generic screenshot summary.
 - Frontend: `pnpm lint` passed with existing 355 warnings; `pnpm build:check` passed with existing CSS/chunk warnings.
 
 Integration drift against `veadk-data-studio/agent/data-studio-p0`:
@@ -729,6 +729,80 @@ Known residual risks and dependencies:
 - Existing frontend lint warnings and build CSS/chunk warnings remain outside Dashboard scope.
 
 Final status after final handoff commit is pushed and `HEAD == @{upstream}`:
+
+```text
+DASHBOARD_BRANCH_READY_FOR_INTEGRATION / 8080_PENDING_INTEGRATION
+```
+
+## Acceptance Breadth Follow-Up
+
+Status: implemented, verified, and pushed in `1155e45` and `5398665`.
+
+New commits:
+
+- `1155e45` `dashboard: extend browser acceptance coverage`
+- `5398665` `dashboard: edit manifest tiles and filters`
+
+Behavior added after the original handoff:
+
+- Browser smoke now seeds real CSV/saved-query/dashboard fixtures through REST and covers inventory, view, edit/review, stale/partial, permission-denied, and legacy scenarios at both `1440x900` and `390x844`.
+- The human workspace inventory now exposes owner, published/draft version, model/version, freshness, readiness/warnings, and last update evidence in a dense table, plus a mobile inventory strip.
+- Edit/review now includes a stable manifest editor with outline, canvas, and inspector. Tile title, business question, and encoding; filter label, operator, default value, add/remove; and tile order changes all use `PATCH /api/dashboard-assets/{id}/draft` with `json_patch` and `base_etag`.
+- Draft ETag conflicts surface a visible structured `Draft conflict (409)` banner with current ETag, refresh, and retry actions. REST coverage asserts the real stale-ETag `409` payload; browser smoke asserts the visible conflict UI without adding an intentional browser console error.
+- Full-manifest draft submissions are now constrained by the same top-level allowlist as JSON Patch. A full manifest rewrite of non-allowlisted `dashboard_id` returns `403`.
+- Saved-query data views now honor per-view `freshness_policy.max_age_seconds` and mark stale view results as `status=stale` with visible `Stale data` and `as_of` UI.
+
+Focused follow-up verification:
+
+- `cd client && node --check scripts/dashboard-workspace-smoke.mjs` -> passed.
+- `cd client && BASE_URL=http://127.0.0.1:5181 API_URL=http://127.0.0.1:8125 SCREEN_DIR=../docs/product/dashboard-browser-smoke pnpm smoke:dashboard` -> passed with `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`.
+- `cd server && uv run ruff check services/dashboard.py tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> passed.
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_lifecycle_service.py tests/test_dashboard_rest_api.py` -> `10 passed`, `41 warnings`.
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_*.py tests/test_migration_chain_hardening.py` -> `45 passed`, `84 warnings`.
+- `cd client && pnpm build:check` -> passed with existing Browserslist, CSS minify, dynamic import, and chunk-size warnings.
+- `cd client && pnpm lint` -> passed with existing `355 warnings`, `0 errors`.
+
+Browser coverage matrix:
+
+| Scene | Viewport | Screenshot | Assertion highlights |
+| --- | --- | --- | --- |
+| Inventory | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-inventory-1440.png` | `/dashboard-assets` renders at least two real fixture assets; owner, published/draft version, model/version, freshness, readiness/warnings, and last update columns are visible; search filters to the secondary fixture and restores. |
+| Inventory | `390x844` | `docs/product/dashboard-browser-smoke/dashboard-inventory-390.png` | Mobile inventory strip and dense inventory evidence render without horizontal overflow; selected structured fixture opens from the mobile route. |
+| View | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-view-1440.png` | Published structured dashboard loads, executes canonical data views, shows filter digest and timestamp/no-run state. |
+| View | `390x844` | `docs/product/dashboard-browser-smoke/dashboard-view-390.png` | Same structured dashboard view is reachable and non-overlapping on mobile. |
+| Data | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-data-1440.png` | Data tab displays `dv-revenue` and table-equivalent results from the real saved-query fixture. |
+| Data | `390x844` | NOT COVERED | The required six-scene matrix did not require separate Data-tab mobile coverage; mobile View covers the published view route, and Data desktop covers the data-table tab. |
+| Lineage | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-lineage-1440.png` | Lineage tab displays reviewed source evidence and saved-query lineage locators. |
+| Lineage | `390x844` | NOT COVERED | The required six-scene matrix did not require separate Lineage-tab mobile coverage; mobile View covers the route, and Lineage desktop covers the lineage/evidence tab. |
+| Edit/review | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-edit-review-1440.png` | Publish disabled with one blocker; draft title patch succeeds; tile title/business question/encoding save via JSON Patch; tile order moves down/up; filter label/operator/default save; add/remove filter; visible 409 conflict banner and retry; validate and preview show review state. |
+| Edit/review | `390x844` | `docs/product/dashboard-browser-smoke/dashboard-edit-review-390.png` | Same tile/filter/layout editor path, validation, preview, blocker-gated publish, and editor layout run on mobile without overflow/overlap. |
+| Stale/partial | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-stale-partial-1440.png` | Stale saved-query view shows visible `Stale data` plus `as of`; partial failure view shows visible `Partial failure` and error/no-run timestamp text. |
+| Stale/partial | `390x844` | `docs/product/dashboard-browser-smoke/dashboard-stale-partial-390.png` | Same stale and partial failure states are visible on mobile without relying only on color. |
+| Permission denied | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-permission-denied-1440.png` | Unresolved row/column/redaction policy refs return visible blocked/permission-denied state without executing saved query. |
+| Permission denied | `390x844` | `docs/product/dashboard-browser-smoke/dashboard-permission-denied-390.png` | Same policy-denied state renders on mobile. |
+| Legacy | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-legacy-1440.png` | Legacy review asset displays `Legacy HTML fallback` and `not agent-ready`. |
+| Legacy | `390x844` | `docs/product/dashboard-browser-smoke/dashboard-legacy-390.png` | Same legacy fallback state renders on mobile. |
+
+Every captured scene runs `assertNoHorizontalOverflow` and scoped `assertNoOverlaps` before screenshot capture. The smoke runner still exits non-zero on any `pageerror`, `consoleError`, `requestfailed`, or `http5xx`; no blanket ignore was added.
+
+Updated integration drift observation on 2026-08-16:
+
+- `git fetch veadk-data-studio` completed.
+- `git rev-parse veadk-data-studio/agent/data-studio-p0` -> `142837f7587dd1519d4287c1cb26c8e2840fc39a`.
+- `git merge-base veadk-data-studio/agent/data-studio-p0 HEAD` -> `24c6b69a1f816a831ee6ce94d8515817b4752913`.
+- `git log --left-right --cherry-pick --oneline veadk-data-studio/agent/data-studio-p0...HEAD` was observation-only; no merge, rebase, or cherry-pick was performed.
+- Directly shared modified file remains `server/tests/test_migration_chain_hardening.py`.
+- Integration source also changes source-resource, source-connector, semantic-modeling, self-hosted release, and Data Studio P0 acceptance files. Dashboard branch intentionally did not touch `server/services/source_*`, `server/routers/source_*`, `server/schemas/source_*`, connector/credential internals, or semantic-modeling core algorithms.
+- Suggested integration order remains: land the latest `agent/data-studio-p0` source-resource/self-hosted hardening first, then Dashboard; resolve `server/tests/test_migration_chain_hardening.py` by preserving the fresh SQLite/source-resource hardening from integration and Dashboard head expectations through `backfill_legacy_dashboard_assets`.
+
+Known residuals after follow-up:
+
+- `pinned_snapshot` mode remains intentionally blocked until immutable run result artifacts exist.
+- Real `8080` target was not touched, occupied, killed, or verified by this isolated Dashboard session.
+- Source-resource migration freshness remains owned by the integration/source session; Dashboard browser evidence used the documented disposable SQLite stamp workaround only for the pre-existing source-resource constraint state.
+- Existing frontend lint warnings and build CSS/chunk warnings remain outside Dashboard scope.
+
+Final follow-up status remains:
 
 ```text
 DASHBOARD_BRANCH_READY_FOR_INTEGRATION / 8080_PENDING_INTEGRATION
