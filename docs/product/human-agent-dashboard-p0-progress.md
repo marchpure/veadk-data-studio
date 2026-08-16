@@ -341,6 +341,39 @@ Commit:
 
 - `d9ac360` `dashboard: add review reload workflow`
 
+### Phase 4 Compatibility Slice: Share, Export, Legacy Fallback
+
+Status: implemented.
+
+Allowlist:
+
+- `server/services/dashboard.py` - shared DashboardService export helper and deterministic structured HTML renderer.
+- `server/routers/dashboard.py` - REST export endpoint for governed Dashboard assets.
+- `server/tests/test_dashboard_rest_api.py`
+- `client/src/features/dashboard/pages/DashboardWorkspacePage.tsx`
+- `client/src/services/dashboard.ts`
+- `client/src/types/dashboard.ts`
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Behavior:
+
+- Added `/api/dashboard-assets/{id}/export/html` with `dashboard.export` scope, published-version enforcement, audit, deterministic manifest-based structured HTML export, and preserved legacy HTML fallback for unstructured versions.
+- Extended REST coverage to assert structured export content, attachment filename, and `dashboard.export` audit.
+- Added human workspace actions for exporting published structured versions and sharing published dashboard version IDs into existing folder sharing, without duplicating folder share logic.
+- Added a visible legacy fallback panel for `legacy_unstructured` assets that keeps rollback/read paths explicit and avoids claiming agent-ready status.
+
+Tests:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_rest_api.py` -> passed, `2 passed`.
+- `cd server && uv run ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed.
+- `cd client && pnpm build:check` -> passed.
+- `cd client && pnpm lint` -> passed with warnings only from existing frontend lint debt.
+- `git diff --check` -> passed.
+
+Commit:
+
+- pending `dashboard: preserve share export compatibility`
+
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
@@ -355,6 +388,7 @@ Commit:
 | `c3e28b1` | `dashboard: expose dashboard mcp contract` | Phase 3 MCP slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_lifecycle_service.py` -> 7 passed; `ruff check services/dashboard.py routers/dashboard.py mcp/tool_wrappers.py mcp/tools.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `33130f5` | `dashboard: render structured dashboard workspace` | Phase 4 human workspace inventory/view slice | `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `d9ac360` | `dashboard: add review reload workflow` | Phase 4 review/preview/publish/reload slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> 5 passed; `ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| pending | `dashboard: preserve share export compatibility` | Phase 4 share/export/legacy compatibility slice | `pytest tests/test_dashboard_rest_api.py` -> 2 passed; `ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pending push |
 
 ## Acceptance Evidence
 

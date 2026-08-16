@@ -4,6 +4,7 @@ import type {
   DashboardAsset,
   DashboardAssetDetail,
   DashboardAuditEvent,
+  DashboardFolderShare,
   DashboardRun,
   DashboardSemanticDiff,
   DashboardState,
@@ -160,6 +161,47 @@ export const DashboardService = {
 
   async getAudit(assetId: string): Promise<{ items: DashboardAuditEvent[]; total: number }> {
     return dashboardFetch<{ items: DashboardAuditEvent[]; total: number }>(`/${assetId}/audit`)
+  },
+
+  async exportHtml(assetId: string, versionNum?: number): Promise<{ blob: Blob; filename: string }> {
+    const base = await getDashboardApiUrl()
+    const params = new URLSearchParams()
+    if (versionNum !== undefined) params.set('version_num', String(versionNum))
+    const response = await fetch(`${base}/${assetId}/export/html${params.toString() ? `?${params.toString()}` : ''}`, {
+      headers: getHeaders(),
+      credentials: 'include',
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null)
+      const message = payload?.message || payload?.detail || response.statusText || 'Dashboard export failed'
+      throw new Error(message)
+    }
+    const disposition = response.headers.get('content-disposition') || ''
+    const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `dashboard-${assetId}.html`
+    return { blob: await response.blob(), filename }
+  },
+
+  async sharePublishedVersionToFolder(folderId: string, dashboardVersionId: string): Promise<DashboardFolderShare> {
+    const runtimeBase = getApiBaseUrl()
+    const apiBase = runtimeBase && runtimeBase !== '/api'
+      ? runtimeBase
+      : isHostedMode()
+        ? '/api'
+        : isTauriApp()
+          ? `${await getBackendUrl()}/api`
+          : '/api'
+    const response = await fetch(`${apiBase}/folders/${folderId}/dashboards`, {
+      method: 'POST',
+      headers: getHeaders(),
+      credentials: 'include',
+      body: JSON.stringify({ dashboard_id: dashboardVersionId }),
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      const message = payload?.message || payload?.detail || response.statusText || 'Dashboard folder share failed'
+      throw new Error(message)
+    }
+    return (payload?.data ?? payload) as DashboardFolderShare
   },
 }
 

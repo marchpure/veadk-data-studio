@@ -282,3 +282,11 @@ export interface DashboardAuditEvent {
   details: Record<string, unknown>
   created_at: string | null
 }
+
+export interface DashboardFolderShare {
+  id: string
+  folder_id: string
+  dashboard_id: string
+  created_at?: string | null
+  is_snapshot?: boolean
+}

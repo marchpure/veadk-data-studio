@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -490,4 +490,29 @@ async def get_dashboard_asset_audit(
     return success_response(
         data={"items": [_audit_payload(event) for event in events], "total": len(events)},
         message=f"Retrieved {len(events)} dashboard audit event(s)",
+    )
+
+
+@router.get("/dashboard-assets/{asset_id}/export/html")
+async def export_dashboard_asset_html(
+    asset_id: UUID,
+    version_num: int | None = None,
+    correlation_id: str | None = None,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_EXPORT)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    _require_non_viewer(auth)
+    html_content, filename = await DashboardService().export_dashboard_html(
+        session=session,
+        tenant_id=auth.tenant_id,
+        asset_id=asset_id,
+        actor_id=auth.user_id,
+        actor_type="human",
+        version_num=version_num,
+        correlation_id=correlation_id,
+    )
+    return Response(
+        content=html_content,
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

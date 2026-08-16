@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
+from html import escape
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -461,6 +462,68 @@ class DashboardService:
         await session.refresh(version)
         return version, semantic_diff
 
+    async def export_dashboard_html(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        asset_id: UUID,
+        actor_id: UUID,
+        actor_type: str = "human",
+        version_num: int | None = None,
+        correlation_id: str | None = None,
+    ) -> tuple[str, str]:
+        repo = DashboardRepository(session)
+        asset = await repo.get_asset(asset_id, tenant_id)
+        if not asset:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard asset not found")
+
+        if version_num is not None:
+            version = await repo.get_asset_version_by_num(
+                tenant_id=tenant_id,
+                asset_id=asset_id,
+                version_num=version_num,
+            )
+        elif asset.published_version_id:
+            version = await repo.get_asset_version(
+                tenant_id=tenant_id,
+                asset_id=asset_id,
+                version_id=asset.published_version_id,
+            )
+        else:
+            version = None
+        if not version:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard version not found")
+        if version.status == "draft":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Draft dashboards must be published before export")
+
+        if not version.manifest_json:
+            if not version.html_content:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Dashboard version has no exportable content")
+            html_content = version.html_content
+            artifact_kind = "legacy_html"
+        else:
+            manifest = self.validate_manifest_payload(version.manifest_json)
+            html_content = self._render_structured_export_html(asset, version, manifest)
+            artifact_kind = "structured_manifest_html"
+
+        await self._audit(
+            session=session,
+            tenant_id=tenant_id,
+            asset_id=asset.id,
+            version_id=version.id,
+            actor_type=actor_type,
+            actor_id=str(actor_id),
+            action="dashboard.export",
+            outcome="success",
+            correlation_id=correlation_id,
+            after_digest=version.content_hash,
+            details={"version_num": version.version_num, "artifact_kind": artifact_kind},
+        )
+        await session.commit()
+        filename = f"{asset.slug or asset.id}-v{version.version_num}.html"
+        return html_content, filename
+
     async def query_dashboard(
         self,
         *,
@@ -868,6 +931,103 @@ class DashboardService:
                 "No semantic model or source snapshot changes were supplied; reload draft captures the current published baseline for review."
             )
         return diff
+
+    @staticmethod
+    def _render_structured_export_html(asset: DashboardAsset, version: Dashboard, manifest: dict[str, Any]) -> str:
+        title = escape(manifest.get("title") or asset.name)
+        description = escape(manifest.get("description") or asset.description or "")
+        bindings = "".join(
+            "<li>"
+            f"<strong>{escape(binding.get('model_slug', 'model'))}</strong> "
+            f"version {escape(binding.get('model_version', 'unknown'))}"
+            f"<span>{escape(', '.join(binding.get('source_snapshot_ids', [])) or 'no source snapshot')}</span>"
+            "</li>"
+            for binding in manifest.get("semantic_bindings", [])
+        )
+        filters = "".join(
+            "<li>"
+            f"{escape(dashboard_filter.get('label', dashboard_filter.get('id', 'filter')))}"
+            f"<span>{escape(dashboard_filter.get('field', ''))} / {escape(dashboard_filter.get('filter_type', ''))}</span>"
+            "</li>"
+            for dashboard_filter in manifest.get("filters", [])
+        )
+        data_views_by_id = {data_view.get("id"): data_view for data_view in manifest.get("data_views", [])}
+        tiles = "".join(
+            DashboardService._render_export_tile(tile, data_views_by_id.get(tile.get("data_view_id")))
+            for tile in manifest.get("tiles", [])
+        )
+        manifest_json = escape(json.dumps(manifest, sort_keys=True, ensure_ascii=False))
+        return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title}</title>
+  <style>
+    body {{ margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d0f11; color: #eef2f3; }}
+    main {{ max-width: 1180px; margin: 0 auto; padding: 32px; }}
+    header {{ border-bottom: 1px solid #293037; padding-bottom: 20px; margin-bottom: 20px; }}
+    h1 {{ margin: 0 0 8px; font-size: 28px; }}
+    h2 {{ font-size: 14px; text-transform: uppercase; color: #9aa4ac; }}
+    p, li, td, th {{ color: #cdd3d8; }}
+    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }}
+    .panel {{ border: 1px solid #293037; border-radius: 8px; background: #14181c; padding: 16px; }}
+    .tile h3 {{ margin: 0 0 8px; font-size: 16px; }}
+    .meta {{ display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }}
+    .pill {{ border: 1px solid #3a444d; border-radius: 999px; padding: 4px 8px; color: #cdd3d8; font-size: 12px; }}
+    li span {{ display: block; color: #818c95; font-size: 12px; margin-top: 4px; }}
+    code {{ white-space: pre-wrap; word-break: break-word; color: #d6dde2; }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>{title}</h1>
+      <p>{description}</p>
+      <div class="meta">
+        <span class="pill">dashboard.manifest.v1</span>
+        <span class="pill">version {version.version_num}</span>
+        <span class="pill">{escape(version.status)}</span>
+        <span class="pill">{escape(version.content_hash or "no hash")}</span>
+      </div>
+    </header>
+    <section class="grid">
+      <div class="panel"><h2>Semantic Bindings</h2><ul>{bindings or "<li>No bindings</li>"}</ul></div>
+      <div class="panel"><h2>Filters</h2><ul>{filters or "<li>No global filters</li>"}</ul></div>
+    </section>
+    <section>
+      <h2>Tiles</h2>
+      <div class="grid">{tiles or '<div class="panel">No tiles</div>'}</div>
+    </section>
+    <section class="panel">
+      <h2>Canonical Manifest</h2>
+      <script type="application/json" id="dashboard-manifest">{manifest_json}</script>
+      <code>{manifest_json}</code>
+    </section>
+  </main>
+</body>
+</html>"""
+
+    @staticmethod
+    def _render_export_tile(tile: dict[str, Any], data_view: dict[str, Any] | None) -> str:
+        title = escape(tile.get("title", tile.get("id", "Tile")))
+        question = escape(tile.get("business_question", ""))
+        tile_type = escape(tile.get("tile_type", "tile"))
+        data_view_id = escape(tile.get("data_view_id") or "none")
+        data_view_question = escape((data_view or {}).get("question", "No data view binding"))
+        fields = ", ".join(field.get("name", "") for field in (data_view or {}).get("output_schema", []))
+        return (
+            '<article class="panel tile">'
+            f"<h3>{title}</h3>"
+            f"<p>{question}</p>"
+            '<div class="meta">'
+            f'<span class="pill">{tile_type}</span>'
+            f'<span class="pill">{data_view_id}</span>'
+            "</div>"
+            f"<p>{data_view_question}</p>"
+            f"<p>{escape(fields or 'No output schema')}</p>"
+            "</article>"
+        )
 
     async def _audit(
         self,

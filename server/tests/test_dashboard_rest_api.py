@@ -261,6 +261,14 @@ async def test_dashboard_asset_rest_lifecycle_query_state_lineage_and_audit(
     )
     assert unknown_view_response.status_code == 403
 
+    export_response = await test_client.get(f"/api/dashboard-assets/{asset['id']}/export/html")
+    assert export_response.status_code == 200
+    assert "text/html" in export_response.headers["content-type"]
+    assert 'attachment; filename="rest-governed-dashboard-v2.html"' == export_response.headers["content-disposition"]
+    assert "dashboard.manifest.v1" in export_response.text
+    assert "REST governed dashboard reviewed" in export_response.text
+    assert "dv-saved-revenue" in export_response.text
+
     state_response = await test_client.get(f"/api/dashboard-assets/{asset['id']}/state")
     assert state_response.status_code == 200
     state_payload = state_response.json()["data"]
@@ -284,6 +292,7 @@ async def test_dashboard_asset_rest_lifecycle_query_state_lineage_and_audit(
     assert "dashboard.preview" in audit_actions
     assert "dashboard.reload" in audit_actions
     assert "dashboard.query" in audit_actions
+    assert "dashboard.export" in audit_actions
 
 
 async def test_dashboard_asset_rest_enforces_tenant_and_notebook_boundaries(test_client, test_session) -> None:

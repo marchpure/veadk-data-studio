@@ -70,6 +70,7 @@ export default function DashboardWorkspacePage() {
   const [editingTitle, setEditingTitle] = useState('')
   const [semanticDiff, setSemanticDiff] = useState<DashboardSemanticDiff | null>(null)
   const [auditEvents, setAuditEvents] = useState<DashboardAuditEvent[]>([])
+  const [shareFolderId, setShareFolderId] = useState('')
 
   const loadAssets = useCallback(async () => {
     setLoadingAssets(true)
@@ -283,6 +284,42 @@ export default function DashboardWorkspacePage() {
     }
   }
 
+  const exportHtml = async () => {
+    if (!selectedAsset || !selectedVersion) return
+    setLoadingWorkflow(true)
+    setValidationMessage(null)
+    try {
+      const response = await DashboardService.exportHtml(selectedAsset.id, selectedVersion.version_num)
+      const url = URL.createObjectURL(response.blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = response.filename
+      anchor.click()
+      URL.revokeObjectURL(url)
+      await loadAudit(selectedAsset.id)
+      setValidationMessage('Exported structured HTML')
+    } catch (err) {
+      setValidationMessage(err instanceof Error ? err.message : 'Export failed')
+    } finally {
+      setLoadingWorkflow(false)
+    }
+  }
+
+  const shareToFolder = async () => {
+    if (!selectedAsset || !selectedVersion || !shareFolderId.trim()) return
+    setLoadingWorkflow(true)
+    setValidationMessage(null)
+    try {
+      await DashboardService.sharePublishedVersionToFolder(shareFolderId.trim(), selectedVersion.id)
+      setShareFolderId('')
+      setValidationMessage('Published version shared to folder')
+    } catch (err) {
+      setValidationMessage(err instanceof Error ? err.message : 'Folder share failed')
+    } finally {
+      setLoadingWorkflow(false)
+    }
+  }
+
   return (
     <div className="flex min-h-full bg-[#0d0f11] text-[#f3f5f5]">
       <aside className="hidden w-[360px] shrink-0 border-r border-[#293037] bg-[#121518] lg:flex lg:flex-col">
@@ -393,6 +430,17 @@ export default function DashboardWorkspacePage() {
                     <Button variant="secondary" onClick={() => void patchTitle()} disabled={loadingWorkflow || !selectedVersion || selectedVersion.status === 'published'}>Patch Title</Button>
                     <Button variant="secondary" onClick={() => void createReloadDraft()} disabled={loadingWorkflow || !selectedAsset.published_version_id}>Reload Draft</Button>
                     <Button variant="secondary" onClick={() => void publishDraft()} disabled={loadingWorkflow || !canPublish}>Publish</Button>
+                    <Button variant="secondary" onClick={() => void exportHtml()} disabled={loadingWorkflow || selectedVersion?.status !== 'published'}>Export</Button>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <Input
+                      value={shareFolderId}
+                      onChange={event => setShareFolderId(event.target.value)}
+                      className="h-9 border-[#303940] bg-[#0e1114] text-sm text-[#eef2f3]"
+                      placeholder="Folder ID"
+                      aria-label="Folder ID"
+                    />
+                    <Button variant="secondary" onClick={() => void shareToFolder()} disabled={loadingWorkflow || selectedVersion?.status !== 'published' || !shareFolderId.trim()}>Share</Button>
                   </div>
                   <Input
                     value={editingTitle}
@@ -408,6 +456,10 @@ export default function DashboardWorkspacePage() {
                 <SemanticDiffPanel diff={semanticDiff} blockers={allBlockers} warnings={warnings} />
                 <AuditTrail events={auditEvents} />
               </section>
+
+              {selectedAsset.lifecycle === 'legacy_unstructured' && (
+                <LegacyFallbackPanel notebookId={selectedAsset.notebook_id} />
+              )}
 
               {manifest && (
                 <section className="rounded-md border border-[#293037] bg-[#14181c]">
@@ -735,6 +787,27 @@ function AuditTrail({ events }: { events: DashboardAuditEvent[] }) {
             <div className="mt-1 truncate text-xs text-[#818c95]">{event.created_at ? formatDate(event.created_at) : 'No timestamp'}</div>
           </div>
         ))}
+      </div>
+    </section>
+  )
+}
+
+function LegacyFallbackPanel({ notebookId }: { notebookId: string | null }) {
+  return (
+    <section className="rounded-md border border-amber-500/30 bg-amber-500/10 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-amber-100">Legacy HTML fallback</h2>
+          <p className="mt-1 text-sm text-amber-100/80">This asset is preserved as legacy HTML and is not agent-ready until structured review is complete.</p>
+        </div>
+        {notebookId && (
+          <Link
+            to={`/notebooks/${notebookId}`}
+            className="rounded border border-amber-500/30 px-3 py-2 text-sm text-amber-100 transition-colors hover:bg-amber-500/10"
+          >
+            Open Notebook
+          </Link>
+        )}
       </div>
     </section>
   )
