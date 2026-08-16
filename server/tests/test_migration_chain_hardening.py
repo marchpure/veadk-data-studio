@@ -29,7 +29,7 @@ def test_semantic_versions_revision_alias_preserves_legacy_and_short_ids() -> No
     assert legacy.down_revision == "add_semantic_model_versions"
     assert alias.revision == "harden_semantic_versions"
     assert alias.down_revision == "harden_semantic_model_versions_compat"
-    assert script.get_heads() == ["add_evaluation_authoritative_model"]
+    assert script.get_heads() == ["add_canonical_sharing_model"]
 
     collaboration = script.get_revision("add_collaboration_integration_tables")
     assert collaboration.down_revision == "harden_semantic_versions"
@@ -44,6 +44,9 @@ def test_semantic_versions_revision_alias_preserves_legacy_and_short_ids() -> No
 
     evaluation = script.get_revision("add_evaluation_authoritative_model")
     assert evaluation.down_revision == "backfill_legacy_dashboard_assets"
+
+    sharing = script.get_revision("add_canonical_sharing_model")
+    assert sharing.down_revision == "add_evaluation_authoritative_model"
 
 
 def test_self_hosted_entrypoint_serializes_migrations_and_blocks_bad_startup() -> None:

@@ -60,6 +60,13 @@ from server.models.semantic_models import (
     SemanticModelVersion,
 )
 from server.models.settings import Setting
+from server.models.sharing import (
+    SharingAuditEvent,
+    SharingCompatibilityLink,
+    SharingGrant,
+    SharingSecret,
+    SharingViewerSession,
+)
 from server.models.skill_citation import SkillCitation
 from server.models.skill_credentials import SkillCredential
 from server.models.skill_loop_lease import SkillLoopLease
@@ -146,6 +153,11 @@ __all__ = [
     "SemanticModelRelationship",
     "SemanticModelVersion",
     "Setting",
+    "SharingAuditEvent",
+    "SharingCompatibilityLink",
+    "SharingGrant",
+    "SharingSecret",
+    "SharingViewerSession",
     "SkillCitation",
     "SkillCredential",
     "SkillLoopLease",

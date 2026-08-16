@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 3/4 — Evaluation browser/MCP parity smoke complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface, Phase 3/4 Human UI workspace and advisor verify/regress/review/apply REST surfaces, Phase 3/4 browser/MCP parity smoke. Current slice: Phase 5 canonical Sharing model/service. Next slice: implement canonical Sharing grants, secrets, viewer sessions, REST/MCP/Human compatibility, and release gates.
+CURRENT_PHASE: Phase 5 — canonical Sharing model/service foundation complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface, Phase 3/4 Human UI workspace and advisor verify/regress/review/apply REST surfaces, Phase 3/4 browser/MCP parity smoke, Phase 5 canonical Sharing grant/secret/viewer-session foundation. Current slice: Phase 5 canonical Sharing REST/MCP/Human compatibility. Next slice: port existing notebook/dashboard/folder share flows to canonical Sharing service while preserving redaction/authorization and legacy compatibility.
 
 ## Phase 0 Slice Checklist
 
@@ -429,6 +429,34 @@ Remaining Phase 5 work:
 - Implement canonical Sharing model/service for grants, secrets, immutable version binding, viewer sessions, audit, and revocation across notebook/dashboard/folder share flows.
 - Port existing share/export/viewer REST, MCP, and Human UI paths onto the canonical Sharing service while preserving the Phase 0 redaction and authorization guarantees.
 - Run the final real `127.0.0.1:8080` Release Gate only after Phase 5 local gates pass, including cleanup/verification of the previously registered dashboard test data.
+
+## 2026-08-16 20:03 CST - Phase 5 Canonical Sharing Model And Service Foundation
+
+Scope:
+
+- Added additive canonical Sharing persistence for `sharing_grants`, `sharing_secrets`, `sharing_viewer_sessions`, `sharing_audit_events`, and `sharing_compatibility_links`.
+- Registered canonical Sharing models in SQLAlchemy metadata so fresh test metadata and Alembic migration paths create the same tables.
+- Added `SharingService` primitives for immutable dashboard public-link grants, password verifier storage/verification, viewer-session issue/require, grant revocation, viewer-session revocation, and sanitized audit events.
+- Canonical grants bind tenant, object type, object id, immutable object version id, and version digest; dashboard grants reject draft or mutable versions.
+- Canonical secrets store only salted PBKDF2 verifier hashes plus salt/algorithm metadata; plaintext passwords are never persisted or read back.
+- Canonical viewer sessions keep a database token digest and bind the signed viewer token to grant/object/version claims; revoked grants invalidate existing sessions.
+- The slice is foundation-only and does not yet replace existing notebook/dashboard/folder REST behavior; the next Phase 5 slice will port legacy share surfaces onto this service with compatibility links.
+
+Evidence:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_sharing_persistence_migration.py tests/test_sharing_canonical_service.py tests/test_migration_chain_hardening.py -q` -> `11 passed, 9 warnings`.
+- `cd server && uv run ruff check models/sharing.py services/sharing.py migrations/versions/add_canonical_sharing_model.py tests/test_sharing_persistence_migration.py tests/test_sharing_canonical_service.py tests/test_migration_chain_hardening.py` -> passed with the existing removed-rule warning.
+- `cd server && PYTHONPATH=..:tests uv run alembic heads` -> `add_canonical_sharing_model (head)`.
+- Fresh isolated SQLite `alembic upgrade head && alembic current` -> `add_canonical_sharing_model (head)`; evidence DB retained under `/tmp/byaan-sharing-migration-latest`.
+- `PYTHONPATH=.. uv run python` import self-check for `SharingGrant`, `SharingSecret`, `SharingViewerSession`, `SharingAuditEvent`, and `SharingCompatibilityLink` -> `sharing model import ok`.
+- `git diff --check` -> passed.
+
+Remaining Phase 5 work:
+
+- Port worker-backed notebook share create/list/delete/password-manage and export/import paths to create/read canonical grants and secrets while continuing to redact password/verifier/raw token fields.
+- Port folder notebook/dashboard share and viewer session checks to canonical grants, compatibility links, and canonical viewer-session validation.
+- Add REST/MCP serializers for canonical Sharing evidence and retain legacy response compatibility for existing UI flows.
+- Run the final real `127.0.0.1:8080` Release Gate only after all Phase 5 local gates pass.
 
 ## 2026-08-16 19:17 CST - Phase 3/4 Evaluation Human UI And Advisor REST Lifecycle
 
