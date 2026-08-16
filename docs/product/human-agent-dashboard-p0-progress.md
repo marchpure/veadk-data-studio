@@ -585,7 +585,7 @@ Browser workspace evidence captured under `docs/product/dashboard-browser-smoke/
 
 ## Final Integration Handoff
 
-Status: post-handoff completion audit fixed missing `semantic_metric`/`context_search` data-view execution in `e564dae`, legacy HTML tool gating in `7a0f83d`, and MCP deprecation marking in `eb924f2`; ledger update prepared after `HEAD == @{upstream}` verification.
+Status: post-handoff completion audit fixed missing `semantic_metric`/`context_search` data-view execution in `e564dae`, legacy HTML tool gating in `7a0f83d`, and MCP deprecation marking in `eb924f2`; final ledger updates were pushed, and current `HEAD` is the authoritative handoff SHA.
 
 Final branch/evidence state recorded by the handoff ledger before this doc-only update:
 
@@ -594,6 +594,7 @@ Final branch/evidence state recorded by the handoff ledger before this doc-only 
 - Latest implementation evidence HEAD before this doc-only update: `e564dae8763c490c82d5f0097a621b36e9774a68`
 - Latest legacy-tool gate implementation HEAD before this doc-only update: `7a0f83dbfd724da331c1494297137b2580f1513a`
 - Latest MCP deprecation marking HEAD before this doc-only update: `eb924f256ca2653502f31f5990a2331ff2e3b1da`
+- Latest pushed ledger SHA before this doc-only update: `41ee0340faa105a3a19f9c73f499fe051d680d12`
 - Remote branch: `veadk-data-studio/agent/dashboard-human-agent-p0`
 - Integration source observed only: `veadk-data-studio/agent/data-studio-p0` at `9718bf6431c177c0b48e6fc21c36626a9057c47a`
 - Merge base with integration source: `24c6b69a1f816a831ee6ce94d8515817b4752913`
@@ -643,6 +644,7 @@ bb54fc0 dashboard: record semantic context execution evidence
 7a0f83d dashboard: gate legacy html tools
 4db0a34 dashboard: record legacy tool gate evidence
 eb924f2 dashboard: mark legacy html mcp tools deprecated
+41ee034 dashboard: record legacy mcp deprecation evidence
 ```
 
 `git diff --name-status 24c6b69a1f816a831ee6ce94d8515817b4752913..HEAD`:
