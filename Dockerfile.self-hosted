@@ -4,7 +4,10 @@
 # Stage 1: Frontend build
 # The frontend produces static assets, so build it on the native builder
 # platform to avoid QEMU crashes during arm64 dependency installation.
-FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-builder
+ARG NODE_BASE_IMAGE=node:20-alpine
+ARG PYTHON_BASE_IMAGE=python:3.11-slim
+
+FROM --platform=$BUILDPLATFORM ${NODE_BASE_IMAGE} AS frontend-builder
 
 WORKDIR /build
 
@@ -22,7 +25,7 @@ COPY client/ /build/client/
 RUN pnpm exec vite --version && pnpm build
 
 # Stage 2: Python dependency build (runs in parallel with frontend-builder via BuildKit)
-FROM python:3.11-slim AS python-builder
+FROM ${PYTHON_BASE_IMAGE} AS python-builder
 
 WORKDIR /app
 
@@ -40,7 +43,7 @@ ENV UV_HTTP_TIMEOUT=300
 RUN --mount=type=cache,target=/root/.cache/uv UV_LINK_MODE=copy uv sync --frozen --no-install-project
 
 # Stage 3: Runtime image
-FROM python:3.11-slim
+FROM ${PYTHON_BASE_IMAGE}
 
 WORKDIR /app
 
@@ -58,13 +61,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgobject-2.0-0 \
     gnupg2 \
     supervisor \
-    lsb-release \
-    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql-keyring.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/postgresql-keyring.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
-    && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
-    && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-15 postgresql-client-15 caddy gettext-base \
+    postgresql \
+    postgresql-client \
+    caddy \
+    gettext-base \
     && rm -rf /var/lib/apt/lists/*
 
 # Install MS ODBC driver (optional, for SQL Server connections)
@@ -99,14 +99,14 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /app/start-backend.sh
 RUN useradd --create-home --shell /bin/bash byaan
 
 # Create data directory and cache for byaan user
-RUN mkdir -p /data/postgres /data/uploads /data/backups /data/logs /home/byaan/.cache/uv
+RUN mkdir -p /data/postgres /data/uploads /data/backups /data/source_resources /data/logs /home/byaan/.cache/uv
 
 # Setup PostgreSQL
 RUN mkdir -p /run/postgresql && chown -R postgres:postgres /run/postgresql
-RUN mkdir -p /var/lib/postgresql/15/main && chown -R postgres:postgres /var/lib/postgresql
+RUN mkdir -p /var/lib/postgresql && chown -R postgres:postgres /var/lib/postgresql
 
 # Set ownership for byaan user
-RUN chown -R byaan:byaan /app /data/uploads /data/backups /data/logs /home/byaan
+RUN chown -R byaan:byaan /app /data/uploads /data/backups /data/source_resources /data/logs /home/byaan
 
 # Environment variables
 ENV PYTHONPATH=/app

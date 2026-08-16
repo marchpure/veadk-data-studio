@@ -21,7 +21,13 @@ mkdir -p /data/logs
 DB_USER="${POSTGRES_USER:-${DB_USER:-byaan}}"
 DB_PASSWORD="${POSTGRES_PASSWORD:-${DB_PASSWORD:-$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 24)}}"
 DB_NAME="${POSTGRES_DB:-${DB_NAME:-byaan}}"
-PG_BIN="/usr/lib/postgresql/15/bin"
+PG_INITDB="$(find /usr/lib/postgresql -maxdepth 3 -type f -path '*/bin/initdb' -print 2>/dev/null | sort -V | tail -n 1)"
+PG_BIN="${PG_INITDB%/initdb}"
+if [ -z "$PG_BIN" ] || [ ! -x "$PG_BIN/initdb" ]; then
+    echo "ERROR: PostgreSQL binaries were not found under /usr/lib/postgresql."
+    exit 1
+fi
+export PG_BIN
 
 # Force UTF-8 locale defaults to avoid SQL_ASCII initdb behavior.
 export LANG="${LANG:-C.UTF-8}"
@@ -221,7 +227,7 @@ echo "Runtime config generated"
 # ============================================
 # 4. Create persistent data directories
 # ============================================
-mkdir -p /data/uploads /data/backups
+mkdir -p /data/uploads /data/backups /data/source_resources
 
 # Create cache directory for byaan user (backend runs as non-root)
 mkdir -p /home/byaan/.cache/uv
@@ -234,7 +240,7 @@ mkdir -p /data/claude
 mkdir -p /data/app_data/datasets
 
 # Set ownership for byaan user (backend runs as non-root)
-chown -R byaan:byaan /data/claude /data/app_data /data/uploads /data/backups /data/logs
+chown -R byaan:byaan /data/claude /data/app_data /data/uploads /data/backups /data/logs /data/source_resources
 
 # ============================================
 # 4a. Symlink application paths to persistent volume
