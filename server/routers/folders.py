@@ -4,11 +4,13 @@ import json
 from uuid import UUID
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.auth.dependencies import AuthContext, require_any_scope, require_scope
 from server.auth.scopes import Scope
 from server.db.session import get_async_session
+from server.models.queries import Query
 from server.models.tenant_member import TenantRole
 from server.repositories.dashboard import DashboardRepository
 from server.repositories.folder import FolderRepository
@@ -71,6 +73,49 @@ async def _require_viewer_session(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid viewer session payload")
 
     return UUID(str(user_id))
+
+
+def _batch_request_query_ids(request: BatchExecuteSavedQueriesRequest) -> list[str]:
+    if request.queries_with_filters:
+        return [str(query.query_id) for query in request.queries_with_filters]
+    return [str(query_id) for query_id in (request.query_ids or [])]
+
+
+async def _require_viewer_dashboard_query_bindings(
+    dashboard_id: UUID,
+    request: BatchExecuteSavedQueriesRequest,
+    session: AsyncSession,
+) -> None:
+    query_ids = _batch_request_query_ids(request)
+    if not query_ids:
+        return
+    try:
+        parsed_query_ids = [UUID(str(query_id)) for query_id in query_ids]
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="One or more queries are not available for this dashboard",
+        ) from None
+
+    dashboard_repo = DashboardRepository(session)
+    dashboard = await dashboard_repo.get(dashboard_id)
+    if not dashboard:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard not found")
+
+    result = await session.execute(
+        select(Query.id).where(
+            Query.id.in_(parsed_query_ids),
+            Query.notebook_id == dashboard.notebook_id,
+            Query.tenant_id == dashboard.tenant_id,
+        )
+    )
+    bound_query_ids = {str(query_id) for query_id in result.scalars().all()}
+    requested_query_ids = {str(query_id) for query_id in query_ids}
+    if bound_query_ids != requested_query_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="One or more queries are not available for this dashboard",
+        )
 
 
 # ==================== Folder CRUD ====================
@@ -1105,6 +1150,8 @@ async def execute_viewer_dashboard_queries(
                     detail="You don't have access to this dashboard",
                 )
 
+        await _require_viewer_dashboard_query_bindings(dashboard_id, request, session)
+
         if request.queries_with_filters:
             result = await QueryService.execute_batch_saved_queries(
                 session=session,
@@ -1161,6 +1208,8 @@ async def preflight_viewer_dashboard_queries(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="You don't have access to this dashboard",
                 )
+
+        await _require_viewer_dashboard_query_bindings(dashboard_id, request, session)
 
         result = await QueryService.preflight_batch_query_filters(
             session=session,

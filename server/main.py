@@ -56,6 +56,7 @@ from server.routers import codex_oauth as codex_oauth_router
 from server.routers import collaboration as collaboration_router
 from server.routers import connections as connections_router
 from server.routers import custom_skills as custom_skills_router
+from server.routers import dashboard as dashboard_router
 from server.routers import databricks_oauth as databricks_oauth_router
 from server.routers import datasets as datasets_router  # Dataset management
 from server.routers import (
@@ -577,6 +578,8 @@ app.include_router(datasets_router.router, prefix="/api", tags=["datasets"])
 app.include_router(datasources_router.router, prefix="/api", tags=["datasources"])
 
 app.include_router(semantic_models_router.router, prefix="/api", tags=["semantic-models"])
+
+app.include_router(dashboard_router.router, prefix="/api", tags=["dashboard"])
 
 app.include_router(analysis_artifacts_router.router, prefix="/api", tags=["analysis-artifacts"])
 app.include_router(assets_router.router, prefix="/api", tags=["assets"])

@@ -58,6 +58,10 @@ class Scope(str, Enum):
 
     # Dashboard scopes
     DASHBOARD_READ = "dashboard.read"
+    DASHBOARD_QUERY = "dashboard.query"
+    DASHBOARD_CREATE = "dashboard.create"
+    DASHBOARD_EDIT = "dashboard.edit"
+    DASHBOARD_PUBLISH = "dashboard.publish"
     DASHBOARD_EXPORT = "dashboard.export"
     DASHBOARD_SHARE = "dashboard.share"
 
@@ -133,6 +137,10 @@ OWNER_SCOPES: list[str] = [
     Scope.LLM_CONNECTION_DELETE.value,
     # Dashboard
     Scope.DASHBOARD_READ.value,
+    Scope.DASHBOARD_QUERY.value,
+    Scope.DASHBOARD_CREATE.value,
+    Scope.DASHBOARD_EDIT.value,
+    Scope.DASHBOARD_PUBLISH.value,
     Scope.DASHBOARD_EXPORT.value,
     Scope.DASHBOARD_SHARE.value,
     # Annotation
@@ -196,6 +204,10 @@ ADMIN_SCOPES: list[str] = [
     Scope.LLM_CONNECTION_DELETE.value,
     # Dashboard
     Scope.DASHBOARD_READ.value,
+    Scope.DASHBOARD_QUERY.value,
+    Scope.DASHBOARD_CREATE.value,
+    Scope.DASHBOARD_EDIT.value,
+    Scope.DASHBOARD_PUBLISH.value,
     Scope.DASHBOARD_EXPORT.value,
     Scope.DASHBOARD_SHARE.value,
     # Annotation
@@ -257,6 +269,9 @@ MEMBER_SCOPES: list[str] = [
     Scope.LLM_CONNECTION_READ.value,
     # Dashboard
     Scope.DASHBOARD_READ.value,
+    Scope.DASHBOARD_QUERY.value,
+    Scope.DASHBOARD_CREATE.value,
+    Scope.DASHBOARD_EDIT.value,
     Scope.DASHBOARD_EXPORT.value,
     # Annotation (read-only)
     Scope.ANNOTATION_READ.value,

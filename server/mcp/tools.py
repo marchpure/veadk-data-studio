@@ -12,8 +12,10 @@ from server.mcp.tool_wrappers import (
     add_learning_wrapper,
     apply_html_patch_wrapper,
     create_custom_skill_wrapper,
+    create_dashboard_draft_wrapper,
     dashboard_search_replace_wrapper,
     define_dashboard_filters_wrapper,
+    describe_dashboard_wrapper,
     describe_semantic_model_wrapper,
     emit_plan_status_wrapper,
     ensure_notebook_exists,
@@ -21,9 +23,12 @@ from server.mcp.tool_wrappers import (
     execute_mongo_query_wrapper,
     execute_skill_api_wrapper,
     execute_sql_query_wrapper,
+    explain_dashboard_tile_wrapper,
     explain_metric_wrapper,
     get_chart_styling_wrapper,
     get_dashboard_filter_config_wrapper,
+    get_dashboard_lineage_wrapper,
+    get_dashboard_state_wrapper,
     get_database_schema_wrapper,
     get_dataset_schema_by_id_wrapper,
     get_existing_html_wrapper,
@@ -34,6 +39,10 @@ from server.mcp.tool_wrappers import (
     get_user_instructions_wrapper,
     get_user_style_guidelines_wrapper,
     list_metrics_wrapper,
+    patch_dashboard_draft_wrapper,
+    preview_dashboard_wrapper,
+    publish_dashboard_wrapper,
+    query_dashboard_wrapper,
     query_metric_wrapper,
     remove_dashboard_filter_wrapper,
     remove_learning_wrapper,
@@ -41,6 +50,7 @@ from server.mcp.tool_wrappers import (
     save_query_wrapper,
     save_skill_query_wrapper,
     saved_query_schema_wrapper,
+    search_dashboards_wrapper,
     search_datasets_wrapper,
     search_enabled_skills_wrapper,
     search_instructions_wrapper,
@@ -50,6 +60,7 @@ from server.mcp.tool_wrappers import (
     update_custom_skill_wrapper,
     update_dashboard_filter_wrapper,
     update_learning_wrapper,
+    validate_dashboard_wrapper,
 )
 from server.utils.custom_logger import get_logger
 
@@ -231,6 +242,203 @@ def register_all_tools(mcp: FastMCP, get_or_create_session_func):
         session = await extract_session_from_context(get_or_create_session_func, context)
         return await get_model_lineage_wrapper(model_id, session["tenant_id"], session["user_id"])
 
+    # Governed Dashboard Tools
+    @mcp.tool()
+    async def search_dashboards(
+        query: str = "",
+        tags: list[str] | None = None,
+        status: str = "",
+        freshness: str = "",
+        limit: int = 20,
+        context: Context = None,
+    ) -> str:
+        """
+        Search governed Dashboard assets by text, tags, lifecycle status, or freshness.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await search_dashboards_wrapper(
+            query,
+            tags,
+            status,
+            freshness,
+            session["tenant_id"],
+            session["user_id"],
+            limit,
+        )
+
+    @mcp.tool()
+    async def describe_dashboard(
+        dashboard_id: str,
+        version: str = "published",
+        detail: str = "compact",
+        context: Context = None,
+    ) -> str:
+        """
+        Describe a governed Dashboard asset and selected manifest version.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await describe_dashboard_wrapper(
+            dashboard_id,
+            version,
+            detail,
+            session["tenant_id"],
+            session["user_id"],
+        )
+
+    @mcp.tool()
+    async def get_dashboard_state(
+        dashboard_id: str,
+        filters_json: str = "{}",
+        data_view_ids: list[str] | None = None,
+        limit: int = 20,
+        context: Context = None,
+    ) -> str:
+        """
+        Return compact current Dashboard state by executing manifest-bound data views.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await get_dashboard_state_wrapper(
+            dashboard_id,
+            filters_json,
+            data_view_ids,
+            session["tenant_id"],
+            session["user_id"],
+            limit,
+        )
+
+    @mcp.tool()
+    async def query_dashboard(
+        dashboard_id: str,
+        data_view_ids: list[str] | None = None,
+        filters_json: str = "{}",
+        cursor: str = "",
+        limit: int = 20,
+        context: Context = None,
+    ) -> str:
+        """
+        Query governed Dashboard data views. Accepts data_view_ids, never raw saved query IDs.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        filters = json.loads(filters_json or "{}")
+        return await query_dashboard_wrapper(
+            dashboard_id,
+            data_view_ids,
+            filters,
+            cursor,
+            limit,
+            session["tenant_id"],
+            session["user_id"],
+        )
+
+    @mcp.tool()
+    async def explain_dashboard_tile(dashboard_id: str, tile_id: str, context: Context = None) -> str:
+        """
+        Explain a Dashboard tile, including bound data view, pinned versions, evidence, and lineage.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await explain_dashboard_tile_wrapper(dashboard_id, tile_id, session["tenant_id"], session["user_id"])
+
+    @mcp.tool()
+    async def get_dashboard_lineage(dashboard_id: str, tile_id: str = "", context: Context = None) -> str:
+        """
+        Return Dashboard lineage from tile/data view to semantic model/source snapshots.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await get_dashboard_lineage_wrapper(dashboard_id, tile_id, session["tenant_id"], session["user_id"])
+
+    @mcp.tool()
+    async def create_dashboard_draft(
+        slug: str,
+        notebook_id: str,
+        manifest_json: str,
+        description: str = "",
+        tags: list[str] | None = None,
+        context: Context = None,
+    ) -> str:
+        """
+        Create a governed Dashboard draft from a validated dashboard.manifest.v1 JSON payload.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await create_dashboard_draft_wrapper(
+            slug,
+            notebook_id,
+            manifest_json,
+            session["tenant_id"],
+            session["user_id"],
+            description,
+            tags,
+        )
+
+    @mcp.tool()
+    async def patch_dashboard_draft(
+        dashboard_id: str,
+        base_etag: str,
+        json_patch: str,
+        change_summary: str = "Patch dashboard draft from MCP",
+        context: Context = None,
+    ) -> str:
+        """
+        Patch a governed Dashboard draft with allowlisted JSON Patch and optimistic ETag.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await patch_dashboard_draft_wrapper(
+            dashboard_id,
+            base_etag,
+            json_patch,
+            change_summary,
+            session["tenant_id"],
+            session["user_id"],
+        )
+
+    @mcp.tool()
+    async def validate_dashboard(dashboard_id: str, context: Context = None) -> str:
+        """
+        Validate the current Dashboard draft and return blockers/warnings.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await validate_dashboard_wrapper(dashboard_id, session["tenant_id"], session["user_id"])
+
+    @mcp.tool()
+    async def preview_dashboard(
+        dashboard_id: str,
+        filters_json: str = "{}",
+        data_view_ids: list[str] | None = None,
+        limit: int = 20,
+        context: Context = None,
+    ) -> str:
+        """
+        Preview the current Dashboard draft using the shared DashboardRun contract.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        filters = json.loads(filters_json or "{}")
+        return await preview_dashboard_wrapper(
+            dashboard_id,
+            filters,
+            data_view_ids,
+            session["tenant_id"],
+            session["user_id"],
+            limit,
+        )
+
+    @mcp.tool()
+    async def publish_dashboard(
+        dashboard_id: str,
+        base_etag: str,
+        change_summary: str = "Publish dashboard from MCP",
+        context: Context = None,
+    ) -> str:
+        """
+        Publish a validated governed Dashboard draft. Requires dashboard.publish scope.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await publish_dashboard_wrapper(
+            dashboard_id,
+            base_etag,
+            change_summary,
+            session["tenant_id"],
+            session["user_id"],
+        )
+
     # Query Execution Tools
     @mcp.tool()
     async def execute_sql_query(
@@ -317,9 +525,11 @@ def register_all_tools(mcp: FastMCP, get_or_create_session_func):
     @mcp.tool()
     async def get_existing_html(context: Context = None) -> str:
         """
-        Get the current dashboard HTML content.
+        Deprecated legacy-only tool for legacy_unstructured dashboard HTML.
 
-        Use this to see what's already in the dashboard before editing.
+        Structured dashboards must use describe_dashboard, query_dashboard, and
+        patch_dashboard_draft with base_etag JSON Patch instead. This tool is
+        blocked for manifest-backed structured Dashboard versions.
         """
         session = await extract_session_from_context(get_or_create_session_func, context)
         if not session["notebook_id"]:
@@ -329,7 +539,11 @@ def register_all_tools(mcp: FastMCP, get_or_create_session_func):
     @mcp.tool()
     async def apply_html_patch(patch_text: str, context: Context = None) -> str:
         """
-        Apply a unified diff patch to modify the dashboard HTML.
+        Deprecated legacy-only tool for legacy_unstructured dashboard HTML.
+
+        Structured dashboards must use patch_dashboard_draft with base_etag
+        JSON Patch. This tool is blocked for manifest-backed structured
+        Dashboard versions and cannot publish structured dashboards.
 
         Args:
             patch_text: Unified diff format patch
@@ -344,7 +558,11 @@ def register_all_tools(mcp: FastMCP, get_or_create_session_func):
     @mcp.tool()
     async def dashboard_search_replace(diff_content: str, context: Context = None) -> str:
         """
-        Search and replace content in the dashboard.
+        Deprecated legacy-only search/replace for legacy_unstructured HTML.
+
+        Structured dashboards must use patch_dashboard_draft with base_etag
+        JSON Patch. This tool is blocked for manifest-backed structured
+        Dashboard versions and cannot publish structured dashboards.
 
         Args:
             diff_content: Search/replace instructions in diff format

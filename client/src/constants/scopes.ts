@@ -44,6 +44,10 @@ export const Scopes = {
 
   // Dashboard scopes
   DASHBOARD_READ: 'dashboard.read',
+  DASHBOARD_QUERY: 'dashboard.query',
+  DASHBOARD_CREATE: 'dashboard.create',
+  DASHBOARD_EDIT: 'dashboard.edit',
+  DASHBOARD_PUBLISH: 'dashboard.publish',
   DASHBOARD_EXPORT: 'dashboard.export',
   DASHBOARD_SHARE: 'dashboard.share',
 

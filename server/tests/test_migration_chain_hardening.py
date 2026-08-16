@@ -29,10 +29,18 @@ def test_semantic_versions_revision_alias_preserves_legacy_and_short_ids() -> No
     assert legacy.down_revision == "add_semantic_model_versions"
     assert alias.revision == "harden_semantic_versions"
     assert alias.down_revision == "harden_semantic_model_versions_compat"
-    assert script.get_heads() == ["add_file_source_resource_type"]
+    assert script.get_heads() == ["backfill_legacy_dashboard_assets"]
 
     collaboration = script.get_revision("add_collaboration_integration_tables")
     assert collaboration.down_revision == "harden_semantic_versions"
+
+    file_source = script.get_revision("add_file_source_resource_type")
+    assert file_source.down_revision == "add_knowledge_provider_metadata"
+
+    dashboard = script.get_revision("add_governed_dashboard_assets")
+    assert dashboard.down_revision == "add_file_source_resource_type"
+    dashboard_backfill = script.get_revision("backfill_legacy_dashboard_assets")
+    assert dashboard_backfill.down_revision == "add_governed_dashboard_assets"
 
 
 def test_self_hosted_entrypoint_serializes_migrations_and_blocks_bad_startup() -> None:
