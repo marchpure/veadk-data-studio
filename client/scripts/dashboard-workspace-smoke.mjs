@@ -445,24 +445,31 @@ const browser = await chromium.launch({
   executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
 })
 
-async function loginPage(page, tenantId) {
-  await page.goto(`${baseURL}/login`, { waitUntil: 'domcontentloaded' })
-  await page.evaluate(id => {
-    window.localStorage.clear()
-    window.sessionStorage.clear()
-    window.localStorage.setItem('byaan_active_tenant', id)
-  }, tenantId)
-  await page.getByLabel('Email').fill(adminEmail)
-  await page.getByLabel('Password').fill(adminPassword)
-  await Promise.all([
-    page.waitForURL(url => !url.pathname.startsWith('/login'), { timeout: 30000 }),
-    page.getByRole('button', { name: /^Sign in$/ }).click(),
-  ])
+async function issueBrowserRefreshToken() {
+  const response = await fetch(`${apiURL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ username: adminEmail, password: adminPassword }),
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(`Browser login failed ${response.status}: ${JSON.stringify(payload)}`)
+  }
+  const refreshToken = payload?.data?.refresh_token
+  if (!refreshToken) {
+    throw new Error(`Browser login did not return a refresh token: ${JSON.stringify(payload)}`)
+  }
+  return refreshToken
 }
 
 async function makePage(viewport, tenantId) {
-  const page = await browser.newPage({ viewport })
-  await loginPage(page, tenantId)
+  const refreshToken = await issueBrowserRefreshToken()
+  const context = await browser.newContext({ viewport, baseURL })
+  await context.addInitScript(({ id, token }) => {
+    window.localStorage.setItem('byaan_active_tenant', id)
+    window.sessionStorage.setItem('byaan_refresh_token', token)
+  }, { id: tenantId, token: refreshToken })
+  const page = await context.newPage()
   page.on('pageerror', error => {
     stats.pageerror += 1
     console.error('pageerror:', error.message)

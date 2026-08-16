@@ -14,8 +14,8 @@ const MAX_NAVIGATION_EXEMPTIONS = 3
 const allowedNavigationAbortPath = `/api/semantic-models/${modelId}`
 
 let accessToken = ''
+let refreshToken = ''
 let browserContext
-let browserContextLoggedIn = false
 const navigationStateByPage = new WeakMap()
 
 if ((email && !password) || (!email && password)) {
@@ -172,8 +172,12 @@ async function authenticate() {
     throw new Error(`POST /api/auth/login failed: ${response.status} ${JSON.stringify(body)}`)
   }
   accessToken = body?.data?.access_token ?? body?.access_token ?? ''
+  refreshToken = body?.data?.refresh_token ?? body?.refresh_token ?? ''
   if (!accessToken) {
     throw new Error(`Login response did not include an access token: ${JSON.stringify(body)}`)
+  }
+  if (!refreshToken) {
+    throw new Error(`Login response did not include a refresh token: ${JSON.stringify(body)}`)
   }
   record('authenticate', { email })
 }
@@ -294,30 +298,18 @@ async function publishAndQueryModel(model) {
   return reloaded
 }
 
-async function loginPage(page) {
-  if (!email || !password || browserContextLoggedIn) return
-  await page.goto(`${baseURL}/login`, { waitUntil: 'domcontentloaded' })
-  await page.evaluate(() => {
-    window.localStorage.clear()
-    window.sessionStorage.clear()
-  })
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(password)
-  await Promise.all([
-    page.waitForURL(url => !url.pathname.startsWith('/login'), { timeout: 30000 }),
-    page.getByRole('button', { name: /^Sign in$/ }).click(),
-  ])
-  browserContextLoggedIn = true
-}
-
 async function makePage(browser, viewport) {
   if (!browserContext) {
     browserContext = await browser.newContext({ viewport, baseURL })
+    if (refreshToken) {
+      await browserContext.addInitScript(token => {
+        window.sessionStorage.setItem('byaan_refresh_token', token)
+      }, refreshToken)
+    }
   }
   const page = await browserContext.newPage()
   navigationStateByPage.set(page, { navigating: false, screen: '', pendingRequests: new Map() })
   await page.setViewportSize(viewport)
-  await loginPage(page)
   await browserContext.route('https://accounts.google.com/**', route => {
     route.fulfill({ status: 204, body: '' })
   })
