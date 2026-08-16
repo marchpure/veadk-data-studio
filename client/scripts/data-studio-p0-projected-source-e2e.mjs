@@ -14,6 +14,10 @@ const password = process.env.E2E_PASSWORD
 let accessToken = ''
 let browserContext
 
+if ((email && !password) || (!email && password)) {
+  throw new Error('Set both E2E_EMAIL and E2E_PASSWORD, or leave both unset for local no-auth mode.')
+}
+
 mkdirSync(screenDir, { recursive: true })
 
 const stats = {
