@@ -1,0 +1,522 @@
+{
+  "objective": "Data Studio Commercial P0 verification evidence matrix",
+  "base_sha": "e9358ea56554cc0ecdf93b723359eee711cb13b1",
+  "branch": "verification/data-studio-commercial-p0",
+  "ports": {
+    "backend": 18123,
+    "frontend": 15179,
+    "do_not_touch": 8080
+  },
+  "runtime": {
+    "sqlite_database": "$EVIDENCE_DIR/runtime/sqlite/app.db",
+    "postgres_container": "byaan-commercial-p0-postgres",
+    "postgres_volume": "byaan-commercial-p0-postgres-data",
+    "postgres_port": 15432
+  },
+  "forbidden_paths": [
+    "server/migrations/",
+    "server/main.py",
+    "server/auth/",
+    "server/models/",
+    "server/services/",
+    "server/Dockerfile",
+    "Dockerfile.self-hosted"
+  ],
+  "allowed_verification_paths": [
+    "docs/product/data-studio-commercial-p0-verification-report.md",
+    "scripts/commercial_p0_matrix.json",
+    "scripts/commercial_p0_verification.mjs",
+    "scripts/commercial_p0_verification.sh",
+    "tests/commercial_p0/"
+  ],
+  "ui_routes": [
+    {
+      "id": "login",
+      "path": "/login",
+      "required": true,
+      "auth": "guest",
+      "expected_markers": [
+        "Email",
+        "Password"
+      ],
+      "notes": "Required by commercial verifier; available when APP_MODE=self-hosted enables enterprise routes."
+    },
+    {
+      "id": "dashboard_assets",
+      "path": "/dashboard-assets",
+      "required": true,
+      "auth": "protected",
+      "expected_markers": [
+        "Dashboard"
+      ],
+      "notes": "Commercial dashboard inventory route present in e9358ea."
+    },
+    {
+      "id": "specified_dashboard_asset",
+      "path": "/dashboard-assets/commercial-verification-asset",
+      "required": true,
+      "auth": "protected",
+      "expected_markers": [
+        "Dashboard"
+      ],
+      "notes": "Override with COMMERCIAL_P0_ASSET_PATH when Coordinator gives a concrete asset id; default records missing-asset behavior honestly."
+    },
+    {
+      "id": "evaluation",
+      "path": "/evaluation",
+      "required": true,
+      "auth": "protected",
+      "expected_markers": [
+        "Evaluation"
+      ],
+      "notes": "Commercial evaluation workspace route present in e9358ea."
+    },
+    {
+      "id": "data_modeling_requested",
+      "path": "/data-modeling",
+      "required": true,
+      "auth": "protected",
+      "expected_markers": [
+        "Data Models",
+        "Semantic"
+      ],
+      "notes": "Requested route; e9358ea canonical app route is /data-models, so this probe records redirect/missing alias if absent."
+    },
+    {
+      "id": "data_models_compat",
+      "path": "/data-models",
+      "required": false,
+      "auth": "protected",
+      "expected_markers": [
+        "Data Models",
+        "Semantic"
+      ],
+      "notes": "Compatibility evidence for the real e9358ea modeling route."
+    },
+    {
+      "id": "databases",
+      "path": "/databases",
+      "required": true,
+      "auth": "protected",
+      "expected_markers": [
+        "Sources",
+        "Database",
+        "Databases"
+      ],
+      "notes": "Existing source/database console route."
+    },
+    {
+      "id": "sources",
+      "path": "/sources",
+      "required": true,
+      "auth": "protected",
+      "expected_markers": [
+        "Sources",
+        "Connector",
+        "Database"
+      ],
+      "notes": "Existing source inventory route."
+    }
+  ],
+  "viewports": [
+    {
+      "id": "desktop",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "id": "mobile",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "api_probes": [
+    {
+      "id": "app_config",
+      "method": "GET",
+      "path": "/api/app/config",
+      "expected_status": [
+        200
+      ],
+      "auth": false
+    },
+    {
+      "id": "scopes_all",
+      "method": "GET",
+      "path": "/api/scopes/all",
+      "expected_status": [
+        200
+      ],
+      "auth": true
+    },
+    {
+      "id": "connector_definitions",
+      "method": "GET",
+      "path": "/api/connector-definitions",
+      "expected_status": [
+        200
+      ],
+      "auth": true
+    },
+    {
+      "id": "sources_overview",
+      "method": "GET",
+      "path": "/api/sources/overview",
+      "expected_status": [
+        200
+      ],
+      "auth": true
+    },
+    {
+      "id": "datasources",
+      "method": "GET",
+      "path": "/api/datasources",
+      "expected_status": [
+        200
+      ],
+      "auth": true
+    },
+    {
+      "id": "source_resources",
+      "method": "GET",
+      "path": "/api/source-resources",
+      "expected_status": [
+        200
+      ],
+      "auth": true
+    },
+    {
+      "id": "semantic_models",
+      "method": "GET",
+      "path": "/api/semantic-models",
+      "expected_status": [
+        200
+      ],
+      "auth": true
+    },
+    {
+      "id": "data_models",
+      "method": "GET",
+      "path": "/api/data-models",
+      "expected_status": [
+        200
+      ],
+      "auth": true
+    },
+    {
+      "id": "dashboard_assets",
+      "method": "GET",
+      "path": "/api/dashboard-assets",
+      "expected_status": [
+        200
+      ],
+      "auth": true
+    },
+    {
+      "id": "evaluation_suites",
+      "method": "GET",
+      "path": "/api/evaluation/suites",
+      "expected_status": [
+        200
+      ],
+      "auth": true
+    },
+    {
+      "id": "assets_search",
+      "method": "POST",
+      "path": "/api/assets/search",
+      "expected_status": [
+        200
+      ],
+      "auth": true,
+      "body": {
+        "query": "",
+        "asset_types": [],
+        "limit": 20
+      }
+    },
+    {
+      "id": "queries",
+      "method": "GET",
+      "path": "/api/queries",
+      "expected_status": [
+        200
+      ],
+      "auth": true
+    },
+    {
+      "id": "folders",
+      "method": "GET",
+      "path": "/api/folders",
+      "expected_status": [
+        200
+      ],
+      "auth": true
+    },
+    {
+      "id": "mcp_stdio_config",
+      "method": "GET",
+      "path": "/api/mcp/stdio-config",
+      "expected_status": [
+        200
+      ],
+      "auth": true
+    }
+  ],
+  "connector_required_fields": [
+    "auth",
+    "browse_import",
+    "snapshot_profile",
+    "parser",
+    "warnings",
+    "retry",
+    "permission",
+    "delete_reindex",
+    "lineage_evidence",
+    "fixture",
+    "status"
+  ],
+  "connectors": [
+    {
+      "id": "files",
+      "label": "Files",
+      "auth": "local upload",
+      "browse_import": "file upload/import API",
+      "snapshot_profile": "source resource snapshot and parsed assets",
+      "parser": "CSV/XLSX/PDF/file parsers where available",
+      "warnings": "parser warnings and failed status",
+      "retry": "source resource sync",
+      "permission": "tenant-scoped dataset permissions",
+      "delete_reindex": "source resource delete and reimport",
+      "lineage_evidence": "lineage/parsed-assets/evidence endpoints",
+      "fixture": "server source connector tests and uploaded fixture files",
+      "status": "beta"
+    },
+    {
+      "id": "web",
+      "label": "Web",
+      "auth": "public URL or blocked when policy disallows fetch",
+      "browse_import": "URL upload/import path",
+      "snapshot_profile": "captured content snapshot",
+      "parser": "web adapter extraction",
+      "warnings": "fetch/parser warnings",
+      "retry": "source resource sync",
+      "permission": "tenant-scoped resource visibility",
+      "delete_reindex": "source resource delete and reimport",
+      "lineage_evidence": "knowledge/evidence endpoints",
+      "fixture": "web source adapter tests",
+      "status": "beta"
+    },
+    {
+      "id": "feishu_lark",
+      "label": "Feishu/Lark",
+      "auth": "OAuth/admin config required",
+      "browse_import": "resource picker and import",
+      "snapshot_profile": "doc/wiki/sheet/base snapshots",
+      "parser": "Feishu contract parser for doc/sheet/base shapes",
+      "warnings": "reauthorization and permission loss",
+      "retry": "refresh/sync connection",
+      "permission": "provider permission loss and tenant RBAC",
+      "delete_reindex": "disconnect/delete/reimport",
+      "lineage_evidence": "resource lineage/evidence locators",
+      "fixture": "fake Feishu connector tests",
+      "status": "beta"
+    },
+    {
+      "id": "tos",
+      "label": "Volcengine TOS",
+      "auth": "access key credentials required",
+      "browse_import": "bucket/prefix/object picker and import",
+      "snapshot_profile": "object snapshot and parsed table profile",
+      "parser": "object bytes parser",
+      "warnings": "missing/forbidden object warnings",
+      "retry": "sync resource",
+      "permission": "credential and object ACL failures",
+      "delete_reindex": "disconnect/delete/reimport",
+      "lineage_evidence": "raw storage URI and metadata locators",
+      "fixture": "fake TOS connector tests",
+      "status": "beta"
+    },
+    {
+      "id": "postgres",
+      "label": "PostgreSQL",
+      "auth": "database credentials",
+      "browse_import": "connection creation and datasource listing",
+      "snapshot_profile": "schema cache/source understanding profile",
+      "parser": "SQL schema/profile parser",
+      "warnings": "connection/schema errors",
+      "retry": "refresh schema and analyze",
+      "permission": "tenant-scoped connection permissions",
+      "delete_reindex": "connection delete/recreate/analyze",
+      "lineage_evidence": "source understanding resources and semantic lineage",
+      "fixture": "SQLite-first tests plus optional live Postgres run",
+      "status": "beta"
+    },
+    {
+      "id": "mysql",
+      "label": "MySQL",
+      "auth": "database credentials",
+      "browse_import": "connection creation and datasource listing",
+      "snapshot_profile": "schema cache/profile when live driver available",
+      "parser": "SQL dialect schema/profile parser",
+      "warnings": "connection/schema errors",
+      "retry": "refresh schema and analyze",
+      "permission": "tenant-scoped connection permissions",
+      "delete_reindex": "connection delete/recreate/analyze",
+      "lineage_evidence": "source understanding resources",
+      "fixture": "connector contract tests",
+      "status": "beta"
+    },
+    {
+      "id": "sqlite",
+      "label": "SQLite",
+      "auth": "local database path",
+      "browse_import": "connection creation and datasource listing",
+      "snapshot_profile": "schema cache/source understanding profile",
+      "parser": "SQLite schema/profile parser",
+      "warnings": "path/schema errors",
+      "retry": "refresh schema and analyze",
+      "permission": "tenant-scoped connection permissions",
+      "delete_reindex": "connection delete/recreate/analyze",
+      "lineage_evidence": "source understanding and semantic model lineage",
+      "fixture": "local SQLite fixtures",
+      "status": "beta"
+    },
+    {
+      "id": "mssql",
+      "label": "MSSQL",
+      "auth": "database credentials",
+      "browse_import": "connection creation and datasource listing",
+      "snapshot_profile": "schema cache/profile when live driver available",
+      "parser": "SQL Server dialect parser",
+      "warnings": "driver/connection/schema errors",
+      "retry": "refresh schema and analyze",
+      "permission": "tenant-scoped connection permissions",
+      "delete_reindex": "connection delete/recreate/analyze",
+      "lineage_evidence": "source understanding resources",
+      "fixture": "connector contract tests",
+      "status": "beta"
+    },
+    {
+      "id": "oracle",
+      "label": "Oracle",
+      "auth": "database credentials",
+      "browse_import": "connection creation and datasource listing",
+      "snapshot_profile": "schema cache/profile when live driver available",
+      "parser": "Oracle dialect parser",
+      "warnings": "driver/connection/schema errors",
+      "retry": "refresh schema and analyze",
+      "permission": "tenant-scoped connection permissions",
+      "delete_reindex": "connection delete/recreate/analyze",
+      "lineage_evidence": "source understanding resources",
+      "fixture": "connector contract tests",
+      "status": "beta"
+    },
+    {
+      "id": "databricks",
+      "label": "Databricks",
+      "auth": "OAuth/PAT required",
+      "browse_import": "discover warehouses and datasource listing",
+      "snapshot_profile": "schema profile when live auth exists",
+      "parser": "Databricks SQL dialect parser",
+      "warnings": "missing OAuth and expired token",
+      "retry": "OAuth refresh/discover retry",
+      "permission": "workspace and warehouse ACL failures",
+      "delete_reindex": "connection delete/recreate/analyze",
+      "lineage_evidence": "source overview and semantic model lineage",
+      "fixture": "Databricks connector tests",
+      "status": "beta"
+    },
+    {
+      "id": "mongo",
+      "label": "MongoDB",
+      "auth": "database credentials",
+      "browse_import": "connection creation and datasource listing",
+      "snapshot_profile": "collection profile snapshot",
+      "parser": "document shape profile",
+      "warnings": "connection/profile warnings",
+      "retry": "refresh schema and analyze",
+      "permission": "tenant-scoped connection permissions",
+      "delete_reindex": "connection delete/recreate/analyze",
+      "lineage_evidence": "source profile evidence only until projection review",
+      "fixture": "Mongo connector tests",
+      "status": "beta"
+    },
+    {
+      "id": "dynamodb",
+      "label": "DynamoDB",
+      "auth": "AWS credentials",
+      "browse_import": "connection creation and datasource listing",
+      "snapshot_profile": "table/key profile snapshot",
+      "parser": "item shape profile",
+      "warnings": "credential/table warnings",
+      "retry": "refresh schema and analyze",
+      "permission": "IAM and tenant-scoped permissions",
+      "delete_reindex": "connection delete/recreate/analyze",
+      "lineage_evidence": "source profile evidence only until projection review",
+      "fixture": "DynamoDB connector tests",
+      "status": "beta"
+    }
+  ],
+  "modeling_checks": [
+    "source understanding",
+    "profile",
+    "projection review",
+    "semantic draft",
+    "publish",
+    "reload",
+    "MCP query_metric",
+    "lineage/evidence",
+    "honest partial/blocked",
+    "Mongo/DynamoDB no semantic-ready without reviewed projection",
+    "OpenHuman runtime provenance fields"
+  ],
+  "dashboard_checks": [
+    "legacy asset reproduction",
+    "blocker state",
+    "read-only preview",
+    "structured migration entry",
+    "saved_query",
+    "semantic_metric",
+    "context_search",
+    "live/preview/publish/reload/lineage/audit/share",
+    "pinned_snapshot blocked",
+    "permission denied",
+    "legacy tool gating"
+  ],
+  "evaluation_checks": [
+    "empty suite onboarding",
+    "create/import/publish",
+    "preflight",
+    "claim/heartbeat/complete/failures",
+    "compare",
+    "advisor",
+    "promotion",
+    "REST/MCP parity",
+    "tenant isolation",
+    "idempotency",
+    "audit"
+  ],
+  "sharing_checks": [
+    "authorization",
+    "binding",
+    "secret redaction",
+    "rotation",
+    "revoke",
+    "audit",
+    "folder/dashboard/notebook/worker",
+    "self-hosted external-sharing policy"
+  ],
+  "source_matrix": {
+    "path": "docs/product/data-studio-p0-source-matrix.md",
+    "status": "PARTIAL",
+    "summary": {
+      "ready": 0,
+      "beta": 14,
+      "planned": 26,
+      "blocked": 0,
+      "total": 40
+    },
+    "openhuman_runtime_provenance": "UNVERIFIED"
+  }
+}
