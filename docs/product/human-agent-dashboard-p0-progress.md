@@ -514,6 +514,41 @@ Commit:
 
 - `b5c679e` `dashboard: add browser smoke evidence`
 
+### Phase 6 Acceptance Slice: Focused Backend, MCP, Security, Migration Evidence
+
+Status: evidence recorded, commit pending.
+
+Allowlist:
+
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Evidence scope:
+
+- Dashboard manifest/run contract validation.
+- Shared DashboardService lifecycle, ETag, publish, reload, query, policy guard, and audit behavior.
+- REST governed asset lifecycle/query/state/lineage/audit/export, tenant/notebook boundaries, REST/MCP parity, and policy-ref guard behavior.
+- MCP lifecycle/query/explain/lineage contract, scoped publish authorization, and query guard behavior.
+- Viewer Dashboard arbitrary saved-query ID binding protection, including cross-notebook and cross-tenant rejection.
+- Dashboard persistence migrations, legacy backfill, SQLite upgrade/downgrade, and migration-chain hardening.
+
+Commands and results:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_contract_schemas.py tests/test_dashboard_execution_service.py tests/test_dashboard_lifecycle_service.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_persistence_migration.py tests/test_dashboard_rest_api.py tests/test_dashboard_security_regressions.py tests/test_migration_chain_hardening.py` -> passed, `33 passed`, `56 warnings`.
+- `cd server && uv run ruff check schemas/dashboard.py models/dashboard.py repositories/dashboard.py services/dashboard.py routers/dashboard.py mcp/tool_wrappers.py mcp/tools.py tests/test_dashboard_contract_schemas.py tests/test_dashboard_execution_service.py tests/test_dashboard_lifecycle_service.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_persistence_migration.py tests/test_dashboard_rest_api.py tests/test_dashboard_security_regressions.py tests/test_migration_chain_hardening.py` -> passed.
+- `cd server && uv run alembic heads` -> `backfill_legacy_dashboard_assets (head)`.
+- Disposable SQLite migration evidence DB: `.tmp/dashboard-migration-evidence-20260816-1208/app.db`.
+- `DATABASE_URL=sqlite+aiosqlite:///$PWD/../.tmp/dashboard-migration-evidence-20260816-1208/app.db uv run alembic upgrade add_knowledge_provider_metadata` -> passed.
+- The disposable DB at `add_knowledge_provider_metadata` already contained `source_resources` check constraint values including `'file'`; applying `add_file_source_resource_type` directly still hits the unrelated SQLite constraint-name issue documented in the browser slice, so evidence stamped only this disposable DB to `add_file_source_resource_type` before testing Dashboard migrations.
+- `DATABASE_URL=sqlite+aiosqlite:///$PWD/../.tmp/dashboard-migration-evidence-20260816-1208/app.db uv run alembic stamp add_file_source_resource_type && ... uv run alembic upgrade head && ... uv run alembic current` -> `backfill_legacy_dashboard_assets (head)`.
+- SQLite inspection after upgrade confirmed `dashboard_assets`, `dashboard_runs`, and `dashboard_audit_events` exist, and `dashboards` has additive `asset_id`, `manifest_json`, `migration_state`, and `is_published_immutable` columns.
+- `... uv run alembic downgrade add_governed_dashboard_assets && ... uv run alembic current && ... uv run alembic upgrade head && ... uv run alembic current` -> downgraded backfill to `add_governed_dashboard_assets`, then upgraded to `backfill_legacy_dashboard_assets (head)`.
+- `... uv run alembic downgrade add_file_source_resource_type && ... uv run alembic current` -> downgraded through the governed Dashboard migration to `add_file_source_resource_type`; SQLite inspection confirmed Dashboard additive tables/columns were gone while legacy `dashboards.html_content` remained.
+- `... uv run alembic upgrade head && ... uv run alembic current` -> returned to `backfill_legacy_dashboard_assets (head)`.
+
+Commit:
+
+- pending `dashboard: record backend acceptance evidence`
+
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
@@ -533,6 +568,7 @@ Commit:
 | `17588a6` | `dashboard: add rest mcp query parity` | Phase 6 REST/MCP query parity slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py` -> 6 passed; `ruff check services/dashboard.py mcp/tool_wrappers.py tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `6e0decc` | `dashboard: guard unresolved policy refs` | Phase 6 policy/ref security slice | `pytest tests/test_dashboard_execution_service.py tests/test_dashboard_rest_api.py` -> 8 passed; `ruff check services/dashboard.py tests/test_dashboard_execution_service.py tests/test_dashboard_rest_api.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `b5c679e` | `dashboard: add browser smoke evidence` | Phase 6 browser workspace smoke slice | `pnpm smoke:dashboard` -> passed against real REST/UI on `8123`/`5179` with 0 page errors, console errors, failed requests, and HTTP 5xx; `node --check scripts/dashboard-workspace-smoke.mjs` -> passed; `pnpm lint` -> passed with existing 355 warnings; `pnpm build:check` -> passed with existing CSS/chunk warnings; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| pending | `dashboard: record backend acceptance evidence` | Phase 6 backend/MCP/security/migration evidence slice | Dashboard focused pytest suite -> 33 passed; Dashboard backend ruff surface -> passed; Alembic head/current evidence -> `backfill_legacy_dashboard_assets`; disposable SQLite Dashboard upgrade/downgrade evidence -> passed with source-resource stamp workaround documented | Pending push |
 
 ## Acceptance Evidence
 
