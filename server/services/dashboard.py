@@ -15,6 +15,8 @@ from server.repositories.dashboard import DashboardRepository
 from server.schemas.dashboard import DashboardManifest
 from server.schemas.query import QueryFilter as SavedQueryFilter
 from server.services.query_service import QueryService
+from server.services.semantic_model_service import SemanticModelService
+from server.services.source_resources import SourceResourceService
 from server.utils.custom_logger import get_logger
 
 logger = get_logger(__name__)
@@ -583,6 +585,9 @@ class DashboardService:
                 view_results.append(
                     await self._execute_data_view(
                         session=session,
+                        tenant_id=tenant_id,
+                        actor_id=actor_id,
+                        manifest=manifest,
                         data_view=data_view,
                         normalized_filters=normalized_filters,
                     )
@@ -700,6 +705,9 @@ class DashboardService:
             view_results = [
                 await self._execute_data_view(
                     session=session,
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    manifest=manifest,
                     data_view=data_view,
                     normalized_filters=normalized_filters,
                 )
@@ -820,6 +828,9 @@ class DashboardService:
         self,
         *,
         session: AsyncSession,
+        tenant_id: UUID,
+        actor_id: str,
+        manifest: dict[str, Any],
         data_view: dict[str, Any],
         normalized_filters: dict[str, Any],
     ) -> dict[str, Any]:
@@ -829,23 +840,27 @@ class DashboardService:
                 data_view=data_view,
                 normalized_filters=normalized_filters,
             )
-        return {
-            "data_view_id": data_view["id"],
-            "status": "blocked",
-            "result": None,
-            "schema": data_view.get("output_schema", []),
-            "row_count": 0,
-            "cached": False,
-            "stale": False,
-            "warnings": [f"{data_view['kind']} execution is not wired in this slice"],
-            "error": {
-                "code": "execution_not_wired",
-                "message": "Data view execution is not available yet",
-                "retryable": False,
-            },
-            "evidence": data_view.get("evidence", []),
-            "lineage": data_view.get("lineage", []),
-        }
+        if data_view["kind"] == "semantic_metric":
+            return await self._execute_semantic_metric_view(
+                session=session,
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                manifest=manifest,
+                data_view=data_view,
+                normalized_filters=normalized_filters,
+            )
+        if data_view["kind"] == "context_search":
+            return await self._execute_context_search_view(
+                session=session,
+                tenant_id=tenant_id,
+                data_view=data_view,
+                normalized_filters=normalized_filters,
+            )
+        return self._blocked_view_result(
+            data_view=data_view,
+            code="unsupported_data_view_kind",
+            message="Dashboard data view kind is not supported",
+        )
 
     async def _execute_saved_query_view(
         self,
@@ -863,19 +878,20 @@ class DashboardService:
         )
         success = bool(result.get("success"))
         rows = result.get("data") if success else None
-        row_count = len(rows) if isinstance(rows, list) else (1 if isinstance(rows, dict) else 0)
+        bounded_rows, row_count, pagination, bound_warnings = self._bounded_result(data_view, rows)
         view_result = {
             "data_view_id": data_view["id"],
             "status": "success" if success and row_count > 0 else "empty" if success else "error",
-            "result": rows,
+            "result": bounded_rows,
             "schema": data_view.get("output_schema", []),
             "row_count": row_count,
             "cached": bool(result.get("cached", False)),
             "stale": bool(result.get("stale", False)),
             "as_of": result.get("as_of") or result.get("cached_at") or datetime.utcnow().isoformat(),
-            "warnings": [f"saved_query compatibility binding: {saved_query['compatibility_reason']}"],
+            "warnings": [f"saved_query compatibility binding: {saved_query['compatibility_reason']}", *bound_warnings],
             "evidence": data_view.get("evidence", []),
             "lineage": data_view.get("lineage") or saved_query.get("lineage", []),
+            "pagination": pagination,
         }
         if not success:
             view_result["error"] = {
@@ -884,6 +900,170 @@ class DashboardService:
                 "retryable": True,
             }
         return view_result
+
+    async def _execute_semantic_metric_view(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        actor_id: str,
+        manifest: dict[str, Any],
+        data_view: dict[str, Any],
+        normalized_filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        semantic_metric = data_view["semantic_metric"]
+        binding = self._semantic_binding(manifest, semantic_metric["semantic_binding_id"])
+        if binding is None:
+            return self._blocked_view_result(
+                data_view=data_view,
+                code="semantic_binding_missing",
+                message="Dashboard semantic binding is not available for this data view",
+            )
+
+        policy_denial = self._semantic_binding_denial(binding, semantic_metric)
+        if policy_denial:
+            return self._blocked_view_result(
+                data_view=data_view,
+                status_value="permission_denied",
+                code="semantic_binding_not_allowed",
+                message="Dashboard semantic binding does not allow this metric or dimension",
+                policy_reason=policy_denial,
+            )
+
+        dimensions = semantic_metric.get("dimensions") or []
+        request = {
+            "metric": semantic_metric["metric"],
+            "dimension": dimensions[0] if dimensions else "",
+            "grain": semantic_metric.get("grain") or "",
+            "limit": min(int(data_view.get("row_limit") or 500), 5000),
+            "timeout": min(int(data_view.get("timeout_seconds") or 30), 300),
+            "filters": self._filters_for_semantic_view(data_view, normalized_filters),
+        }
+        if "time_range" in normalized_filters:
+            request["time_range"] = normalized_filters["time_range"]
+
+        try:
+            result = await SemanticModelService.run_query_metric(
+                session=session,
+                tenant_id=tenant_id,
+                slug=binding["model_slug"],
+                request=request,
+                user_id=self._optional_uuid(actor_id),
+            )
+        except PermissionError:
+            return self._blocked_view_result(
+                data_view=data_view,
+                status_value="permission_denied",
+                code="semantic_metric_permission_denied",
+                message="Semantic metric execution is not allowed for this dashboard principal",
+            )
+        except (RuntimeError, ValueError):
+            return self._blocked_view_result(
+                data_view=data_view,
+                code="semantic_metric_unavailable",
+                message="Semantic metric execution is not available for this published dashboard binding",
+            )
+        except Exception:
+            logger.exception("Dashboard semantic_metric data view execution failed")
+            return self._blocked_view_result(
+                data_view=data_view,
+                status_value="error",
+                code="semantic_metric_failed",
+                message="Dashboard semantic metric execution failed",
+                retryable=True,
+            )
+
+        if result is None:
+            return self._blocked_view_result(
+                data_view=data_view,
+                code="semantic_model_not_found",
+                message="Published semantic model binding was not found",
+            )
+
+        success = result.get("status") == "completed" and not result.get("error")
+        rows, row_count, pagination, bound_warnings = self._bounded_result(data_view, result.get("result"))
+        warnings = self._coerce_warnings(result.get("warnings"))
+        if result.get("limited"):
+            warnings.append("Semantic metric query returned a limited result set")
+        warnings.extend(bound_warnings)
+        view_result = {
+            "data_view_id": data_view["id"],
+            "status": "success" if success and row_count > 0 else "empty" if success else "error",
+            "result": rows if success else None,
+            "schema": data_view.get("output_schema", []),
+            "row_count": row_count if success else 0,
+            "cached": False,
+            "stale": False,
+            "as_of": result.get("freshness") or datetime.utcnow().isoformat(),
+            "warnings": warnings,
+            "evidence": self._semantic_metric_evidence(data_view, binding, semantic_metric),
+            "lineage": self._semantic_metric_lineage(data_view, binding, semantic_metric, result),
+            "pagination": pagination,
+        }
+        if not success:
+            view_result["error"] = {
+                "code": "semantic_metric_failed",
+                "message": "Dashboard semantic metric execution failed",
+                "retryable": True,
+            }
+        return view_result
+
+    async def _execute_context_search_view(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        data_view: dict[str, Any],
+        normalized_filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        binding = data_view["context_search"]
+        resource_id = self._optional_uuid(binding["source_binding_id"])
+        if resource_id is None:
+            return self._blocked_view_result(
+                data_view=data_view,
+                code="context_binding_invalid",
+                message="Context search data view must bind to a source resource id",
+            )
+
+        query = self._render_context_query(binding["query_template"], normalized_filters)
+        try:
+            evidence_items = await SourceResourceService().search_knowledge(
+                session=session,
+                tenant_id=tenant_id,
+                query=query,
+                resource_ids=[resource_id],
+                limit=min(int(data_view.get("row_limit") or 10), 50),
+            )
+        except Exception:
+            logger.exception("Dashboard context_search data view execution failed")
+            return self._blocked_view_result(
+                data_view=data_view,
+                status_value="error",
+                code="context_search_failed",
+                message="Dashboard context search execution failed",
+                retryable=True,
+            )
+
+        rows = [self._context_search_row(item) for item in evidence_items]
+        bounded_rows, row_count, pagination, bound_warnings = self._bounded_result(data_view, rows)
+        evidence = [*data_view.get("evidence", []), *[self._context_evidence_locator(item) for item in evidence_items]]
+        warnings = bound_warnings
+        if binding.get("evidence_required", True) and not evidence_items:
+            warnings = ["Context search returned no evidence for this dashboard query", *warnings]
+        return {
+            "data_view_id": data_view["id"],
+            "status": "success" if row_count > 0 else "empty",
+            "result": bounded_rows,
+            "schema": data_view.get("output_schema", []),
+            "row_count": row_count,
+            "cached": False,
+            "stale": False,
+            "as_of": datetime.utcnow().isoformat(),
+            "warnings": warnings,
+            "evidence": evidence,
+            "lineage": data_view.get("lineage", []),
+            "pagination": pagination,
+        }
 
     @staticmethod
     def _filters_for_data_view(data_view: dict[str, Any], normalized_filters: dict[str, Any]) -> list[SavedQueryFilter] | None:
@@ -895,6 +1075,208 @@ class DashboardService:
             if field in normalized_filters:
                 filters.append(SavedQueryFilter(field=field, operator="eq", value=normalized_filters[field]))
         return filters or None
+
+    @staticmethod
+    def _filters_for_semantic_view(data_view: dict[str, Any], normalized_filters: dict[str, Any]) -> dict[str, Any]:
+        filter_fields = set(data_view.get("filter_fields") or [])
+        return {field: normalized_filters[field] for field in sorted(filter_fields) if field in normalized_filters}
+
+    @staticmethod
+    def _semantic_binding(manifest: dict[str, Any], binding_id: str) -> dict[str, Any] | None:
+        return next(
+            (binding for binding in manifest.get("semantic_bindings", []) if binding.get("id") == binding_id),
+            None,
+        )
+
+    @staticmethod
+    def _semantic_binding_denial(binding: dict[str, Any], semantic_metric: dict[str, Any]) -> str:
+        denied: list[str] = []
+        allowed_metrics = set(binding.get("allowed_metrics") or [])
+        if allowed_metrics and semantic_metric.get("metric") not in allowed_metrics:
+            denied.append("metric_not_allowlisted")
+        allowed_dimensions = set(binding.get("allowed_dimensions") or [])
+        denied_dimensions = [
+            dimension for dimension in semantic_metric.get("dimensions", []) if allowed_dimensions and dimension not in allowed_dimensions
+        ]
+        if denied_dimensions:
+            denied.append(f"dimensions_not_allowlisted={','.join(sorted(denied_dimensions))}")
+        return "; ".join(denied)
+
+    @staticmethod
+    def _bounded_result(data_view: dict[str, Any], rows: Any) -> tuple[Any, int, dict[str, Any], list[str]]:
+        row_limit = int(data_view.get("row_limit") or 500)
+        byte_limit = int(data_view.get("byte_limit") or 1_000_000)
+        warnings: list[str] = []
+        has_more = False
+        if isinstance(rows, list):
+            bounded = rows[:row_limit]
+            has_more = len(rows) > row_limit
+            if has_more:
+                warnings.append("Dashboard data view result was truncated to the manifest row limit")
+            byte_truncated = False
+            while bounded and len(json.dumps(bounded, ensure_ascii=False, default=str).encode("utf-8")) > byte_limit:
+                bounded = bounded[:-1]
+                has_more = True
+                byte_truncated = True
+            if byte_truncated:
+                warnings.append("Dashboard data view result was truncated to the manifest byte limit")
+            return bounded, len(bounded), {"cursor": None, "has_more": has_more, "limit": row_limit}, warnings
+        if isinstance(rows, dict):
+            encoded_size = len(json.dumps(rows, ensure_ascii=False, default=str).encode("utf-8"))
+            if encoded_size > byte_limit:
+                warnings.append("Dashboard data view result exceeded the manifest byte limit")
+                return None, 0, {"cursor": None, "has_more": True, "limit": row_limit}, warnings
+            return rows, 1, {"cursor": None, "has_more": False, "limit": row_limit}, warnings
+        return rows, 0, {"cursor": None, "has_more": False, "limit": row_limit}, warnings
+
+    @staticmethod
+    def _blocked_view_result(
+        *,
+        data_view: dict[str, Any],
+        code: str,
+        message: str,
+        status_value: str = "blocked",
+        retryable: bool = False,
+        policy_reason: str | None = None,
+    ) -> dict[str, Any]:
+        error: dict[str, Any] = {"code": code, "message": message, "retryable": retryable}
+        if policy_reason:
+            error["policy_reason"] = policy_reason
+        return {
+            "data_view_id": data_view["id"],
+            "status": status_value,
+            "result": None,
+            "schema": data_view.get("output_schema", []),
+            "row_count": 0,
+            "cached": False,
+            "stale": False,
+            "warnings": [message],
+            "error": error,
+            "evidence": data_view.get("evidence", []),
+            "lineage": data_view.get("lineage", []),
+        }
+
+    @staticmethod
+    def _optional_uuid(value: str | UUID | None) -> UUID | None:
+        if isinstance(value, UUID):
+            return value
+        try:
+            return UUID(str(value))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _coerce_warnings(value: Any) -> list[str]:
+        if not value:
+            return []
+        if isinstance(value, list):
+            return [str(item) for item in value if item]
+        return [str(value)]
+
+    @staticmethod
+    def _semantic_metric_evidence(
+        data_view: dict[str, Any],
+        binding: dict[str, Any],
+        semantic_metric: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        return [
+            *data_view.get("evidence", []),
+            {
+                "id": f"{data_view['id']}:metric-definition",
+                "kind": "semantic_metric",
+                "title": f"Metric definition for {semantic_metric['metric']}",
+                "locator": {
+                    "model_slug": binding["model_slug"],
+                    "model_version": binding["model_version"],
+                    "metric": semantic_metric["metric"],
+                },
+                "confidence": 1,
+            },
+        ]
+
+    @staticmethod
+    def _semantic_metric_lineage(
+        data_view: dict[str, Any],
+        binding: dict[str, Any],
+        semantic_metric: dict[str, Any],
+        result: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        lineage = [
+            *data_view.get("lineage", []),
+            {
+                "id": f"{data_view['id']}:metric",
+                "kind": "metric",
+                "name": semantic_metric["metric"],
+                "ref": f"{binding['model_slug']}.{semantic_metric['metric']}",
+                "version": binding["model_version"],
+            },
+            {
+                "id": f"{data_view['id']}:semantic-model",
+                "kind": "semantic_model",
+                "name": binding["model_slug"],
+                "ref": binding["model_slug"],
+                "version": binding["model_version"],
+            },
+        ]
+        for snapshot_id in binding.get("source_snapshot_ids") or []:
+            lineage.append(
+                {
+                    "id": f"{data_view['id']}:source:{snapshot_id}",
+                    "kind": "source_snapshot",
+                    "name": str(snapshot_id),
+                    "ref": str(snapshot_id),
+                    "version": None,
+                }
+            )
+        for item in result.get("lineage") or []:
+            if isinstance(item, dict) and item.get("id"):
+                lineage.append(
+                    {
+                        "id": str(item.get("id")),
+                        "kind": str(item.get("kind") or "metric"),
+                        "name": str(item.get("name") or item.get("id")),
+                        "ref": str(item.get("ref") or item.get("id")),
+                        "version": str(item.get("version")) if item.get("version") is not None else None,
+                    }
+                )
+        return lineage
+
+    @staticmethod
+    def _render_context_query(query_template: str, normalized_filters: dict[str, Any]) -> str:
+        query = query_template
+        for key, value in normalized_filters.items():
+            query = query.replace("{" + key + "}", str(value))
+        return query
+
+    @staticmethod
+    def _context_search_row(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "evidence_id": str(item.get("id") or ""),
+            "text": str(item.get("text") or ""),
+            "title_path": item.get("title_path") or [],
+            "locator": item.get("locator_json") or {},
+            "snapshot_id": str(item.get("snapshot_id") or ""),
+            "confidence": item.get("confidence"),
+        }
+
+    @staticmethod
+    def _context_evidence_locator(item: dict[str, Any]) -> dict[str, Any]:
+        title_path = item.get("title_path") or []
+        title = " / ".join(str(part) for part in title_path if part) or "Context evidence"
+        return {
+            "id": str(item.get("id") or ""),
+            "kind": str(item.get("fragment_type") or "context_search"),
+            "title": title,
+            "locator": item.get("locator_json") or {},
+            "confidence": DashboardService._confidence_float(item.get("confidence")),
+        }
+
+    @staticmethod
+    def _confidence_float(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _overall_freshness(view_results: list[dict[str, Any]]) -> str:

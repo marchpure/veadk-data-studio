@@ -81,10 +81,141 @@ def _manifest_payload(query_id: str, access_policy: dict | None = None) -> dict:
     }
 
 
-async def _seed_published_saved_query_dashboard(
+def _semantic_metric_manifest_payload(access_policy: dict | None = None) -> dict:
+    return {
+        "schema_version": "dashboard.manifest.v1",
+        "dashboard_id": "dash-semantic-metric",
+        "title": "Semantic metric dashboard",
+        "description": "Manifest-first semantic metric dashboard",
+        "audience": ["finance"],
+        "semantic_bindings": [
+            {
+                "id": "sales-model",
+                "model_slug": "sales-semantic",
+                "model_version": "v3",
+                "source_snapshot_ids": ["snapshot-1"],
+                "allowed_metrics": ["paid_revenue"],
+                "allowed_dimensions": ["order_status"],
+            }
+        ],
+        "data_views": [
+            {
+                "id": "dv-paid-revenue",
+                "kind": "semantic_metric",
+                "question": "What paid revenue is recognized by order status?",
+                "output_schema": [
+                    {"name": "order_status", "data_type": "string"},
+                    {"name": "paid_revenue", "data_type": "number", "unit": "USD"},
+                ],
+                "filter_fields": ["region"],
+                "row_limit": 2,
+                "semantic_metric": {
+                    "semantic_binding_id": "sales-model",
+                    "metric": "paid_revenue",
+                    "dimensions": ["order_status"],
+                    "grain": "month",
+                },
+            }
+        ],
+        "filters": [
+            {
+                "id": "region",
+                "label": "Region",
+                "source": "semantic_field",
+                "field": "region",
+                "filter_type": "enum",
+                "operators": ["eq"],
+                "affected_data_view_ids": ["dv-paid-revenue"],
+            }
+        ],
+        "layout": {"sections": [{"id": "main", "tile_ids": ["tile-paid-revenue"]}]},
+        "tiles": [
+            {
+                "id": "tile-paid-revenue",
+                "title": "Paid revenue",
+                "tile_type": "bar",
+                "business_question": "What paid revenue is recognized?",
+                "data_view_id": "dv-paid-revenue",
+            }
+        ],
+        "actions": [],
+        "freshness_policy": {"mode": "live", "max_age_seconds": 3600, "allow_stale": True},
+        "access_policy": access_policy or {"required_scopes": ["dashboard:read", "dashboard:query"]},
+        "provenance": {"created_by_actor_type": "human", "created_by": "user-1", "source": "human"},
+        "migration": {"state": "new_structured", "blockers": []},
+    }
+
+
+def _context_search_manifest_payload(source_binding_id: str, access_policy: dict | None = None) -> dict:
+    return {
+        "schema_version": "dashboard.manifest.v1",
+        "dashboard_id": "dash-context-search",
+        "title": "Context search dashboard",
+        "description": "Evidence-backed context dashboard",
+        "audience": ["finance"],
+        "semantic_bindings": [
+            {
+                "id": "context-source",
+                "model_slug": "policy-context",
+                "model_version": "v1",
+                "source_snapshot_ids": ["snapshot-ctx"],
+                "allowed_metrics": [],
+                "allowed_dimensions": [],
+            }
+        ],
+        "data_views": [
+            {
+                "id": "dv-policy-evidence",
+                "kind": "context_search",
+                "question": "Which evidence defines paid revenue?",
+                "output_schema": [
+                    {"name": "evidence_id", "data_type": "string"},
+                    {"name": "text", "data_type": "string"},
+                    {"name": "snapshot_id", "data_type": "string"},
+                ],
+                "filter_fields": ["topic"],
+                "row_limit": 5,
+                "context_search": {
+                    "source_binding_id": source_binding_id,
+                    "query_template": "definition for {topic}",
+                    "evidence_required": True,
+                },
+            }
+        ],
+        "filters": [
+            {
+                "id": "topic",
+                "label": "Topic",
+                "source": "semantic_field",
+                "field": "topic",
+                "filter_type": "string",
+                "operators": ["eq"],
+                "affected_data_view_ids": ["dv-policy-evidence"],
+            }
+        ],
+        "layout": {"sections": [{"id": "main", "tile_ids": ["tile-policy-evidence"]}]},
+        "tiles": [
+            {
+                "id": "tile-policy-evidence",
+                "title": "Policy evidence",
+                "tile_type": "evidence",
+                "business_question": "Where is the definition evidenced?",
+                "data_view_id": "dv-policy-evidence",
+            }
+        ],
+        "actions": [],
+        "freshness_policy": {"mode": "live", "max_age_seconds": 3600, "allow_stale": True},
+        "access_policy": access_policy or {"required_scopes": ["dashboard:read", "dashboard:query"]},
+        "provenance": {"created_by_actor_type": "human", "created_by": "user-1", "source": "human"},
+        "migration": {"state": "new_structured", "blockers": []},
+    }
+
+
+async def _seed_published_dashboard(
     test_session: AsyncSession,
-    query_id: str,
-    access_policy: dict | None = None,
+    manifest_payload: dict,
+    *,
+    slug_suffix: str,
 ) -> dict[str, UUID]:
     user_id = uuid4()
     tenant_id = uuid4()
@@ -117,8 +248,8 @@ async def _seed_published_saved_query_dashboard(
         tenant_id=tenant_id,
         actor_id=user_id,
         notebook_id=notebook_id,
-        slug=f"exec-{query_id}",
-        manifest_payload=_manifest_payload(query_id, access_policy=access_policy),
+        slug=f"exec-{slug_suffix}",
+        manifest_payload=manifest_payload,
     )
     published = await service.publish(
         session=test_session,
@@ -126,9 +257,21 @@ async def _seed_published_saved_query_dashboard(
         asset_id=asset.id,
         actor_id=user_id,
         base_etag=asset.etag,
-        change_summary="publish saved query dashboard",
+        change_summary="publish dashboard",
     )
     return {"tenant_id": tenant_id, "user_id": user_id, "asset_id": asset.id, "version_id": published.id}
+
+
+async def _seed_published_saved_query_dashboard(
+    test_session: AsyncSession,
+    query_id: str,
+    access_policy: dict | None = None,
+) -> dict[str, UUID]:
+    return await _seed_published_dashboard(
+        test_session,
+        _manifest_payload(query_id, access_policy=access_policy),
+        slug_suffix=query_id,
+    )
 
 
 @pytest.mark.asyncio
@@ -188,6 +331,179 @@ async def test_query_dashboard_executes_manifest_bound_saved_query(
         )
     ).scalars().all()
     assert "dashboard.query" in audit_actions
+
+
+@pytest.mark.asyncio
+async def test_query_dashboard_executes_manifest_bound_semantic_metric(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ids = await _seed_published_dashboard(
+        test_session,
+        _semantic_metric_manifest_payload(),
+        slug_suffix=f"semantic-{uuid4()}",
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_run_query_metric(session, tenant_id, slug, request, user_id):
+        captured["tenant_id"] = tenant_id
+        captured["slug"] = slug
+        captured["request"] = request
+        captured["user_id"] = user_id
+        return {
+            "resolvedMetric": "Paid Revenue",
+            "modelVersion": "v3",
+            "status": "completed",
+            "result": [
+                {"order_status": "PAID", "paid_revenue": 120},
+                {"order_status": "REFUNDED", "paid_revenue": 5},
+                {"order_status": "PENDING", "paid_revenue": 3},
+            ],
+            "returnedCount": 3,
+            "totalCount": 3,
+            "limited": False,
+            "lineage": [{"id": "paid_revenue", "kind": "metric", "name": "Paid Revenue", "ref": "sales.paid_revenue"}],
+            "freshness": "2026-08-16T12:00:00",
+            "policyDecision": "allowed",
+            "warnings": [],
+        }
+
+    monkeypatch.setattr("server.services.dashboard.SemanticModelService.run_query_metric", fake_run_query_metric)
+
+    run = await DashboardService().query_dashboard(
+        session=test_session,
+        tenant_id=ids["tenant_id"],
+        asset_id=ids["asset_id"],
+        actor_id=str(ids["user_id"]),
+        actor_type="agent",
+        filters={"region": "AMER", "ignored": "nope"},
+        data_view_ids=["dv-paid-revenue"],
+        correlation_id="semantic-metric",
+    )
+
+    assert captured["tenant_id"] == ids["tenant_id"]
+    assert captured["slug"] == "sales-semantic"
+    assert captured["user_id"] == ids["user_id"]
+    assert captured["request"] == {
+        "metric": "paid_revenue",
+        "dimension": "order_status",
+        "grain": "month",
+        "limit": 2,
+        "timeout": 30,
+        "filters": {"region": "AMER"},
+    }
+    assert run["overall_freshness"] == "fresh"
+    assert run["views"][0]["data_view_id"] == "dv-paid-revenue"
+    assert run["views"][0]["status"] == "success"
+    assert run["views"][0]["result"] == [
+        {"order_status": "PAID", "paid_revenue": 120},
+        {"order_status": "REFUNDED", "paid_revenue": 5},
+    ]
+    assert run["views"][0]["pagination"]["has_more"] is True
+    assert "row limit" in run["views"][0]["warnings"][0]
+    assert run["views"][0]["evidence"][0]["locator"]["model_version"] == "v3"
+    assert any(item["kind"] == "semantic_model" for item in run["views"][0]["lineage"])
+    assert any(item["kind"] == "source_snapshot" and item["ref"] == "snapshot-1" for item in run["views"][0]["lineage"])
+
+
+@pytest.mark.asyncio
+async def test_query_dashboard_blocks_semantic_metric_outside_manifest_allowlist(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _semantic_metric_manifest_payload()
+    payload["data_views"][0]["semantic_metric"]["metric"] = "gross_margin"
+    ids = await _seed_published_dashboard(test_session, payload, slug_suffix=f"semantic-denied-{uuid4()}")
+    executed = False
+
+    async def fake_run_query_metric(*_args, **_kwargs):
+        nonlocal executed
+        executed = True
+        return {"status": "completed", "result": []}
+
+    monkeypatch.setattr("server.services.dashboard.SemanticModelService.run_query_metric", fake_run_query_metric)
+
+    run = await DashboardService().query_dashboard(
+        session=test_session,
+        tenant_id=ids["tenant_id"],
+        asset_id=ids["asset_id"],
+        actor_id=str(ids["user_id"]),
+        actor_type="agent",
+        data_view_ids=["dv-paid-revenue"],
+    )
+
+    assert executed is False
+    assert run["overall_freshness"] == "blocked"
+    assert run["views"][0]["status"] == "permission_denied"
+    assert run["views"][0]["error"]["code"] == "semantic_binding_not_allowed"
+    assert "metric_not_allowlisted" in run["views"][0]["error"]["policy_reason"]
+
+
+@pytest.mark.asyncio
+async def test_query_dashboard_executes_context_search_with_evidence(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    resource_id = uuid4()
+    evidence_id = uuid4()
+    snapshot_id = uuid4()
+    ids = await _seed_published_dashboard(
+        test_session,
+        _context_search_manifest_payload(str(resource_id)),
+        slug_suffix=f"context-{uuid4()}",
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_search_knowledge(self, *, session, tenant_id, query, resource_ids, limit):
+        captured["tenant_id"] = tenant_id
+        captured["query"] = query
+        captured["resource_ids"] = resource_ids
+        captured["limit"] = limit
+        return [
+            {
+                "id": evidence_id,
+                "knowledge_resource_id": uuid4(),
+                "snapshot_id": snapshot_id,
+                "fragment_type": "document_section",
+                "title_path": ["Finance", "Revenue"],
+                "text": "Paid revenue is net paid order amount.",
+                "locator_json": {"document_token": "docx_1", "block_id": "blk_paid_revenue"},
+                "confidence": "0.91",
+                "content_hash": "hash",
+            }
+        ]
+
+    monkeypatch.setattr("server.services.dashboard.SourceResourceService.search_knowledge", fake_search_knowledge)
+
+    run = await DashboardService().query_dashboard(
+        session=test_session,
+        tenant_id=ids["tenant_id"],
+        asset_id=ids["asset_id"],
+        actor_id=str(ids["user_id"]),
+        actor_type="human",
+        filters={"topic": "paid revenue"},
+        data_view_ids=["dv-policy-evidence"],
+        correlation_id="context-search",
+    )
+
+    assert captured["tenant_id"] == ids["tenant_id"]
+    assert captured["query"] == "definition for paid revenue"
+    assert captured["resource_ids"] == [resource_id]
+    assert captured["limit"] == 5
+    assert run["overall_freshness"] == "fresh"
+    assert run["views"][0]["status"] == "success"
+    assert run["views"][0]["result"] == [
+        {
+            "evidence_id": str(evidence_id),
+            "text": "Paid revenue is net paid order amount.",
+            "title_path": ["Finance", "Revenue"],
+            "locator": {"document_token": "docx_1", "block_id": "blk_paid_revenue"},
+            "snapshot_id": str(snapshot_id),
+            "confidence": "0.91",
+        }
+    ]
+    assert run["views"][0]["evidence"][0]["id"] == str(evidence_id)
+    assert run["views"][0]["evidence"][0]["confidence"] == 0.91
 
 
 @pytest.mark.asyncio
