@@ -1,7 +1,7 @@
 """add evaluation authoritative model
 
 Revision ID: add_evaluation_authoritative_model
-Revises: backfill_legacy_dashboard_assets
+Revises: merge_ds_dash_20260816
 Create Date: 2026-08-16
 """
 
@@ -12,7 +12,7 @@ from alembic import op
 from fastapi_users_db_sqlalchemy.generics import GUID
 
 revision = "add_evaluation_authoritative_model"
-down_revision = "backfill_legacy_dashboard_assets"
+down_revision = "merge_ds_dash_20260816"
 branch_labels = None
 depends_on = None
 

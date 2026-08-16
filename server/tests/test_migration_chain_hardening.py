@@ -41,9 +41,13 @@ def test_semantic_versions_revision_alias_preserves_legacy_and_short_ids() -> No
     assert dashboard.down_revision == "add_file_source_resource_type"
     dashboard_backfill = script.get_revision("backfill_legacy_dashboard_assets")
     assert dashboard_backfill.down_revision == "add_governed_dashboard_assets"
+    blocked_source_status = script.get_revision("add_blocked_source_resource_status")
+    assert blocked_source_status.down_revision == "add_file_source_resource_type"
+    integration_merge = script.get_revision("merge_ds_dash_20260816")
+    assert integration_merge.down_revision == ("backfill_legacy_dashboard_assets", "add_blocked_source_resource_status")
 
     evaluation = script.get_revision("add_evaluation_authoritative_model")
-    assert evaluation.down_revision == "backfill_legacy_dashboard_assets"
+    assert evaluation.down_revision == "merge_ds_dash_20260816"
 
     sharing = script.get_revision("add_canonical_sharing_model")
     assert sharing.down_revision == "add_evaluation_authoritative_model"
