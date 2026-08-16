@@ -32,7 +32,8 @@ class DashboardAssetCreateRequest(BaseModel):
 
 class DashboardDraftPatchRequest(BaseModel):
     base_etag: str = Field(min_length=1)
-    manifest: dict[str, Any]
+    manifest: dict[str, Any] | None = None
+    json_patch: list[dict[str, Any]] | None = None
     change_summary: str = Field(default="Update structured dashboard draft", min_length=1)
 
 
@@ -51,6 +52,12 @@ class DashboardQueryRequest(BaseModel):
     mode: Literal["live", "pinned_snapshot"] = "live"
     correlation_id: str | None = None
     idempotency_key: str | None = None
+
+
+class DashboardPreviewRequest(BaseModel):
+    filters: dict[str, Any] = Field(default_factory=dict)
+    data_view_ids: list[str] | None = None
+    correlation_id: str | None = None
 
 
 def _require_non_viewer(auth: AuthContext) -> None:
@@ -263,16 +270,30 @@ async def patch_dashboard_draft(
     asset = await _get_asset_or_404(repo, auth, asset_id)
     if asset.notebook_id:
         await _assert_notebook_access(session, asset.notebook_id, auth)
-    version = await DashboardService().patch_draft(
-        session=session,
-        tenant_id=auth.tenant_id,
-        asset_id=asset_id,
-        actor_id=auth.user_id,
-        manifest_payload=payload.manifest,
-        base_etag=payload.base_etag,
-        change_summary=payload.change_summary,
-        actor_type="human",
-    )
+    if payload.json_patch is not None:
+        version = await DashboardService().apply_draft_patch(
+            session=session,
+            tenant_id=auth.tenant_id,
+            asset_id=asset_id,
+            actor_id=auth.user_id,
+            base_etag=payload.base_etag,
+            patch_operations=payload.json_patch,
+            change_summary=payload.change_summary,
+            actor_type="human",
+        )
+    elif payload.manifest is not None:
+        version = await DashboardService().patch_draft(
+            session=session,
+            tenant_id=auth.tenant_id,
+            asset_id=asset_id,
+            actor_id=auth.user_id,
+            manifest_payload=payload.manifest,
+            base_etag=payload.base_etag,
+            change_summary=payload.change_summary,
+            actor_type="human",
+        )
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="manifest or json_patch is required")
     return success_response(data=_version_payload(version), message="Dashboard draft patched")
 
 
@@ -301,6 +322,27 @@ async def validate_dashboard_asset(
     validated_manifest = DashboardService.validate_manifest_payload(manifest)
     validation = DashboardService.validation_summary(validated_manifest)
     return success_response(data={"validation": validation, "manifest": validated_manifest}, message="Dashboard validated")
+
+
+@router.post("/dashboard-assets/{asset_id}/preview")
+async def preview_dashboard_asset(
+    asset_id: UUID,
+    payload: DashboardPreviewRequest,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_QUERY)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    _require_non_viewer(auth)
+    run = await DashboardService().preview_dashboard(
+        session=session,
+        tenant_id=auth.tenant_id,
+        asset_id=asset_id,
+        actor_id=str(auth.user_id),
+        actor_type="human",
+        filters=payload.filters,
+        data_view_ids=payload.data_view_ids,
+        correlation_id=payload.correlation_id,
+    )
+    return success_response(data=run, message="Dashboard preview executed")
 
 
 @router.post("/dashboard-assets/{asset_id}/publish")

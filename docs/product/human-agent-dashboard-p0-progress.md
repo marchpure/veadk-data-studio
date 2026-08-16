@@ -243,6 +243,38 @@ Commit:
 
 - `4de07e7` `dashboard: expose dashboard rest contract`
 
+### Phase 3 MCP Slice: Governed Dashboard Tool Contract
+
+Status: implemented.
+
+Allowlist:
+
+- `server/mcp/tool_wrappers.py` - conditional shared MCP wrapper file; additive governed Dashboard wrappers and scope checks over `DashboardService`.
+- `server/mcp/tools.py` - conditional shared MCP registration file; additive governed Dashboard tool registrations only.
+- `server/services/dashboard.py` - shared service file; additive JSON Patch and preview primitives so REST/MCP do not duplicate lifecycle/execution logic.
+- `server/routers/dashboard.py` - shared REST file; additive preview endpoint and JSON Patch draft support to keep REST/MCP contract parity.
+- `server/tests/test_dashboard_mcp_contract.py`
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Behavior:
+
+- Added MCP tools for `search_dashboards`, `describe_dashboard`, `get_dashboard_state`, `query_dashboard`, `explain_dashboard_tile`, `get_dashboard_lineage`, `create_dashboard_draft`, `patch_dashboard_draft`, `validate_dashboard`, `preview_dashboard`, and `publish_dashboard`.
+- MCP wrappers resolve an explicit tenant/user principal, enforce dashboard read/query/create/edit/publish scopes from tenant role, and call the shared `DashboardService`.
+- MCP query accepts `data_view_ids` and validated filters, never raw saved query IDs, and returns compact bounded run JSON with pagination metadata.
+- Added shared allowlisted JSON Patch support for draft edits with ETag conflict handling; REST draft patch now accepts JSON Patch as well as full manifest compatibility.
+- Added shared draft preview support through `DashboardService.preview_dashboard`; REST exposes `/api/dashboard-assets/{id}/preview`.
+- Publish through MCP requires `dashboard.publish`; member principals can create/edit/query but cannot publish.
+
+Tests:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_lifecycle_service.py` -> passed, `7 passed`.
+- `cd server && uv run ruff check services/dashboard.py routers/dashboard.py mcp/tool_wrappers.py mcp/tools.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> passed.
+- `git diff --check` -> passed.
+
+Commit:
+
+- pending `dashboard: expose dashboard mcp contract`
+
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
@@ -254,6 +286,7 @@ Commit:
 | `da3b2d2` | `dashboard: add lifecycle service primitives` | Phase 1 lifecycle slice | `pytest tests/test_dashboard_lifecycle_service.py` -> 3 passed; `ruff check repositories/dashboard.py services/dashboard.py tests/test_dashboard_lifecycle_service.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `0d05215` | `dashboard: bind dashboard run execution` | Phase 2 execution slice | `pytest tests/test_dashboard_execution_service.py` -> 3 passed; `ruff check services/dashboard.py tests/test_dashboard_execution_service.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `4de07e7` | `dashboard: expose dashboard rest contract` | Phase 3 REST slice | `pytest tests/test_dashboard_rest_api.py` -> 2 passed; `ruff check routers/dashboard.py main.py repositories/dashboard.py auth/scopes.py tests/test_dashboard_rest_api.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| pending | `dashboard: expose dashboard mcp contract` | Phase 3 MCP slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_lifecycle_service.py` -> 7 passed; `ruff check services/dashboard.py routers/dashboard.py mcp/tool_wrappers.py mcp/tools.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> passed; `git diff --check` -> passed | Pending push |
 
 ## Acceptance Evidence
 

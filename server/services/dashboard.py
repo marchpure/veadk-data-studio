@@ -22,6 +22,21 @@ logger = get_logger(__name__)
 class DashboardService:
     """Governed Dashboard lifecycle service shared by REST and MCP wrappers."""
 
+    PATCHABLE_MANIFEST_PATHS = {
+        "title",
+        "description",
+        "audience",
+        "semantic_bindings",
+        "data_views",
+        "filters",
+        "layout",
+        "tiles",
+        "actions",
+        "freshness_policy",
+        "access_policy",
+        "migration",
+    }
+
     @staticmethod
     def canonical_json(payload: dict[str, Any]) -> str:
         return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -34,6 +49,63 @@ class DashboardService:
     def validate_manifest_payload(payload: dict[str, Any]) -> dict[str, Any]:
         manifest = DashboardManifest.model_validate(payload)
         return manifest.model_dump(mode="json", by_alias=True)
+
+    @staticmethod
+    def apply_manifest_patch(manifest_payload: dict[str, Any], patch_operations: list[dict[str, Any]]) -> dict[str, Any]:
+        manifest = json.loads(DashboardService.canonical_json(manifest_payload))
+        for operation in patch_operations:
+            op = operation.get("op")
+            path = operation.get("path")
+            if op not in {"add", "replace", "remove"} or not isinstance(path, str):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported dashboard patch operation")
+            target = DashboardService._manifest_patch_target(path)
+            if target not in DashboardService.PATCHABLE_MANIFEST_PATHS:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Dashboard patch path is not allowed")
+            manifest = DashboardService._apply_patch_operation(manifest, op, path, operation.get("value"))
+        return DashboardService.validate_manifest_payload(manifest)
+
+    @staticmethod
+    def _manifest_patch_target(path: str) -> str:
+        if not path.startswith("/"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dashboard patch path must be absolute")
+        parts = [part for part in path.split("/") if part]
+        if not parts:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Dashboard manifest root patch is not allowed")
+        return parts[0].replace("~1", "/").replace("~0", "~")
+
+    @staticmethod
+    def _apply_patch_operation(payload: dict[str, Any], op: str, path: str, value: Any = None) -> dict[str, Any]:
+        parts = [part.replace("~1", "/").replace("~0", "~") for part in path.split("/") if part]
+        parent: Any = payload
+        for part in parts[:-1]:
+            if isinstance(parent, list):
+                parent = parent[int(part)]
+            elif isinstance(parent, dict) and part in parent:
+                parent = parent[part]
+            else:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dashboard patch path does not exist")
+
+        leaf = parts[-1]
+        if isinstance(parent, list):
+            index = len(parent) if leaf == "-" else int(leaf)
+            if op == "remove":
+                parent.pop(index)
+            elif op == "add":
+                parent.insert(index, value)
+            else:
+                parent[index] = value
+        elif isinstance(parent, dict):
+            if op == "remove":
+                if leaf not in parent:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dashboard patch path does not exist")
+                parent.pop(leaf)
+            elif op in {"add", "replace"}:
+                if op == "replace" and leaf not in parent:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dashboard patch path does not exist")
+                parent[leaf] = value
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dashboard patch path does not exist")
+        return payload
 
     async def create_asset_draft(
         self,
@@ -113,6 +185,43 @@ class DashboardService:
         await session.commit()
         await session.refresh(asset)
         return asset
+
+    async def apply_draft_patch(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        asset_id: UUID,
+        actor_id: UUID,
+        base_etag: str,
+        patch_operations: list[dict[str, Any]],
+        change_summary: str,
+        actor_type: str = "human",
+    ) -> Dashboard:
+        repo = DashboardRepository(session)
+        asset = await repo.get_asset(asset_id, tenant_id)
+        if not asset:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard asset not found")
+        if not asset.current_draft_version_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Dashboard has no editable draft")
+        draft = await repo.get_asset_version(
+            tenant_id=tenant_id,
+            asset_id=asset_id,
+            version_id=asset.current_draft_version_id,
+        )
+        if not draft or not draft.manifest_json:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard draft not found")
+        manifest = self.apply_manifest_patch(draft.manifest_json, patch_operations)
+        return await self.patch_draft(
+            session=session,
+            tenant_id=tenant_id,
+            asset_id=asset_id,
+            actor_id=actor_id,
+            manifest_payload=manifest,
+            base_etag=base_etag,
+            change_summary=change_summary,
+            actor_type=actor_type,
+        )
 
     async def patch_draft(
         self,
@@ -367,6 +476,93 @@ class DashboardService:
             outcome="success" if not run_payload["errors"] else "partial",
             correlation_id=correlation_id,
             details={"run_id": str(run.id), "data_view_ids": [view["data_view_id"] for view in view_results]},
+        )
+        await session.commit()
+        return run_payload
+
+    async def preview_dashboard(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        asset_id: UUID,
+        actor_id: str,
+        actor_type: str,
+        filters: dict[str, Any] | None = None,
+        data_view_ids: list[str] | None = None,
+        correlation_id: str | None = None,
+    ) -> dict[str, Any]:
+        repo = DashboardRepository(session)
+        asset = await repo.get_asset(asset_id, tenant_id)
+        if not asset:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard asset not found")
+        if not asset.current_draft_version_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Dashboard has no editable draft")
+
+        version = await repo.get_asset_version(
+            tenant_id=tenant_id,
+            asset_id=asset_id,
+            version_id=asset.current_draft_version_id,
+        )
+        if not version or not version.manifest_json:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard draft not found")
+
+        manifest = self.validate_manifest_payload(version.manifest_json)
+        selected_data_views = self._select_data_views(manifest, data_view_ids)
+        normalized_filters = self._normalize_filters(filters or {})
+        filter_digest = self.digest_payload(normalized_filters)
+        execution_plan_digest = self.digest_payload(
+            {
+                "dashboard_version_id": str(version.id),
+                "data_view_ids": [view["id"] for view in selected_data_views],
+                "preview": True,
+            }
+        )
+        started_at = datetime.utcnow()
+        view_results = [
+            await self._execute_data_view(
+                session=session,
+                data_view=data_view,
+                normalized_filters=normalized_filters,
+            )
+            for data_view in selected_data_views
+        ]
+        completed_at = datetime.utcnow()
+        run_payload = {
+            "contract_version": "dashboard.run.v1",
+            "run_id": str(uuid4()),
+            "dashboard_id": str(asset.id),
+            "dashboard_version_id": str(version.id),
+            "actor_type": actor_type,
+            "actor_id": actor_id,
+            "correlation_id": correlation_id,
+            "mode": "live",
+            "preview": True,
+            "normalized_filters": normalized_filters,
+            "filter_digest": filter_digest,
+            "pinned_versions": {
+                "semantic_models": version.pinned_model_versions_json,
+                "source_snapshots": version.pinned_source_snapshots_json,
+            },
+            "execution_plan_digest": execution_plan_digest,
+            "started_at": started_at.isoformat(),
+            "completed_at": completed_at.isoformat(),
+            "overall_freshness": self._overall_freshness(view_results),
+            "views": view_results,
+            "warnings": self._run_warnings(view_results),
+            "errors": [view["error"] for view in view_results if view.get("error")],
+        }
+        await self._audit(
+            session=session,
+            tenant_id=tenant_id,
+            asset_id=asset.id,
+            version_id=version.id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="dashboard.preview",
+            outcome="success" if not run_payload["errors"] else "partial",
+            correlation_id=correlation_id,
+            details={"run_id": run_payload["run_id"], "data_view_ids": [view["data_view_id"] for view in view_results]},
         )
         await session.commit()
         return run_payload
