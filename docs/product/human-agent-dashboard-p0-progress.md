@@ -372,7 +372,7 @@ Tests:
 
 Commit:
 
-- pending `dashboard: preserve share export compatibility`
+- `77bfd98` `dashboard: preserve share export compatibility`
 
 ## Commit Ledger
 
@@ -388,7 +388,7 @@ Commit:
 | `c3e28b1` | `dashboard: expose dashboard mcp contract` | Phase 3 MCP slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_lifecycle_service.py` -> 7 passed; `ruff check services/dashboard.py routers/dashboard.py mcp/tool_wrappers.py mcp/tools.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `33130f5` | `dashboard: render structured dashboard workspace` | Phase 4 human workspace inventory/view slice | `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `d9ac360` | `dashboard: add review reload workflow` | Phase 4 review/preview/publish/reload slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> 5 passed; `ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
-| pending | `dashboard: preserve share export compatibility` | Phase 4 share/export/legacy compatibility slice | `pytest tests/test_dashboard_rest_api.py` -> 2 passed; `ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pending push |
+| `77bfd98` | `dashboard: preserve share export compatibility` | Phase 4 share/export/legacy compatibility slice | `pytest tests/test_dashboard_rest_api.py` -> 2 passed; `ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 
 ## Acceptance Evidence
 
