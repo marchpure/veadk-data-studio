@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 2 — DB-backed Evaluation runner and grader gate. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer. Current slice: extend runner with heartbeat/stop, idempotent retry/resume, artifact capture, and promotion gate wiring. Next slice: Phase 2 runner resumability and promotion blocking.
+CURRENT_PHASE: Phase 2 — DB-backed Evaluation runner and grader gate. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer. Current slice: wire promotion decisions to verification/regression Evaluation gates. Next slice: Phase 2 promotion blocking.
 
 ## Phase 0 Slice Checklist
 
@@ -289,3 +289,24 @@ Remaining Phase 2 work:
 - Add heartbeat refresh, stop-request handling, expired-lease reclaim, and retry/resume idempotency semantics.
 - Persist evaluation artifacts for runner inputs/outputs and grader diagnostics.
 - Wire promotion decisions so advisor/promote flows are blocked unless verification and regression Evaluation runs satisfy gate policy.
+
+## 2026-08-16 17:56 CST - Phase 2 Runner Resumability And Artifact Tracer
+
+Scope:
+
+- Made preflight run creation idempotent per suite version and idempotency key so retries return the existing run instead of tripping the DB uniqueness constraint or creating duplicate target snapshots.
+- Extended runner leasing with expired-lease reclaim semantics; a different worker can claim an expired running run and the attempt counter advances.
+- Added heartbeat refresh with worker ownership checks; stale workers cannot heartbeat or complete runs after reclaim.
+- Added stop-request handling so a leased worker sees `stop_requested`, marks the run `canceled`, records audit, and stops extending the run as active work.
+- Added run-level artifact persistence with immutable `evaluation_artifacts` rows and content hashes for runner diagnostics.
+
+Evidence:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_evaluation_runner_service.py -q` -> `3 passed, 14 warnings`.
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_evaluation_runner_service.py tests/test_migration_chain_hardening.py -q` -> `17 passed, 15 warnings`.
+- `cd server && uv run ruff check repositories/evaluation.py services/evaluation.py tests/test_evaluation_runner_service.py tests/test_evaluation_service.py` -> passed with the existing removed-rule warning.
+
+Remaining Phase 2 work:
+
+- Wire promotion decisions so advisor/promote flows are blocked unless verification and regression Evaluation runs satisfy gate policy.
+- Add promotion-decision audit evidence for accepted/rejected advisor changesets.

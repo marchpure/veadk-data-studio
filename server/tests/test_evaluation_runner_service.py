@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.evaluation import (
+    EvaluationArtifact,
     EvaluationAssessment,
     EvaluationCase,
     EvaluationCaseRun,
@@ -183,3 +184,76 @@ async def test_runner_claims_queued_run_persists_case_results_and_hard_fail_gate
     assert any(assessment.category == "security" and assessment.hard_fail for assessment in assessments)
     saved = await test_session.get(EvaluationRun, run.id)
     assert saved is not None and saved.completed_at is not None
+
+
+async def test_preflight_run_is_idempotent_for_suite_and_key(test_session: AsyncSession) -> None:
+    tenant_id, suite_version_id = await _seed_published_suite_version_with_cases(test_session)
+    service = EvaluationService(test_session)
+
+    first = await service.create_preflight_run(
+        tenant_id=tenant_id,
+        suite_version_id=suite_version_id,
+        target_snapshot_payload=_complete_snapshot(),
+        actor_id="agent-1",
+        idempotency_key="same-key",
+    )
+    second = await service.create_preflight_run(
+        tenant_id=tenant_id,
+        suite_version_id=suite_version_id,
+        target_snapshot_payload=_complete_snapshot(),
+        actor_id="agent-1",
+        idempotency_key="same-key",
+    )
+
+    assert second.id == first.id
+    runs = (
+        await test_session.execute(
+            select(EvaluationRun).where(
+                EvaluationRun.suite_version_id == suite_version_id,
+                EvaluationRun.idempotency_key == "same-key",
+            )
+        )
+    ).scalars().all()
+    assert len(runs) == 1
+
+
+async def test_runner_reclaims_expired_lease_rejects_stale_worker_and_persists_artifact(
+    test_session: AsyncSession,
+) -> None:
+    tenant_id, suite_version_id = await _seed_published_suite_version_with_cases(test_session)
+    service = EvaluationService(test_session)
+    run = await service.create_preflight_run(
+        tenant_id=tenant_id,
+        suite_version_id=suite_version_id,
+        target_snapshot_payload=_complete_snapshot(),
+        actor_id="agent-1",
+        idempotency_key="reclaim-stop",
+    )
+    first_claim = await service.claim_next_run(tenant_id=tenant_id, worker_id="worker-a", lease_seconds=-1)
+    assert first_claim is not None and first_claim.lease_holder == "worker-a"
+
+    reclaimed = await service.claim_next_run(tenant_id=tenant_id, worker_id="worker-b", lease_seconds=60)
+
+    assert reclaimed is not None
+    assert reclaimed.id == run.id
+    assert reclaimed.lease_holder == "worker-b"
+    assert reclaimed.attempt == 2
+    with pytest.raises(ValueError, match="leased by this worker"):
+        await service.heartbeat_run(tenant_id=tenant_id, run_id=str(run.id), worker_id="worker-a", lease_seconds=60)
+
+    await service.request_run_stop(tenant_id=tenant_id, run_id=str(run.id), actor_id="owner")
+    stopped = await service.heartbeat_run(tenant_id=tenant_id, run_id=str(run.id), worker_id="worker-b", lease_seconds=60)
+
+    assert stopped.stop_requested is True
+    assert stopped.status == "canceled"
+    artifact = await service.record_run_artifact(
+        tenant_id=tenant_id,
+        run_id=str(run.id),
+        artifact_type="runner.log",
+        uri="memory://runner-log",
+        content={"events": ["claimed", "stopped"]},
+    )
+    assert artifact.immutable is True
+    saved_artifact = await test_session.get(EvaluationArtifact, artifact.id)
+    assert saved_artifact is not None
+    assert saved_artifact.content_hash.startswith("sha256:")

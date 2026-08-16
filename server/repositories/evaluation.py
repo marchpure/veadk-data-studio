@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.evaluation import (
+    EvaluationArtifact,
     EvaluationAssessment,
     EvaluationAuditEvent,
     EvaluationCase,
@@ -45,6 +46,22 @@ class EvaluationRepository:
             select(EvaluationRun).where(
                 EvaluationRun.tenant_id == tenant_id,
                 EvaluationRun.id == run_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_run_by_idempotency_key(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_version_id: str | UUID,
+        idempotency_key: str,
+    ) -> EvaluationRun | None:
+        result = await self._session.execute(
+            select(EvaluationRun).where(
+                EvaluationRun.tenant_id == tenant_id,
+                EvaluationRun.suite_version_id == suite_version_id,
+                EvaluationRun.idempotency_key == idempotency_key,
             )
         )
         return result.scalar_one_or_none()
@@ -194,6 +211,31 @@ class EvaluationRepository:
         self._session.add(assessment)
         await self._session.flush()
         return assessment
+
+    async def create_artifact(
+        self,
+        *,
+        tenant_id: str | UUID,
+        run_id: str | UUID | None,
+        case_run_id: str | UUID | None,
+        artifact_type: str,
+        uri: str,
+        content_hash: str,
+        metadata_json: dict,
+    ) -> EvaluationArtifact:
+        artifact = EvaluationArtifact(
+            tenant_id=tenant_id,
+            run_id=run_id,
+            case_run_id=case_run_id,
+            artifact_type=artifact_type,
+            uri=uri,
+            content_hash=content_hash,
+            metadata_json=metadata_json,
+            immutable=True,
+        )
+        self._session.add(artifact)
+        await self._session.flush()
+        return artifact
 
     async def create_audit_event(
         self,

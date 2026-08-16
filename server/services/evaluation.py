@@ -8,7 +8,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.models.evaluation import EvaluationRun, EvaluationSuiteVersion
+from server.models.evaluation import EvaluationArtifact, EvaluationRun, EvaluationSuiteVersion
 from server.repositories.evaluation import EvaluationRepository
 from server.schemas.evaluation import EvaluationTargetSnapshot
 
@@ -32,6 +32,14 @@ class EvaluationService:
             tenant_id=tenant_id,
             suite_version_id=suite_version_id,
         )
+        if idempotency_key:
+            existing = await self._repo.get_run_by_idempotency_key(
+                tenant_id=tenant_id,
+                suite_version_id=suite_version.id,
+                idempotency_key=idempotency_key,
+            )
+            if existing is not None:
+                return existing
         target_snapshot = EvaluationTargetSnapshot.model_validate(target_snapshot_payload)
         blockers = target_snapshot.required_pin_blockers()
         snapshot_json = target_snapshot.model_dump(mode="json")
@@ -69,6 +77,119 @@ class EvaluationService:
         await self._session.commit()
         await self._session.refresh(run)
         return run
+
+    async def heartbeat_run(
+        self,
+        *,
+        tenant_id: str | UUID,
+        run_id: str | UUID,
+        worker_id: str,
+        lease_seconds: int,
+    ) -> EvaluationRun:
+        run = await self._require_worker_run(
+            tenant_id=tenant_id,
+            run_id=run_id,
+            worker_id=worker_id,
+        )
+        now = datetime.utcnow()
+        run.heartbeat_at = now
+        run.lease_expires_at = now + timedelta(seconds=lease_seconds)
+        outcome = "running"
+        if run.stop_requested:
+            run.status = "canceled"
+            run.completed_at = now
+            run.summary_json = {**(run.summary_json or {}), "gate_decision": "canceled", "stop_requested": True}
+            outcome = "canceled"
+        suite_version = await self._require_suite_version(
+            tenant_id=tenant_id,
+            suite_version_id=run.suite_version_id,
+        )
+        await self._repo.create_audit_event(
+            tenant_id=tenant_id,
+            suite_id=suite_version.suite_id,
+            suite_version_id=suite_version.id,
+            run_id=run.id,
+            actor_type="worker",
+            actor_id=worker_id,
+            action="evaluation.run.heartbeat",
+            outcome=outcome,
+            details_json={"lease_seconds": lease_seconds},
+        )
+        await self._session.commit()
+        await self._session.refresh(run)
+        return run
+
+    async def request_run_stop(
+        self,
+        *,
+        tenant_id: str | UUID,
+        run_id: str | UUID,
+        actor_id: str,
+        actor_type: str = "human",
+    ) -> EvaluationRun:
+        run = await self._repo.get_run(tenant_id=tenant_id, run_id=run_id)
+        if run is None:
+            raise ValueError("evaluation run not found")
+        run.stop_requested = True
+        suite_version = await self._require_suite_version(
+            tenant_id=tenant_id,
+            suite_version_id=run.suite_version_id,
+        )
+        await self._repo.create_audit_event(
+            tenant_id=tenant_id,
+            suite_id=suite_version.suite_id,
+            suite_version_id=suite_version.id,
+            run_id=run.id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="evaluation.run.stop_request",
+            outcome="requested",
+            details_json={},
+        )
+        await self._session.commit()
+        await self._session.refresh(run)
+        return run
+
+    async def record_run_artifact(
+        self,
+        *,
+        tenant_id: str | UUID,
+        run_id: str | UUID,
+        artifact_type: str,
+        uri: str,
+        content: Any,
+    ) -> EvaluationArtifact:
+        run = await self._repo.get_run(tenant_id=tenant_id, run_id=run_id)
+        if run is None:
+            raise ValueError("evaluation run not found")
+        content_hash = self._digest(content)
+        artifact = await self._repo.create_artifact(
+            tenant_id=tenant_id,
+            run_id=run.id,
+            case_run_id=None,
+            artifact_type=artifact_type,
+            uri=uri,
+            content_hash=content_hash,
+            metadata_json={"content_hash": content_hash},
+        )
+        suite_version = await self._require_suite_version(
+            tenant_id=tenant_id,
+            suite_version_id=run.suite_version_id,
+        )
+        await self._repo.create_audit_event(
+            tenant_id=tenant_id,
+            suite_id=suite_version.suite_id,
+            suite_version_id=suite_version.id,
+            run_id=run.id,
+            actor_type="service",
+            actor_id="evaluation-service",
+            action="evaluation.artifact.record",
+            outcome="created",
+            details_json={"artifact_type": artifact_type, "uri": uri, "content_hash": content_hash},
+        )
+        await self._session.commit()
+        await self._session.refresh(artifact)
+        return artifact
 
     async def claim_next_run(
         self,
@@ -271,6 +392,20 @@ class EvaluationService:
         if suite_version is None:
             raise ValueError("evaluation suite version not found")
         return suite_version
+
+    async def _require_worker_run(
+        self,
+        *,
+        tenant_id: str | UUID,
+        run_id: str | UUID,
+        worker_id: str,
+    ) -> EvaluationRun:
+        run = await self._repo.get_run(tenant_id=tenant_id, run_id=run_id)
+        if run is None:
+            raise ValueError("evaluation run not found")
+        if run.status != "running" or run.lease_holder != worker_id:
+            raise ValueError("evaluation run is not leased by this worker")
+        return run
 
     @staticmethod
     def _digest(payload: Any) -> str:
