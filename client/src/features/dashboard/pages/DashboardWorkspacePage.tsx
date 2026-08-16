@@ -8,6 +8,7 @@ import {
   Braces,
   CheckCircle2,
   Database,
+  ExternalLink,
   Filter,
   GitBranch,
   LayoutDashboard,
@@ -131,7 +132,11 @@ export default function DashboardWorkspacePage() {
       const version = await DashboardService.getVersion(id, versionSummary.version_num)
       setSelectedVersion(version)
       setVersionNum(version.version_num)
-      setEditorSelection(previous => normalizeEditorSelection(version.manifest, previous))
+      setRun(null)
+      setEditorSelection(previous => {
+        if (!isStructuredDashboardManifest(version.manifest)) return null
+        return normalizeEditorSelection(version.manifest, previous)
+      })
       const diff = extractSemanticDiff(version)
       setSemanticDiff(diff ?? extractSemanticDiff(asset))
       void loadAudit(id)
@@ -143,6 +148,10 @@ export default function DashboardWorkspacePage() {
   }, [loadAudit])
 
   const executeRun = useCallback(async (asset: DashboardAssetDetail, version: DashboardVersion, nextFilters: Record<string, unknown>) => {
+    if (!isStructuredDashboardManifest(version.manifest)) {
+      setRun(null)
+      return
+    }
     setLoadingRun(true)
     try {
       const payload = {
@@ -176,8 +185,10 @@ export default function DashboardWorkspacePage() {
   }, [assetId, loadDetail])
 
   useEffect(() => {
-    if (selectedAsset && selectedVersion) {
+    if (selectedAsset && selectedVersion && isStructuredDashboardManifest(selectedVersion.manifest)) {
       void executeRun(selectedAsset, selectedVersion, filters)
+    } else {
+      setRun(null)
     }
   }, [selectedAsset, selectedVersion, executeRun, filters])
 
@@ -187,13 +198,14 @@ export default function DashboardWorkspacePage() {
     return assets.filter(asset => [asset.name, asset.slug, asset.description].some(value => value.toLowerCase().includes(lower)))
   }, [assets, query])
 
-  const manifest = selectedVersion?.manifest ?? null
+  const manifest = isStructuredDashboardManifest(selectedVersion?.manifest) ? selectedVersion.manifest : null
+  const isLegacyAsset = selectedAsset?.lifecycle === 'legacy_unstructured' || selectedVersion?.migration_state === 'legacy_unstructured'
   const blockers = selectedVersion?.validation_result.blockers ?? manifest?.migration.blockers ?? []
   const semanticWarnings = semanticDiff?.warnings ?? []
   const semanticBlockers = semanticDiff?.blockers ?? []
   const allBlockers = [...blockers, ...semanticBlockers]
   const warnings = [...(selectedVersion?.validation_result.warnings ?? []), ...semanticWarnings, ...(run?.warnings ?? [])]
-  const canPublish = Boolean(selectedAsset && selectedVersion?.status === 'draft' && allBlockers.length === 0)
+  const canPublish = Boolean(selectedAsset && manifest && selectedVersion?.status === 'draft' && allBlockers.length === 0)
 
   const handleFilterChange = (filter: DashboardFilter, value: string) => {
     setFilters(previous => {
@@ -269,7 +281,7 @@ export default function DashboardWorkspacePage() {
   }
 
   const patchTitle = async () => {
-    if (!editingTitle.trim()) return
+    if (!manifest || !editingTitle.trim()) return
     await applyDraftPatch(
       [{ op: 'replace', path: '/title', value: editingTitle.trim() }],
       'Update Dashboard title from workspace',
@@ -278,12 +290,12 @@ export default function DashboardWorkspacePage() {
   }
 
   const createReloadDraft = async () => {
-    if (!selectedAsset || !selectedVersion) return
+    if (!selectedAsset || !selectedVersion || !manifest) return
     setLoadingWorkflow(true)
     setValidationMessage(null)
     try {
       const nextModelVersions = Object.fromEntries(
-        selectedVersion.manifest.semantic_bindings.map(binding => [binding.id, binding.model_version]),
+        manifest.semantic_bindings.map(binding => [binding.id, binding.model_version]),
       )
       const response = await DashboardService.reload(selectedAsset.id, {
         base_etag: selectedAsset.etag,
@@ -328,7 +340,7 @@ export default function DashboardWorkspacePage() {
   }
 
   const executeSelectedVersion = async () => {
-    if (!selectedAsset || !selectedVersion) return
+    if (!selectedAsset || !selectedVersion || !manifest) return
     await executeRun(selectedAsset, selectedVersion, filters)
     if (selectedVersion.status !== 'published') {
       setValidationMessage('Preview executed against draft version')
@@ -336,7 +348,7 @@ export default function DashboardWorkspacePage() {
   }
 
   const exportHtml = async () => {
-    if (!selectedAsset || !selectedVersion) return
+    if (!selectedAsset || !selectedVersion || !manifest) return
     setLoadingWorkflow(true)
     setValidationMessage(null)
     try {
@@ -525,17 +537,17 @@ export default function DashboardWorkspacePage() {
                       <div className="text-xs font-medium uppercase text-[#818c95]">Review state</div>
                       <div className="mt-1 text-sm text-[#d6dde2]">{allBlockers.length} blockers, {warnings.length} warnings</div>
                     </div>
-                    <Button variant="secondary" onClick={() => void executeSelectedVersion()} disabled={loadingRun}>
+                    <Button variant="secondary" onClick={() => void executeSelectedVersion()} disabled={loadingRun || !manifest}>
                       {loadingRun ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                       {selectedVersion?.status === 'published' ? 'Run' : 'Preview'}
                     </Button>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button variant="secondary" onClick={() => void validateDraft()} disabled={loadingWorkflow}>Validate</Button>
-                    <Button variant="secondary" onClick={() => void patchTitle()} disabled={loadingWorkflow || !selectedVersion || selectedVersion.status === 'published'}>Patch Title</Button>
-                    <Button variant="secondary" onClick={() => void createReloadDraft()} disabled={loadingWorkflow || !selectedAsset.published_version_id}>Reload Draft</Button>
+                    <Button variant="secondary" onClick={() => void validateDraft()} disabled={loadingWorkflow || !manifest}>Validate</Button>
+                    <Button variant="secondary" onClick={() => void patchTitle()} disabled={loadingWorkflow || !manifest || !selectedVersion || selectedVersion.status === 'published'}>Patch Title</Button>
+                    <Button variant="secondary" onClick={() => void createReloadDraft()} disabled={loadingWorkflow || !manifest || !selectedAsset.published_version_id}>Reload Draft</Button>
                     <Button variant="secondary" onClick={() => void publishDraft()} disabled={loadingWorkflow || !canPublish}>Publish</Button>
-                    <Button variant="secondary" onClick={() => void exportHtml()} disabled={loadingWorkflow || selectedVersion?.status !== 'published'}>Export</Button>
+                    <Button variant="secondary" onClick={() => void exportHtml()} disabled={loadingWorkflow || !manifest || selectedVersion?.status !== 'published'}>Export</Button>
                   </div>
                   <div className="mt-3 flex gap-2">
                     <Input
@@ -545,7 +557,7 @@ export default function DashboardWorkspacePage() {
                       placeholder="Folder ID"
                       aria-label="Folder ID"
                     />
-                    <Button variant="secondary" onClick={() => void shareToFolder()} disabled={loadingWorkflow || selectedVersion?.status !== 'published' || !shareFolderId.trim()}>Share</Button>
+                    <Button variant="secondary" onClick={() => void shareToFolder()} disabled={loadingWorkflow || !manifest || selectedVersion?.status !== 'published' || !shareFolderId.trim()}>Share</Button>
                   </div>
                   <Input
                     value={editingTitle}
@@ -573,8 +585,12 @@ export default function DashboardWorkspacePage() {
                 />
               )}
 
-              {(selectedAsset.lifecycle === 'legacy_unstructured' || selectedVersion?.migration_state === 'legacy_unstructured') && (
-                <LegacyFallbackPanel notebookId={selectedAsset.notebook_id} />
+              {isLegacyAsset && (
+                <LegacyFallbackPanel
+                  asset={selectedAsset}
+                  version={selectedVersion}
+                  blockers={allBlockers}
+                />
               )}
 
               {manifest && (
@@ -619,6 +635,22 @@ function extractSemanticDiff(source: DashboardVersion | DashboardAssetDetail | n
   }
   const diff = source.health_summary.semantic_diff
   return isRecord(diff) ? diff as DashboardSemanticDiff : null
+}
+
+function isStructuredDashboardManifest(value: unknown): value is DashboardManifest {
+  if (!isRecord(value)) return false
+  if (value.schema_version !== 'dashboard.manifest.v1') return false
+  return Array.isArray(value.semantic_bindings)
+    && Array.isArray(value.data_views)
+    && Array.isArray(value.filters)
+    && isRecord(value.layout)
+    && Array.isArray(value.layout.sections)
+    && Array.isArray(value.tiles)
+    && Array.isArray(value.actions)
+    && isRecord(value.freshness_policy)
+    && isRecord(value.access_policy)
+    && isRecord(value.provenance)
+    && isRecord(value.migration)
 }
 
 function normalizeEditorSelection(manifest: DashboardManifest, selection: EditorSelection | null): EditorSelection | null {
@@ -1524,24 +1556,66 @@ function AuditTrail({ events }: { events: DashboardAuditEvent[] }) {
   )
 }
 
-function LegacyFallbackPanel({ notebookId }: { notebookId: string | null }) {
+function LegacyFallbackPanel({
+  asset,
+  version,
+  blockers,
+}: {
+  asset: DashboardAssetDetail
+  version: DashboardVersion | null
+  blockers: string[]
+}) {
+  const migrationSummary = isRecord(asset.health_summary.migration) ? asset.health_summary.migration : {}
+  const migrationState = version?.migration_state
+    ?? stringValue(migrationSummary.state)
+    ?? asset.lifecycle
+  const latestLegacyVersionId = stringValue(migrationSummary.latest_dashboard_version_id)
+  const previewPath = asset.notebook_id ? `/notebook/${asset.notebook_id}/preview` : null
+
   return (
     <section className="rounded-md border border-amber-500/30 bg-amber-500/10 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-amber-100">Legacy HTML fallback</h2>
-          <p className="mt-1 text-sm text-amber-100/80">This asset is preserved as legacy HTML and is not agent-ready until structured review is complete.</p>
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold text-amber-100">Legacy HTML fallback</h2>
+            <StatusPill status={migrationState} />
+          </div>
+          <p className="mt-1 max-w-4xl text-sm text-amber-100/80">
+            {asset.name} is preserved as legacy HTML and is not agent-ready until structured manifest review is complete.
+          </p>
+          <div className="mt-3 grid gap-2 text-xs text-amber-100/80 md:grid-cols-2 xl:grid-cols-4">
+            <LegacySignal label="Asset ID" value={asset.id} />
+            <LegacySignal label="Notebook ID" value={asset.notebook_id ?? 'none'} />
+            <LegacySignal label="Version" value={version ? `v${version.version_num} ${version.status}` : 'none'} />
+            <LegacySignal label="Legacy Version ID" value={latestLegacyVersionId ?? version?.id ?? 'none'} />
+          </div>
+          {blockers.length > 0 && (
+            <div className="mt-3 rounded border border-amber-500/30 bg-[#14100a] p-3">
+              <div className="text-xs font-medium uppercase text-amber-100/70">Migration blocker</div>
+              <div className="mt-1 text-sm text-amber-100">{blockers[0]}</div>
+            </div>
+          )}
         </div>
-        {notebookId && (
+        {previewPath && (
           <Link
-            to={`/notebooks/${notebookId}`}
-            className="rounded border border-amber-500/30 px-3 py-2 text-sm text-amber-100 transition-colors hover:bg-amber-500/10"
+            to={previewPath}
+            className="inline-flex h-9 shrink-0 items-center gap-2 rounded border border-amber-500/30 px-3 text-sm text-amber-100 transition-colors hover:bg-amber-500/10"
           >
-            Open Notebook
+            <ExternalLink className="h-4 w-4" />
+            Open legacy preview
           </Link>
         )}
       </div>
     </section>
+  )
+}
+
+function LegacySignal({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded border border-amber-500/20 bg-[#14100a] p-2">
+      <div className="text-[11px] uppercase text-amber-100/60">{label}</div>
+      <div className="mt-1 truncate text-amber-100">{value}</div>
+    </div>
   )
 }
 
@@ -1624,6 +1698,10 @@ function shortId(value?: string | null) {
 
 function shortHash(value: string) {
   return value.replace('sha256:', '').slice(0, 10)
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null
 }
 
 function formatInventoryModel(asset: DashboardAsset): string {

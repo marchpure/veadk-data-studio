@@ -6,6 +6,7 @@ const apiURL = process.env.API_URL || 'http://127.0.0.1:8000'
 const screenDir = process.env.SCREEN_DIR || './tmp-dashboard-screens'
 const adminEmail = process.env.BYAAN_ADMIN_EMAIL || 'admin@example.com'
 const adminPassword = process.env.BYAAN_ADMIN_PASSWORD || 'password'
+const explicitLegacyAssetId = process.env.LEGACY_ASSET_ID || ''
 mkdirSync(screenDir, { recursive: true })
 
 const stats = {
@@ -602,6 +603,22 @@ async function runLegacyScene(page, fixtures, viewport) {
   await capture(page, 'legacy', viewport)
 }
 
+async function runExplicitLegacyAssetScene(page, assetId) {
+  if (!assetId) return
+  await page.goto(`${baseURL}/dashboard-assets/${assetId}`, { waitUntil: 'networkidle' })
+  await page.getByText('Black Friday Demographic Buying Pattern Analysis').waitFor()
+  await page.getByText('legacy_unstructured').first().waitFor()
+  await page.getByText('legacy HTML dashboard requires structured manifest review before agent-ready publish').waitFor()
+  await page.getByText('Legacy HTML fallback').waitFor()
+  await page.getByText('not agent-ready').waitFor()
+  await page.getByRole('link', { name: /Open legacy preview/i }).waitFor()
+  const bodyText = await page.locator('body').innerText()
+  if (/Something went wrong/i.test(bodyText)) {
+    throw new Error(`Explicit legacy asset ${assetId} rendered the generic error boundary`)
+  }
+  await capture(page, 'legacy-explicit-asset', '1440')
+}
+
 async function runStalePartialScene(page, fixtures, viewport) {
   await page.goto(`${baseURL}/dashboard-assets/${fixtures.stalePartialAssetId}`, { waitUntil: 'networkidle' })
   await page.getByRole('heading', { name: /Browser Stale Partial/i }).waitFor()
@@ -718,6 +735,7 @@ async function runDashboardJourney(fixtures) {
   await runStalePartialScene(desktop, fixtures, '1440')
   await runPermissionScene(desktop, fixtures, '1440')
   await runLegacyScene(desktop, fixtures, '1440')
+  await runExplicitLegacyAssetScene(desktop, explicitLegacyAssetId)
   await desktop.close()
 
   const mobile = await makePage({ width: 390, height: 844 }, fixtures.tenantId)
