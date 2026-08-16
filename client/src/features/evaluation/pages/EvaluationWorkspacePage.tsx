@@ -37,6 +37,15 @@ import type {
 
 type EvaluationTab = 'cases' | 'runs' | 'advisor' | 'feedback' | 'settings'
 
+const supportedTargetKinds = new Set([
+  'connector',
+  'semantic_model',
+  'agent_answer',
+  'dashboard',
+  'policy',
+  'end_to_end',
+])
+
 const statusTone: Record<string, string> = {
   published: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
   draft: 'border-sky-500/30 bg-sky-500/10 text-sky-200',
@@ -746,7 +755,7 @@ function SettingsTab({ suite, version }: { suite: EvaluationSuite; version: Eval
 }
 
 function buildTargetSnapshot(changeSet: AdvisorChangeSet, suite: EvaluationSuite | null, version: EvaluationSuiteVersion | null): EvaluationTargetSnapshotInput {
-  const targetKind = changeSet.target_ref.split(':')[0] || suite?.target_kinds[0] || 'semantic_model'
+  const targetKind = resolveTargetKind(changeSet.target_ref, suite)
   const now = new Date().toISOString()
   return {
     contract_version: 'evaluation.target_snapshot.v1',
@@ -760,12 +769,23 @@ function buildTargetSnapshot(changeSet: AdvisorChangeSet, suite: EvaluationSuite
     source: { snapshot_id: 'human-ui-source', snapshot_hash: `sha256:${changeSet.base_etag || changeSet.id}` },
     semantic_model: { version_id: changeSet.base_version_ref, version_hash: changeSet.base_etag || `sha256:${changeSet.id}` },
     dashboard: { version_id: version?.id ?? 'none', manifest_hash: version?.content_hash ?? 'sha256:none' },
-    prompt: { registry_version: 'human-ui', tool_registry_hash: 'sha256:human-ui' },
+    prompt: { version: 'human-ui', prompt_hash: 'sha256:human-ui-prompt' },
+    tool_registry_hash: 'sha256:human-ui-tools',
+    skill_registry_hash: 'sha256:human-ui-skills',
+    llm: { provider: 'human-ui', model: 'human-review', params_hash: 'sha256:human-ui-params' },
     principal: { tenant_id: changeSet.tenant_id, actor_type: 'human', actor_id: changeSet.created_by, scopes: ['dashboard.query'] },
     dataset: { snapshot_id: 'human-ui-dataset', snapshot_hash: `sha256:${version?.content_hash || changeSet.id}` },
     feature_flags: { evaluation_governance: true },
     time_fixture: { now, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' },
   }
+}
+
+function resolveTargetKind(targetRef: string, suite: EvaluationSuite | null): string {
+  const prefix = targetRef.split(':')[0]
+  if (supportedTargetKinds.has(prefix)) return prefix
+  const suiteKinds = suite?.target_kinds ?? []
+  if (prefix === 'custom_skill' && suiteKinds.includes('agent_answer')) return 'agent_answer'
+  return suiteKinds.find(kind => supportedTargetKinds.has(kind)) ?? 'agent_answer'
 }
 
 function latestGate(runs: EvaluationRun[]): string {

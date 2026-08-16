@@ -9,6 +9,7 @@
     "build:check": "tsc -b && vite build",
     "lint": "eslint .",
     "smoke:dashboard": "node scripts/dashboard-workspace-smoke.mjs",
+    "smoke:evaluation": "node scripts/evaluation-workspace-smoke.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

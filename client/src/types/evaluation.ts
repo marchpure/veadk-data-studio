@@ -192,6 +192,9 @@ export interface EvaluationTargetSnapshotInput {
   semantic_model?: Record<string, unknown>
   dashboard?: Record<string, unknown>
   prompt?: Record<string, unknown>
+  tool_registry_hash?: string | null
+  skill_registry_hash?: string | null
+  llm?: Record<string, unknown>
   principal: Record<string, unknown>
   dataset?: Record<string, unknown>
   feature_flags: Record<string, unknown>

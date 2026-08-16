@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 3/4 — Evaluation Human UI and advisor REST lifecycle surfaces complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface, Phase 3/4 Human UI workspace and advisor verify/regress/review/apply REST surfaces. Current slice: ready for browser/MCP parity smoke and then Phase 5 canonical Sharing. Next slice: add end-to-end browser/MCP parity evidence showing failed-set verification plus full-suite regression evidence is visible before promotion/apply, then start canonical Sharing model/service.
+CURRENT_PHASE: Phase 3/4 — Evaluation browser/MCP parity smoke complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface, Phase 3/4 Human UI workspace and advisor verify/regress/review/apply REST surfaces, Phase 3/4 browser/MCP parity smoke. Current slice: Phase 5 canonical Sharing model/service. Next slice: implement canonical Sharing grants, secrets, viewer sessions, REST/MCP/Human compatibility, and release gates.
 
 ## Phase 0 Slice Checklist
 
@@ -403,6 +403,32 @@ Remaining Phase 3/4 work:
 - Add Human UI surfaces for suite inventory/detail, case editor, run compare, failure drawer, feedback review, and advisor staged patch review.
 - Add explicit REST review/apply endpoints for advisor verification/regression lifecycle if the UI needs review-specific shapes beyond the existing runner/promotion endpoints.
 - Add end-to-end browser/MCP parity tests showing failed-set verification plus full-suite regression evidence is visible before promotion/apply.
+
+## 2026-08-16 19:47 CST - Phase 3/4 Evaluation Browser And MCP Parity Smoke
+
+Scope:
+
+- Added isolated Evaluation seed and parity smoke scripts for a published suite with three cases, baseline/candidate runs, failed-set evidence, advisor ready/draft change sets, verification runs, regression runs, and redaction sentinels.
+- Added a browser workspace smoke that exercises the real REST API and rendered Human UI: suite inventory/detail, cases, failed run failures, baseline/candidate comparison, advisor ready apply, draft verification/regression queueing, feedback provenance, settings/manifest, desktop screenshots, and mobile overflow check.
+- Added an MCP parity smoke using the same seeded fixture IDs through the service-backed MCP wrappers for suite search/detail, case list, run detail, failure detail, comparison, and advisor verification/regression queueing.
+- Fixed the Human UI advisor gate target snapshot pins to include Phase 1 required `prompt.version`, `prompt.prompt_hash`, `tool_registry_hash`, `skill_registry_hash`, and `llm.params_hash`.
+- Normalized advisor `target_ref` prefixes such as `custom_skill:*` to a supported Evaluation `target_kind` (`agent_answer` for the seeded suite) before sending verification/regression requests, matching the authoritative backend enum.
+- The browser smoke used isolated SQLite plus ports `127.0.0.1:18081` and `127.0.0.1:15175`; it did not touch, restart, or seed `127.0.0.1:8080`.
+
+Evidence:
+
+- `cd client && pnpm exec tsc -b --pretty false` -> passed.
+- `cd client && pnpm exec eslint scripts/evaluation-workspace-smoke.mjs src/features/evaluation/pages/EvaluationWorkspacePage.tsx src/types/evaluation.ts` -> passed.
+- `uv run ruff check server/scripts/seed_evaluation_smoke.py server/scripts/evaluation_mcp_parity_smoke.py` -> passed with the existing removed-rule warning.
+- Isolated MCP parity smoke on a fresh SQLite DB -> `ok: true`, `case_count: 3`, `failure_count: 2`, `regression_count: 2`, `advisor_verification_status: queued`, `advisor_regression_status: queued`; fixture retained under `/tmp/byaan-evaluation-mcp-smoke-latest`.
+- Isolated browser smoke on fresh seeded Evaluation fixture -> `ok: true`, `baseURL: http://127.0.0.1:15175`, `apiURL: http://127.0.0.1:18081`, `suiteId: 5b7bc357-5d9a-4427-8853-64677b2101f2`, `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`; screenshots retained under `/tmp/byaan-evaluation-browser-smoke-GghD6x/screens-final`.
+- Verified temporary smoke ports `18081` and `15175` were no longer listening after cleanup.
+
+Remaining Phase 5 work:
+
+- Implement canonical Sharing model/service for grants, secrets, immutable version binding, viewer sessions, audit, and revocation across notebook/dashboard/folder share flows.
+- Port existing share/export/viewer REST, MCP, and Human UI paths onto the canonical Sharing service while preserving the Phase 0 redaction and authorization guarantees.
+- Run the final real `127.0.0.1:8080` Release Gate only after Phase 5 local gates pass, including cleanup/verification of the previously registered dashboard test data.
 
 ## 2026-08-16 19:17 CST - Phase 3/4 Evaluation Human UI And Advisor REST Lifecycle
 
