@@ -439,7 +439,7 @@ Commit:
 
 ### Phase 6 Security Slice: Policy Ref Execution Guard
 
-Status: implemented; pending commit/push.
+Status: implemented and pushed.
 
 Allowlist:
 
@@ -463,7 +463,7 @@ Tests:
 
 Commit:
 
-- Pending `dashboard: guard unresolved policy refs`
+- `6e0decc` `dashboard: guard unresolved policy refs`
 
 ## Commit Ledger
 
@@ -482,7 +482,7 @@ Commit:
 | `77bfd98` | `dashboard: preserve share export compatibility` | Phase 4 share/export/legacy compatibility slice | `pytest tests/test_dashboard_rest_api.py` -> 2 passed; `ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `817fca6` | `dashboard: backfill legacy dashboard assets` | Phase 5 legacy asset backfill slice | `pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> 7 passed; `ruff check migrations/versions/backfill_legacy_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with existing 355 warnings; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `17588a6` | `dashboard: add rest mcp query parity` | Phase 6 REST/MCP query parity slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py` -> 6 passed; `ruff check services/dashboard.py mcp/tool_wrappers.py tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
-| Pending | `dashboard: guard unresolved policy refs` | Phase 6 policy/ref security slice | `pytest tests/test_dashboard_execution_service.py tests/test_dashboard_rest_api.py` -> 8 passed; `ruff check services/dashboard.py tests/test_dashboard_execution_service.py tests/test_dashboard_rest_api.py` -> passed; `git diff --check` -> passed | Pending push |
+| `6e0decc` | `dashboard: guard unresolved policy refs` | Phase 6 policy/ref security slice | `pytest tests/test_dashboard_execution_service.py tests/test_dashboard_rest_api.py` -> 8 passed; `ruff check services/dashboard.py tests/test_dashboard_execution_service.py tests/test_dashboard_rest_api.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 
 ## Acceptance Evidence
 
