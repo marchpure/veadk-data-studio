@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 5 — canonical Sharing REST/MCP evidence and folder notebook compatibility are implemented. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface, Phase 3/4 Human UI workspace and advisor verify/regress/review/apply REST surfaces, Phase 3/4 browser/MCP parity smoke, Phase 5 canonical Sharing grant/secret/viewer-session foundation, Phase 5 folder dashboard canonical compatibility, Phase 5 worker-backed notebook share canonical compatibility, Phase 5 canonical Sharing read surface and folder notebook compatibility. Current slice: Phase 5 local end-to-end sharing smoke and release-gate preparation. Next slice: run a local smoke covering folder dashboard share, folder notebook share, worker HTML/JSON notebook share/password rotation, redacted canonical evidence, and legacy response compatibility before final real `127.0.0.1:8080` Release Gate.
+CURRENT_PHASE: Phase 5 — local end-to-end Sharing smoke is implemented and passing. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface, Phase 3/4 Human UI workspace and advisor verify/regress/review/apply REST surfaces, Phase 3/4 browser/MCP parity smoke, Phase 5 canonical Sharing grant/secret/viewer-session foundation, Phase 5 folder dashboard canonical compatibility, Phase 5 worker-backed notebook share canonical compatibility, Phase 5 canonical Sharing read surface and folder notebook compatibility, Phase 5 local canonical Sharing integration smoke. Current slice: final real `127.0.0.1:8080` Release Gate preparation. Next slice: verify the current 8080 runtime, exercise the canonical Sharing flows on the real instance, and clean up the previously registered test folder only during that Release Gate.
 
 ## Phase 0 Slice Checklist
 
@@ -530,6 +530,28 @@ Remaining Phase 5 work:
 
 - Run an end-to-end local smoke covering folder dashboard share, folder notebook share, worker HTML/JSON notebook share/password rotation, canonical audit evidence, and legacy response compatibility.
 - Run the final real `127.0.0.1:8080` Release Gate only after the local Phase 5 smoke passes, including verification/cleanup of the registered dashboard test folder.
+
+## 2026-08-16 20:39 CST - Phase 5 Local Canonical Sharing Integration Smoke
+
+Scope:
+
+- Added `server/scripts/sharing_governance_smoke.py`, an isolated ASGI/SQLite smoke that does not touch `127.0.0.1:8080`.
+- The smoke seeds a tenant, owner, notebook, folder, and immutable dashboard version in an in-memory SQLite database.
+- The smoke exercises folder notebook share, folder dashboard share, worker-backed HTML notebook share, worker-backed JSON notebook share, JSON password rotation, canonical Sharing grant read evidence, legacy response redaction, and revocation of all notebook share surfaces.
+- Worker, notebook export, compiled HTML export, feature flag, and dashboard cache warm paths are patched in-process so the script stays deterministic and avoids external worker or cache side effects.
+- Redaction assertions fail the smoke if payloads expose plaintext passwords, raw tokens, verifier values, salts, restricted table names, credentials, or SQL-like details.
+
+Evidence:
+
+- `PYTHONPATH=. uv run python server/scripts/sharing_governance_smoke.py` -> `ok: true`; canonical notebook surfaces `folder_notebook`, `html_notebook_share`, and `json_notebook_share`; canonical dashboard grant count `1`; revoked notebook surface statuses all `revoked`.
+- `cd server && uv run ruff check scripts/sharing_governance_smoke.py` -> passed with the existing removed-rule warning.
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_share_secret_redaction.py tests/test_share_object_authorization.py tests/test_dashboard_security_regressions.py tests/test_sharing_canonical_service.py tests/test_sharing_read_surface.py tests/test_sharing_persistence_migration.py tests/test_migration_chain_hardening.py -q` -> `39 passed, 9 warnings`.
+- `cd server && PYTHONPATH=..:tests uv run alembic heads` -> `add_canonical_sharing_model (head)`.
+- `git diff --check` -> passed.
+
+Remaining Phase 5 work:
+
+- Run the final real `127.0.0.1:8080` Release Gate, including verifying the current listener before any interaction, exercising the canonical Sharing flows on the real runtime, and cleaning up the previously registered dashboard test folder only during that gate.
 
 ## 2026-08-16 19:17 CST - Phase 3/4 Evaluation Human UI And Advisor REST Lifecycle
 
