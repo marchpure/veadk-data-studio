@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -22,6 +23,7 @@ from server.models.semantic_models import (
     SemanticModelRelationship,
     SemanticModelVersion,
 )
+from server.services.file_operations import DataFrameFileService
 from server.services.raw_query import AsyncRawQueryService
 from server.tools.sql import DIALECT_MAP, validate_sql_query
 
@@ -57,7 +59,10 @@ def _quote_identifier(name: str) -> str:
 def _table_reference(table: str, schema: str | None = None, datasource_kind: str | None = None) -> str:
     table_name = str(table).strip()
     schema_name = str(schema or "").strip()
-    if str(datasource_kind or "").lower() == "sqlite" and schema_name.lower() in {"sqlite", "main"}:
+    normalized_kind = str(datasource_kind or "").lower()
+    if normalized_kind == "sqlite" and schema_name.lower() in {"sqlite", "main"}:
+        schema_name = ""
+    if normalized_kind == "duckdb" and schema_name.lower() in {"duckdb", "main", "projection"}:
         schema_name = ""
     if schema_name:
         return f"{_quote_identifier(schema_name)}.{_quote_identifier(table_name)}"
@@ -75,6 +80,15 @@ def _split_qualified_field(value: str) -> tuple[str, str] | None:
     if len(parts) != 2:
         return None
     return parts[0], parts[1]
+
+
+@dataclass(frozen=True)
+class _SemanticQueryTarget:
+    kind: str
+    db_type: str
+    connection_id: str | None = None
+    connection_obj: dict[str, Any] | None = None
+    dataset_id: str | None = None
 
 
 class SemanticModelService:
@@ -362,7 +376,12 @@ class SemanticModelService:
             else:
                 metric.preview_json = _json_dump(item.get("preview") or _json_load(metric.preview_json, {}))
                 metric.compiled_sql = str((item.get("preview") or {}).get("sql") or metric.compiled_sql or "")
-                metric.validation_status = str(item.get("validationStatus") or item.get("validation_status") or metric.validation_status or "warning")
+                metric.validation_status = str(
+                    item.get("validationStatus")
+                    or item.get("validation_status")
+                    or metric.validation_status
+                    or "warning"
+                )
             metric.sort_order = index
         for slug, metric in existing.items():
             if slug not in seen:
@@ -390,7 +409,9 @@ class SemanticModelService:
             relationship.unique_rate = float(item.get("uniqueRate") or item.get("unique_rate") or 0)
             relationship.orphan_rate = float(item.get("orphanRate") or item.get("orphan_rate") or 0)
             relationship.fanout_risk = str(item.get("fanoutRisk") or item.get("fanout_risk") or "medium")
-            relationship.validation_status = str(item.get("validationStatus") or item.get("validation_status") or "warning")
+            relationship.validation_status = str(
+                item.get("validationStatus") or item.get("validation_status") or "warning"
+            )
             relationship.status = str(item.get("status") or "candidate")
             relationship.validation_message = str(item.get("validationMessage") or item.get("validation_message") or "")
             relationship.evidence_json = _json_dump(item.get("evidence") or [])
@@ -451,7 +472,9 @@ class SemanticModelService:
                 await session.delete(entity)
 
     @staticmethod
-    async def _replace_entity_fields(session: AsyncSession, entity: SemanticModelEntity, items: list[dict[str, Any]]) -> None:
+    async def _replace_entity_fields(
+        session: AsyncSession, entity: SemanticModelEntity, items: list[dict[str, Any]]
+    ) -> None:
         existing = {field.name: field for field in entity.fields}
         seen: set[str] = set()
         for index, item in enumerate(items):
@@ -500,19 +523,45 @@ class SemanticModelService:
             "level": level,
             "components": [
                 {"id": "structural", "name": "Structural completeness", "score": structural, "status": "ready"},
-                {"id": "semantic", "name": "Semantic completeness", "score": semantic, "status": "ready" if semantic >= 85 else "warning"},
-                {"id": "query", "name": "Query correctness", "score": query, "status": "ready" if query >= 85 else "blocked"},
-                {"id": "governance", "name": "Governance", "score": governance, "status": "ready" if governance >= 85 else "warning"},
-                {"id": "evidence", "name": "Evidence coverage", "score": evidence, "status": "ready" if evidence >= 80 else "warning"},
+                {
+                    "id": "semantic",
+                    "name": "Semantic completeness",
+                    "score": semantic,
+                    "status": "ready" if semantic >= 85 else "warning",
+                },
+                {
+                    "id": "query",
+                    "name": "Query correctness",
+                    "score": query,
+                    "status": "ready" if query >= 85 else "blocked",
+                },
+                {
+                    "id": "governance",
+                    "name": "Governance",
+                    "score": governance,
+                    "status": "ready" if governance >= 85 else "warning",
+                },
+                {
+                    "id": "evidence",
+                    "name": "Evidence coverage",
+                    "score": evidence,
+                    "status": "ready" if evidence >= 80 else "warning",
+                },
             ],
-            "reliableQuestions": [f"What is {metric.business_name} by available dimensions?" for metric in model.metrics],
-            "unreliableQuestions": [] if not blockers else ["Questions requiring unresolved relationships are not reliable yet."],
+            "reliableQuestions": [
+                f"What is {metric.business_name} by available dimensions?" for metric in model.metrics
+            ],
+            "unreliableQuestions": []
+            if not blockers
+            else ["Questions requiring unresolved relationships are not reliable yet."],
             "blockers": blockers,
             "warnings": warnings,
         }
 
     @staticmethod
-    async def validate_model(session: AsyncSession, tenant_id: UUID, slug: str, user_id: UUID | None) -> dict[str, Any] | None:
+    async def validate_model(
+        session: AsyncSession, tenant_id: UUID, slug: str, user_id: UUID | None
+    ) -> dict[str, Any] | None:
         model = await SemanticModelService.load_model(session, tenant_id, slug)
         if model is None:
             return None
@@ -546,7 +595,9 @@ class SemanticModelService:
         return SemanticModelService.model_to_payload(await SemanticModelService.load_model(session, tenant_id, slug))
 
     @staticmethod
-    async def publish_model(session: AsyncSession, tenant_id: UUID, slug: str, user_id: UUID | None) -> dict[str, Any] | None:
+    async def publish_model(
+        session: AsyncSession, tenant_id: UUID, slug: str, user_id: UUID | None
+    ) -> dict[str, Any] | None:
         model = await SemanticModelService.load_model(session, tenant_id, slug)
         if model is None:
             return None
@@ -581,7 +632,9 @@ class SemanticModelService:
         mcp["allowedMetrics"] = [metric.slug for metric in model.metrics]
         mcp["allowedDimensions"] = [dimension.slug for dimension in model.dimensions]
         model.mcp_json = _json_dump(mcp)
-        model.validation_log_json = _json_dump([f"Published {next_version}.", *_json_load(model.validation_log_json, [])])
+        model.validation_log_json = _json_dump(
+            [f"Published {next_version}.", *_json_load(model.validation_log_json, [])]
+        )
         source_snapshot_ids = SemanticModelService._source_snapshot_ids(review)
         session.add(
             SemanticModelVersion(
@@ -769,7 +822,9 @@ class SemanticModelService:
         if dimension is not None:
             join_clause = SemanticModelService._payload_join_clause_for_dimension(model, entity, dimension)
             field_expr = f"{_quote_identifier(str(dimension.get('entityId') or ''))}.{_quote_identifier(str(dimension.get('field') or ''))}"
-            select_parts.append(f"{field_expr} AS {_quote_identifier(str(dimension.get('id') or dimension.get('field')))}")
+            select_parts.append(
+                f"{field_expr} AS {_quote_identifier(str(dimension.get('id') or dimension.get('field')))}"
+            )
             group_parts.append(field_expr)
         metric_expr = str(metric.get("formula") or "").strip()
         if not metric_expr:
@@ -813,7 +868,9 @@ class SemanticModelService:
             return ""
         for relationship in model.relationships:
             if relationship.from_entity == base_entity.slug and relationship.to_entity == target.slug:
-                return SemanticModelService._relationship_join_clause(relationship, target, datasource_kind=model.datasource_kind)
+                return SemanticModelService._relationship_join_clause(
+                    relationship, target, datasource_kind=model.datasource_kind
+                )
             if relationship.from_entity == target.slug and relationship.to_entity == base_entity.slug:
                 return SemanticModelService._relationship_join_clause(
                     relationship,
@@ -880,7 +937,9 @@ class SemanticModelService:
         if not target_slug or target_slug == base_slug:
             return ""
         entities = model.get("entities") or []
-        target = next((entity for entity in entities if str(entity.get("id") or entity.get("name") or "") == target_slug), None)
+        target = next(
+            (entity for entity in entities if str(entity.get("id") or entity.get("name") or "") == target_slug), None
+        )
         if target is None:
             return ""
         for relationship in model.get("relationships") or []:
@@ -945,11 +1004,11 @@ class SemanticModelService:
         return _json_load(version.snapshot_json, {})
 
     @staticmethod
-    async def _resolve_query_connection(
+    async def _resolve_query_target(
         session: AsyncSession,
         tenant_id: UUID,
         datasource_id: str,
-    ) -> tuple[Connection, dict[str, Any]]:
+    ) -> _SemanticQueryTarget:
         parsed_id: UUID | None = None
         try:
             parsed_id = UUID(str(datasource_id))
@@ -958,18 +1017,68 @@ class SemanticModelService:
         connection: Connection | None = None
         if parsed_id is not None:
             dataset = await session.scalar(
-                select(Dataset).where(Dataset.tenant_id == tenant_id, Dataset.id == parsed_id).options(selectinload(Dataset.connection))
+                select(Dataset)
+                .where(Dataset.tenant_id == tenant_id, Dataset.id == parsed_id)
+                .options(selectinload(Dataset.connection))
             )
             if dataset is not None and dataset.type == "connection" and dataset.connection is not None:
                 connection = dataset.connection
+            elif dataset is not None and dataset.type == "file":
+                return _SemanticQueryTarget(
+                    kind="file_dataset",
+                    db_type="duckdb",
+                    dataset_id=str(dataset.id),
+                    connection_obj={
+                        "dataset_id": str(dataset.id),
+                        "dataset_type": "file",
+                        "db_type": "duckdb",
+                    },
+                )
             if connection is None:
-                connection = await session.scalar(select(Connection).where(Connection.tenant_id == tenant_id, Connection.id == parsed_id))
+                connection = await session.scalar(
+                    select(Connection).where(Connection.tenant_id == tenant_id, Connection.id == parsed_id)
+                )
         if connection is None:
-            raise ValueError("Published model datasource connection was not found.")
+            raise ValueError("Published model datasource was not found.")
         connection_obj = await connection.get_decrypted_connection_obj(session)
         if not connection_obj:
             raise ValueError("Published model datasource credentials could not be decrypted.")
-        return connection, connection_obj
+        return _SemanticQueryTarget(
+            kind="connection",
+            db_type=connection.type,
+            connection_id=str(connection.id),
+            connection_obj=connection_obj,
+        )
+
+    @staticmethod
+    async def _execute_query_target(
+        session: AsyncSession,
+        target: _SemanticQueryTarget,
+        *,
+        query: str,
+        limit: int,
+        timeout: int,
+    ) -> dict[str, Any]:
+        if target.kind == "file_dataset":
+            if not target.dataset_id:
+                return {"success": False, "error": "Published model projected dataset was not found."}
+            return await DataFrameFileService.execute_duckdb_query_on_dataset(
+                session=session,
+                dataset_id=target.dataset_id,
+                query=query,
+                limit=limit,
+                timeout=timeout,
+            )
+        if not target.connection_id or target.connection_obj is None:
+            return {"success": False, "error": "Published model datasource connection was not found."}
+        return await AsyncRawQueryService.execute_raw_query(
+            query=query,
+            db_type=target.db_type,
+            connection_id=target.connection_id,
+            connection_obj=target.connection_obj,
+            limit=limit,
+            timeout=timeout,
+        )
 
     @staticmethod
     async def run_query_metric(
@@ -1002,17 +1111,18 @@ class SemanticModelService:
         mcp = _json_load(model.mcp_json, {})
         if metric.slug not in set(mcp.get("allowedMetrics") or [item.slug for item in model.metrics]):
             raise PermissionError("Metric is not exposed to MCP.")
-        if dimension and dimension.slug not in set(mcp.get("allowedDimensions") or [item.slug for item in model.dimensions]):
+        if dimension and dimension.slug not in set(
+            mcp.get("allowedDimensions") or [item.slug for item in model.dimensions]
+        ):
             raise PermissionError("Dimension is not exposed to MCP.")
         sql = SemanticModelService._compile_metric_sql(model, metric, dimension)
-        dialect = DIALECT_MAP.get(model.datasource_kind)
+        query_target = await SemanticModelService._resolve_query_target(session, tenant_id, model.datasource_id)
+        dialect = DIALECT_MAP.get(query_target.db_type)
         safe_sql = validate_sql_query(sql, dialect=dialect)
-        connection, connection_obj = await SemanticModelService._resolve_query_connection(session, tenant_id, model.datasource_id)
-        result = await AsyncRawQueryService.execute_raw_query(
+        result = await SemanticModelService._execute_query_target(
+            session,
+            query_target,
             query=safe_sql,
-            db_type=connection.type,
-            connection_id=str(connection.id),
-            connection_obj=connection_obj,
             limit=int(request.get("limit") or 100),
             timeout=int(request.get("timeout") or 30),
         )
@@ -1051,7 +1161,9 @@ class SemanticModelService:
             "policyDecision": payload["policyDecision"],
         }
         model.mcp_json = _json_dump(mcp)
-        model.validation_log_json = _json_dump([f"MCP query_metric executed for {metric.slug}.", *_json_load(model.validation_log_json, [])])
+        model.validation_log_json = _json_dump(
+            [f"MCP query_metric executed for {metric.slug}.", *_json_load(model.validation_log_json, [])]
+        )
         session.add(
             SemanticModelAuditEvent(
                 id=uuid4(),
@@ -1081,19 +1193,20 @@ class SemanticModelService:
             raise ValueError("Dimension not found in published Semantic Model.")
         mcp = published.get("mcp") or _json_load(model.mcp_json, {})
         allowed_metrics = set(mcp.get("allowedMetrics") or [item.get("id") for item in published.get("metrics") or []])
-        allowed_dimensions = set(mcp.get("allowedDimensions") or [item.get("id") for item in published.get("dimensions") or []])
+        allowed_dimensions = set(
+            mcp.get("allowedDimensions") or [item.get("id") for item in published.get("dimensions") or []]
+        )
         if metric.get("id") not in allowed_metrics:
             raise PermissionError("Metric is not exposed to MCP.")
         if dimension and dimension.get("id") not in allowed_dimensions:
             raise PermissionError("Dimension is not exposed to MCP.")
         sql = SemanticModelService._compile_payload_metric_sql(published, metric, dimension)
-        safe_sql = validate_sql_query(sql, dialect=DIALECT_MAP.get(model.datasource_kind))
-        connection, connection_obj = await SemanticModelService._resolve_query_connection(session, model.tenant_id, model.datasource_id)
-        result = await AsyncRawQueryService.execute_raw_query(
+        query_target = await SemanticModelService._resolve_query_target(session, model.tenant_id, model.datasource_id)
+        safe_sql = validate_sql_query(sql, dialect=DIALECT_MAP.get(query_target.db_type))
+        result = await SemanticModelService._execute_query_target(
+            session,
+            query_target,
             query=safe_sql,
-            db_type=connection.type,
-            connection_id=str(connection.id),
-            connection_obj=connection_obj,
             limit=int(request.get("limit") or 100),
             timeout=int(request.get("timeout") or 30),
         )
@@ -1122,7 +1235,9 @@ class SemanticModelService:
             "policyDecision": payload["policyDecision"],
         }
         model.mcp_json = _json_dump(mcp_state)
-        model.validation_log_json = _json_dump([f"MCP query_metric executed for {metric.get('id')}.", *_json_load(model.validation_log_json, [])])
+        model.validation_log_json = _json_dump(
+            [f"MCP query_metric executed for {metric.get('id')}.", *_json_load(model.validation_log_json, [])]
+        )
         session.add(
             SemanticModelAuditEvent(
                 id=uuid4(),
@@ -1130,7 +1245,13 @@ class SemanticModelService:
                 model_id=model.id,
                 user_id=user_id,
                 action="semantic_query_metric",
-                details_json=_json_dump({"metric": metric.get("id"), "dimension": dimension.get("id") if dimension else None, "version": model.published_version}),
+                details_json=_json_dump(
+                    {
+                        "metric": metric.get("id"),
+                        "dimension": dimension.get("id") if dimension else None,
+                        "version": model.published_version,
+                    }
+                ),
             )
         )
         await session.commit()

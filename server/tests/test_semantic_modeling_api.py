@@ -85,7 +85,6 @@ async def _create_semantic_model(test_session, tenant: Tenant, datasource_id: st
         SemanticModelEntity,
         SemanticModelField,
         SemanticModelMetric,
-        SemanticModelRelationship,
     )
 
     entity = SemanticModelEntity(
@@ -565,7 +564,26 @@ async def test_publish_failure_does_not_create_version(test_client, test_session
 
     patch_response = await test_client.patch(
         "/api/data-models/sales-semantic",
-        json={"expected_revision": 1, "relationships": [{"id": "bad_join", "fromEntity": "orders", "toEntity": "orders", "label": "Bad fanout", "joinFields": [], "cardinality": "many-to-many", "fkEvidence": "none", "uniqueRate": 10, "orphanRate": 90, "fanoutRisk": "high", "validationStatus": "blocked", "status": "candidate", "validationMessage": "Fanout risk"}]},
+        json={
+            "expected_revision": 1,
+            "relationships": [
+                {
+                    "id": "bad_join",
+                    "fromEntity": "orders",
+                    "toEntity": "orders",
+                    "label": "Bad fanout",
+                    "joinFields": [],
+                    "cardinality": "many-to-many",
+                    "fkEvidence": "none",
+                    "uniqueRate": 10,
+                    "orphanRate": 90,
+                    "fanoutRisk": "high",
+                    "validationStatus": "blocked",
+                    "status": "candidate",
+                    "validationMessage": "Fanout risk",
+                }
+            ],
+        },
     )
     assert patch_response.status_code == 200
     validate_response = await test_client.post("/api/data-models/sales-semantic/validate")
@@ -596,8 +614,10 @@ async def test_published_metric_query_uses_physical_schema_and_relationship_join
     )
 
     entities = (
-        await test_session.execute(select(SemanticModelEntity).where(SemanticModelEntity.model_id == model.id))
-    ).scalars().all()
+        (await test_session.execute(select(SemanticModelEntity).where(SemanticModelEntity.model_id == model.id)))
+        .scalars()
+        .all()
+    )
     orders = next(entity for entity in entities if entity.slug == "orders")
     orders.profile_json = json.dumps({"schema": "sales_reporting"})
     customers = SemanticModelEntity(
@@ -751,3 +771,97 @@ async def test_published_sqlite_metric_query_omits_synthetic_schema(
     assert query_response.status_code == 200
     assert query_response.json()["data"]["status"] == "completed"
     assert query_response.json()["data"]["result"][0]["paid_revenue"] == 120.5
+
+
+async def test_projected_dataset_semantic_model_publish_and_mcp_query(test_client, monkeypatch):
+    uploaded = await test_client.post(
+        "/api/source-resources/files",
+        files={
+            "file": (
+                "revenue.csv",
+                b"order_id,region,revenue,paid_at\n1,East,120,2026-08-01\n2,West,80,2026-08-02\n",
+                "text/csv",
+            )
+        },
+        data={"name": "projected revenue"},
+    )
+    assert uploaded.status_code == 201
+    projected_dataset_id = uploaded.json()["data"]["projected_dataset_id"]
+    assert projected_dataset_id
+
+    analyzed = await test_client.post(
+        f"/api/datasources/{projected_dataset_id}/understanding/analyze",
+        json={},
+    )
+    assert analyzed.status_code == 200
+    understanding = analyzed.json()["data"]
+    selected = [
+        candidate
+        for candidate in understanding["candidates"]
+        if candidate["candidate_type"] in {"schema_map", "data_truth", "relationship"}
+    ]
+    assert {candidate["candidate_type"] for candidate in selected} >= {"schema_map", "data_truth"}
+    for candidate in selected:
+        reviewed = await test_client.post(
+            f"/api/datasources/{projected_dataset_id}/understanding/candidates/{candidate['id']}/review",
+            json={"action": "accept"},
+        )
+        assert reviewed.status_code == 200
+
+    drafted = await test_client.post(
+        f"/api/datasources/{projected_dataset_id}/understanding/semantic-model-draft",
+        json={
+            "model_id": "projected-revenue-mcp",
+            "name": "Projected Revenue MCP",
+            "domain": "Sales / Orders",
+            "owner": "Revenue Analytics",
+            "candidate_ids": [candidate["id"] for candidate in selected],
+        },
+    )
+    assert drafted.status_code == 200
+    draft = drafted.json()["data"]["model"]
+    assert draft["datasourceId"] == projected_dataset_id
+    assert draft["datasourceKind"] == "duckdb"
+
+    validated = await test_client.post("/api/data-models/projected-revenue-mcp/validate")
+    assert validated.status_code == 200
+    assert validated.json()["data"]["readinessDetail"]["blockers"] == []
+
+    published = await test_client.post("/api/data-models/projected-revenue-mcp/publish")
+    assert published.status_code == 200
+    assert published.json()["data"]["status"] == "Published"
+
+    from server.services.file_operations import DataFrameFileService
+
+    original_execute = DataFrameFileService.execute_duckdb_query_on_dataset
+    calls: list[dict[str, str]] = []
+
+    async def tracked_execute_duckdb_query_on_dataset(**kwargs):
+        calls.append({"dataset_id": kwargs["dataset_id"], "query": kwargs["query"]})
+        return await original_execute(**kwargs)
+
+    monkeypatch.setattr(
+        "server.services.semantic_model_service.DataFrameFileService.execute_duckdb_query_on_dataset",
+        tracked_execute_duckdb_query_on_dataset,
+    )
+    monkeypatch.setattr(
+        "server.services.semantic_model_service.AsyncRawQueryService.execute_raw_query",
+        pytest.fail,
+    )
+
+    query_response = await test_client.post(
+        "/api/data-models/projected-revenue-mcp/mcp/query_metric",
+        json={"metric": "revenue_revenue", "dimension": "revenue_region", "limit": 10},
+    )
+    assert query_response.status_code == 200
+    payload = query_response.json()["data"]
+    assert payload["status"] == "completed"
+    assert payload["modelVersion"] == "v1"
+    assert payload["resolvedMetric"] == "Revenue Revenue"
+    assert sorted(payload["result"], key=lambda item: item["revenue_region"]) == [
+        {"revenue_region": "East", "revenue_revenue": 120},
+        {"revenue_region": "West", "revenue_revenue": 80},
+    ]
+    assert calls and calls[0]["dataset_id"] == projected_dataset_id
+    assert 'FROM "revenue" AS "revenue"' in calls[0]["query"]
+    assert '"projection"."revenue"' not in calls[0]["query"]
