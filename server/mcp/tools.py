@@ -11,11 +11,16 @@ from fastmcp import Context, FastMCP
 from server.mcp.tool_wrappers import (
     add_learning_wrapper,
     apply_html_patch_wrapper,
+    compare_evaluation_runs_wrapper,
+    create_advisor_change_set_wrapper,
     create_custom_skill_wrapper,
     create_dashboard_draft_wrapper,
+    create_evaluation_case_draft_wrapper,
     dashboard_search_replace_wrapper,
     define_dashboard_filters_wrapper,
     describe_dashboard_wrapper,
+    describe_evaluation_failure_wrapper,
+    describe_evaluation_suite_wrapper,
     describe_semantic_model_wrapper,
     emit_plan_status_wrapper,
     ensure_notebook_exists,
@@ -31,6 +36,7 @@ from server.mcp.tool_wrappers import (
     get_dashboard_state_wrapper,
     get_database_schema_wrapper,
     get_dataset_schema_by_id_wrapper,
+    get_evaluation_run_wrapper,
     get_existing_html_wrapper,
     get_filter_options_wrapper,
     get_learning_wrapper,
@@ -41,11 +47,14 @@ from server.mcp.tool_wrappers import (
     list_metrics_wrapper,
     patch_dashboard_draft_wrapper,
     preview_dashboard_wrapper,
+    preview_evaluation_ground_truth_wrapper,
     publish_dashboard_wrapper,
     query_dashboard_wrapper,
     query_metric_wrapper,
     remove_dashboard_filter_wrapper,
     remove_learning_wrapper,
+    run_advisor_gate_wrapper,
+    run_evaluation_wrapper,
     run_semantic_query_wrapper,
     save_query_wrapper,
     save_skill_query_wrapper,
@@ -53,10 +62,12 @@ from server.mcp.tool_wrappers import (
     search_dashboards_wrapper,
     search_datasets_wrapper,
     search_enabled_skills_wrapper,
+    search_evaluation_suites_wrapper,
     search_instructions_wrapper,
     search_learnings_wrapper,
     search_semantic_models_wrapper,
     start_html_generation_wrapper,
+    submit_evaluation_feedback_wrapper,
     update_custom_skill_wrapper,
     update_dashboard_filter_wrapper,
     update_learning_wrapper,
@@ -435,6 +446,237 @@ def register_all_tools(mcp: FastMCP, get_or_create_session_func):
             dashboard_id,
             base_etag,
             change_summary,
+            session["tenant_id"],
+            session["user_id"],
+        )
+
+    # Evaluation Governance Tools
+    @mcp.tool()
+    async def search_evaluation_suites(
+        query: str = "",
+        target_kind: str = "",
+        status: str = "",
+        limit: int = 20,
+        context: Context = None,
+    ) -> str:
+        """
+        Search Evaluation suites by text, target kind, or lifecycle status.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await search_evaluation_suites_wrapper(
+            query,
+            target_kind,
+            status,
+            session["tenant_id"],
+            session["user_id"],
+            limit,
+        )
+
+    @mcp.tool()
+    async def describe_evaluation_suite(
+        suite_id: str,
+        include_manifests: bool = False,
+        context: Context = None,
+    ) -> str:
+        """
+        Describe an Evaluation suite, versions, gate policy, and optional manifests.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await describe_evaluation_suite_wrapper(
+            suite_id,
+            session["tenant_id"],
+            session["user_id"],
+            include_manifests,
+        )
+
+    @mcp.tool()
+    async def list_evaluation_cases(
+        suite_version_id: str,
+        include_expected_contract: bool = False,
+        limit: int = 20,
+        context: Context = None,
+    ) -> str:
+        """
+        List Evaluation cases for a suite version. Expected contracts are omitted unless requested.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await list_evaluation_cases_wrapper(
+            suite_version_id,
+            session["tenant_id"],
+            session["user_id"],
+            include_expected_contract,
+            limit,
+        )
+
+    @mcp.tool()
+    async def create_evaluation_case_draft(
+        suite_version_id: str,
+        case_json: str,
+        context: Context = None,
+    ) -> str:
+        """
+        Create an Evaluation case draft from a JSON case payload. Published suite versions remain immutable.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await create_evaluation_case_draft_wrapper(
+            suite_version_id,
+            case_json,
+            session["tenant_id"],
+            session["user_id"],
+        )
+
+    @mcp.tool()
+    async def preview_evaluation_ground_truth(expected_contract_json: str, context: Context = None) -> str:
+        """
+        Validate ground-truth SQL as read-only and return redacted preview metadata.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await preview_evaluation_ground_truth_wrapper(
+            expected_contract_json,
+            session["tenant_id"],
+            session["user_id"],
+        )
+
+    @mcp.tool()
+    async def run_evaluation(
+        suite_version_id: str,
+        target_snapshot_json: str,
+        idempotency_key: str = "",
+        context: Context = None,
+    ) -> str:
+        """
+        Create a DB-backed Evaluation run preflight for a pinned target snapshot.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await run_evaluation_wrapper(
+            suite_version_id,
+            target_snapshot_json,
+            idempotency_key,
+            session["tenant_id"],
+            session["user_id"],
+        )
+
+    @mcp.tool()
+    async def get_evaluation_run(
+        run_id: str,
+        include_case_results: bool = True,
+        limit: int = 20,
+        context: Context = None,
+    ) -> str:
+        """
+        Get an Evaluation run report, including redacted case results and assessments.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await get_evaluation_run_wrapper(
+            run_id,
+            session["tenant_id"],
+            session["user_id"],
+            include_case_results,
+            limit,
+        )
+
+    @mcp.tool()
+    async def compare_evaluation_runs(
+        baseline_run_id: str,
+        candidate_run_id: str,
+        context: Context = None,
+    ) -> str:
+        """
+        Compare baseline and candidate Evaluation runs and surface regressions first.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await compare_evaluation_runs_wrapper(
+            baseline_run_id,
+            candidate_run_id,
+            session["tenant_id"],
+            session["user_id"],
+        )
+
+    @mcp.tool()
+    async def describe_evaluation_failure(run_id: str, limit: int = 20, context: Context = None) -> str:
+        """
+        Return failed case runs and hard-fail assessments for an Evaluation run.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await describe_evaluation_failure_wrapper(
+            run_id,
+            session["tenant_id"],
+            session["user_id"],
+            limit,
+        )
+
+    @mcp.tool()
+    async def create_advisor_change_set(
+        skill_suggestion_id: str,
+        suite_version_id: str = "",
+        affected_case_ids: list[str] | None = None,
+        context: Context = None,
+    ) -> str:
+        """
+        Convert a pending skill suggestion into a typed draft Advisor change set.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await create_advisor_change_set_wrapper(
+            skill_suggestion_id,
+            suite_version_id,
+            affected_case_ids,
+            session["tenant_id"],
+            session["user_id"],
+        )
+
+    @mcp.tool()
+    async def run_advisor_verification(
+        change_set_id: str,
+        target_snapshot_json: str,
+        idempotency_key: str = "",
+        context: Context = None,
+    ) -> str:
+        """
+        Queue failed-set Advisor verification for a draft change set.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await run_advisor_gate_wrapper(
+            change_set_id,
+            target_snapshot_json,
+            "verification",
+            idempotency_key,
+            session["tenant_id"],
+            session["user_id"],
+        )
+
+    @mcp.tool()
+    async def run_advisor_regression(
+        change_set_id: str,
+        target_snapshot_json: str,
+        idempotency_key: str = "",
+        context: Context = None,
+    ) -> str:
+        """
+        Queue full-suite Advisor regression for a draft change set.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await run_advisor_gate_wrapper(
+            change_set_id,
+            target_snapshot_json,
+            "regression",
+            idempotency_key,
+            session["tenant_id"],
+            session["user_id"],
+        )
+
+    @mcp.tool()
+    async def submit_evaluation_feedback(
+        suite_version_id: str,
+        feedback_json: str,
+        context: Context = None,
+    ) -> str:
+        """
+        Submit redacted feedback into Evaluation as a reviewed draft case.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await submit_evaluation_feedback_wrapper(
+            suite_version_id,
+            feedback_json,
             session["tenant_id"],
             session["user_id"],
         )

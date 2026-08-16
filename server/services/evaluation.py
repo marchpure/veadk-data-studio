@@ -15,15 +15,18 @@ from server.models.evaluation import (
     AdvisorChangeSet,
     AdvisorSuggestion,
     EvaluationArtifact,
+    EvaluationAssessment,
     EvaluationCase,
+    EvaluationCaseRun,
     EvaluationRun,
+    EvaluationSuite,
     EvaluationSuiteVersion,
     PromotionDecision,
 )
 from server.models.notebooks import Notebook
 from server.models.skill_suggestion import SkillSuggestion
 from server.repositories.evaluation import EvaluationRepository
-from server.schemas.evaluation import EvaluationTargetSnapshot
+from server.schemas.evaluation import EvaluationExpectedContract, EvaluationTargetSnapshot
 from server.utils.error_sanitizer import sanitize_error_payload
 
 
@@ -31,6 +34,123 @@ class EvaluationService:
     def __init__(self, session: AsyncSession):
         self._session = session
         self._repo = EvaluationRepository(session)
+
+    async def list_suites(
+        self,
+        *,
+        tenant_id: str | UUID,
+        query: str = "",
+        target_kind: str = "",
+        status: str = "",
+        limit: int = 50,
+    ) -> list[EvaluationSuite]:
+        return await self._repo.list_suites(
+            tenant_id=tenant_id,
+            query=query,
+            target_kind=target_kind,
+            status=status,
+            limit=limit,
+        )
+
+    async def describe_suite(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_id: str | UUID,
+    ) -> tuple[EvaluationSuite, list[EvaluationSuiteVersion]]:
+        suite = await self._repo.get_suite(tenant_id=tenant_id, suite_id=suite_id)
+        if suite is None:
+            raise ValueError("evaluation suite not found")
+        versions = await self._repo.list_suite_versions(tenant_id=tenant_id, suite_id=suite.id)
+        return suite, versions
+
+    async def list_cases(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_version_id: str | UUID,
+    ) -> list[EvaluationCase]:
+        await self._require_suite_version(tenant_id=tenant_id, suite_version_id=suite_version_id)
+        return await self._repo.list_cases_for_suite_version(
+            tenant_id=tenant_id,
+            suite_version_id=suite_version_id,
+        )
+
+    async def list_runs(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_version_id: str | UUID,
+        limit: int = 50,
+    ) -> list[EvaluationRun]:
+        await self._require_suite_version(tenant_id=tenant_id, suite_version_id=suite_version_id)
+        return await self._repo.list_runs_for_suite_version(
+            tenant_id=tenant_id,
+            suite_version_id=suite_version_id,
+            limit=limit,
+        )
+
+    async def get_run_report(
+        self,
+        *,
+        tenant_id: str | UUID,
+        run_id: str | UUID,
+    ) -> tuple[EvaluationRun, list[tuple[EvaluationCaseRun, list[EvaluationAssessment]]]]:
+        run = await self._repo.get_run(tenant_id=tenant_id, run_id=run_id)
+        if run is None:
+            raise ValueError("evaluation run not found")
+        case_runs = await self._repo.list_case_runs_for_run(tenant_id=tenant_id, run_id=run.id)
+        assessments = await self._repo.list_assessments_for_case_runs(
+            tenant_id=tenant_id,
+            case_run_ids=[case_run.id for case_run in case_runs],
+        )
+        assessments_by_case_run: dict[str, list[EvaluationAssessment]] = {}
+        for assessment in assessments:
+            assessments_by_case_run.setdefault(str(assessment.case_run_id), []).append(assessment)
+        return run, [
+            (case_run, assessments_by_case_run.get(str(case_run.id), []))
+            for case_run in case_runs
+        ]
+
+    async def compare_runs(
+        self,
+        *,
+        tenant_id: str | UUID,
+        baseline_run_id: str | UUID,
+        candidate_run_id: str | UUID,
+    ) -> dict[str, Any]:
+        baseline, baseline_case_runs = await self.get_run_report(tenant_id=tenant_id, run_id=baseline_run_id)
+        candidate, candidate_case_runs = await self.get_run_report(tenant_id=tenant_id, run_id=candidate_run_id)
+        baseline_by_case = {str(case_run.case_id): case_run for case_run, _ in baseline_case_runs}
+        candidate_by_case = {str(case_run.case_id): case_run for case_run, _ in candidate_case_runs}
+        all_case_ids = sorted(set(baseline_by_case) | set(candidate_by_case))
+        regressions = []
+        improvements = []
+        unchanged = []
+        for case_id in all_case_ids:
+            baseline_status = baseline_by_case.get(case_id).status if case_id in baseline_by_case else "missing"
+            candidate_status = candidate_by_case.get(case_id).status if case_id in candidate_by_case else "missing"
+            item = {"case_id": case_id, "baseline_status": baseline_status, "candidate_status": candidate_status}
+            if baseline_status == "passed" and candidate_status != "passed":
+                regressions.append(item)
+            elif baseline_status != "passed" and candidate_status == "passed":
+                improvements.append(item)
+            else:
+                unchanged.append(item)
+        return {
+            "baseline_run_id": str(baseline.id),
+            "candidate_run_id": str(candidate.id),
+            "baseline_gate": self._run_gate_decision(baseline),
+            "candidate_gate": self._run_gate_decision(candidate),
+            "regressions": regressions,
+            "improvements": improvements,
+            "unchanged": unchanged,
+            "summary": {
+                "regression_count": len(regressions),
+                "improvement_count": len(improvements),
+                "unchanged_count": len(unchanged),
+            },
+        }
 
     async def create_preflight_run(
         self,
@@ -385,6 +505,81 @@ class EvaluationService:
         await self._session.refresh(case)
         return case, True
 
+    async def create_case_draft(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_version_id: str | UUID,
+        case_key: str,
+        title: str,
+        target_kinds: list[str],
+        operation: str,
+        question: str,
+        expected_contract: dict[str, Any],
+        provenance: dict[str, Any],
+        tags: list[str],
+        actor_id: str,
+        actor_type: str = "agent",
+    ) -> tuple[EvaluationCase, bool]:
+        suite_version = await self._require_suite_version(
+            tenant_id=tenant_id,
+            suite_version_id=suite_version_id,
+        )
+        if suite_version.status == "published":
+            raise ValueError("published evaluation suite version manifest is immutable")
+        existing = await self._repo.get_case_by_key(
+            tenant_id=tenant_id,
+            suite_version_id=suite_version.id,
+            case_key=case_key,
+        )
+        if existing is not None:
+            return existing, False
+        validated_expected = EvaluationExpectedContract.model_validate(expected_contract).model_dump(mode="json")
+        sanitized_provenance = sanitize_error_payload(provenance or {})
+        sanitized_tags = sorted({str(tag) for tag in tags})
+        case = await self._repo.create_case(
+            tenant_id=tenant_id,
+            suite_version_id=suite_version.id,
+            case_key=case_key,
+            title=title,
+            target_kinds_json=[str(kind) for kind in target_kinds],
+            operation=operation,
+            question=question,
+            expected_contract_json=sanitize_error_payload(validated_expected),
+            provenance_json=sanitized_provenance,
+            tags_json=sanitized_tags,
+            content_hash=self._digest(
+                {
+                    "case_key": case_key,
+                    "question": question,
+                    "expected": validated_expected,
+                    "provenance": sanitized_provenance,
+                    "tags": sanitized_tags,
+                }
+            ),
+            immutable=False,
+        )
+        suite_version.case_count += 1
+        suite_version.manifest_json = {
+            **(suite_version.manifest_json or {}),
+            "last_manual_case_draft_id": str(case.id),
+        }
+        suite_version.content_hash = self._digest(suite_version.manifest_json)
+        await self._repo.create_audit_event(
+            tenant_id=tenant_id,
+            suite_id=suite_version.suite_id,
+            suite_version_id=suite_version.id,
+            run_id=None,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="evaluation.case.create_draft",
+            outcome="draft_created",
+            details_json={"case_id": str(case.id), "case_key": case.case_key},
+        )
+        await self._session.commit()
+        await self._session.refresh(case)
+        return case, True
+
     async def create_advisor_change_set_from_skill_suggestion(
         self,
         *,
@@ -473,6 +668,53 @@ class EvaluationService:
         await self._session.refresh(change_set)
         await self._session.refresh(advisor_suggestion)
         return change_set, [advisor_suggestion], True
+
+    async def create_advisor_gate_run(
+        self,
+        *,
+        tenant_id: str | UUID,
+        change_set_id: str | UUID,
+        gate_kind: str,
+        target_snapshot_payload: dict[str, Any],
+        actor_id: str,
+        idempotency_key: str | None = None,
+    ) -> tuple[AdvisorChangeSet, EvaluationRun]:
+        if gate_kind not in {"verification", "regression"}:
+            raise ValueError("advisor gate kind must be verification or regression")
+        change_set = await self._repo.get_change_set(tenant_id=tenant_id, change_set_id=change_set_id)
+        if change_set is None:
+            raise ValueError("advisor change set not found")
+        if change_set.suite_version_id is None:
+            raise ValueError("advisor change set has no suite version for evaluation gates")
+        run = await self.create_preflight_run(
+            tenant_id=tenant_id,
+            suite_version_id=change_set.suite_version_id,
+            target_snapshot_payload=target_snapshot_payload,
+            actor_id=actor_id,
+            idempotency_key=idempotency_key or f"advisor-{gate_kind}-{change_set.id}",
+            actor_type="agent",
+        )
+        if gate_kind == "verification":
+            change_set.verification_run_id = run.id
+            change_set.status = "verification_queued"
+        else:
+            change_set.regression_run_id = run.id
+            change_set.status = "regression_queued"
+        await self._repo.create_audit_event(
+            tenant_id=tenant_id,
+            suite_id=None,
+            suite_version_id=change_set.suite_version_id,
+            run_id=run.id,
+            actor_type="agent",
+            actor_id=actor_id,
+            action=f"evaluation.advisor.{gate_kind}.run",
+            outcome=run.status,
+            details_json={"change_set_id": str(change_set.id), "target_ref": change_set.target_ref},
+        )
+        await self._session.commit()
+        await self._session.refresh(change_set)
+        await self._session.refresh(run)
+        return change_set, run
 
     async def claim_next_run(
         self,

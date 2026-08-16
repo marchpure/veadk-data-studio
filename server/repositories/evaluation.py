@@ -15,6 +15,7 @@ from server.models.evaluation import (
     EvaluationCase,
     EvaluationCaseRun,
     EvaluationRun,
+    EvaluationSuite,
     EvaluationSuiteVersion,
     EvaluationTargetSnapshot,
     PromotionDecision,
@@ -38,6 +39,65 @@ class EvaluationRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def get_suite(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_id: str | UUID,
+    ) -> EvaluationSuite | None:
+        result = await self._session.execute(
+            select(EvaluationSuite).where(
+                EvaluationSuite.tenant_id == tenant_id,
+                EvaluationSuite.id == suite_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_suites(
+        self,
+        *,
+        tenant_id: str | UUID,
+        query: str = "",
+        target_kind: str = "",
+        status: str = "",
+        limit: int = 50,
+    ) -> list[EvaluationSuite]:
+        statement = select(EvaluationSuite).where(EvaluationSuite.tenant_id == tenant_id)
+        if status:
+            statement = statement.where(EvaluationSuite.lifecycle == status)
+        result = await self._session.execute(
+            statement.order_by(EvaluationSuite.updated_at.desc(), EvaluationSuite.id).limit(max(1, limit))
+        )
+        suites = list(result.scalars().all())
+        query_lower = query.lower().strip()
+        if query_lower:
+            suites = [
+                suite
+                for suite in suites
+                if query_lower in suite.name.lower()
+                or query_lower in suite.slug.lower()
+                or query_lower in (suite.description or "").lower()
+            ]
+        if target_kind:
+            suites = [suite for suite in suites if target_kind in (suite.target_kinds_json or [])]
+        return suites
+
+    async def list_suite_versions(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_id: str | UUID,
+    ) -> list[EvaluationSuiteVersion]:
+        result = await self._session.execute(
+            select(EvaluationSuiteVersion)
+            .where(
+                EvaluationSuiteVersion.tenant_id == tenant_id,
+                EvaluationSuiteVersion.suite_id == suite_id,
+            )
+            .order_by(EvaluationSuiteVersion.version_num.desc())
+        )
+        return list(result.scalars().all())
 
     async def get_run(
         self,
@@ -153,6 +213,58 @@ class EvaluationRepository:
                 EvaluationCase.suite_version_id == suite_version_id,
             )
             .order_by(EvaluationCase.case_key)
+        )
+        return list(result.scalars().all())
+
+    async def list_runs_for_suite_version(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_version_id: str | UUID,
+        limit: int = 50,
+    ) -> list[EvaluationRun]:
+        result = await self._session.execute(
+            select(EvaluationRun)
+            .where(
+                EvaluationRun.tenant_id == tenant_id,
+                EvaluationRun.suite_version_id == suite_version_id,
+            )
+            .order_by(EvaluationRun.created_at.desc(), EvaluationRun.id)
+            .limit(max(1, limit))
+        )
+        return list(result.scalars().all())
+
+    async def list_case_runs_for_run(
+        self,
+        *,
+        tenant_id: str | UUID,
+        run_id: str | UUID,
+    ) -> list[EvaluationCaseRun]:
+        result = await self._session.execute(
+            select(EvaluationCaseRun)
+            .where(
+                EvaluationCaseRun.tenant_id == tenant_id,
+                EvaluationCaseRun.run_id == run_id,
+            )
+            .order_by(EvaluationCaseRun.created_at, EvaluationCaseRun.id)
+        )
+        return list(result.scalars().all())
+
+    async def list_assessments_for_case_runs(
+        self,
+        *,
+        tenant_id: str | UUID,
+        case_run_ids: list[str | UUID],
+    ) -> list[EvaluationAssessment]:
+        if not case_run_ids:
+            return []
+        result = await self._session.execute(
+            select(EvaluationAssessment)
+            .where(
+                EvaluationAssessment.tenant_id == tenant_id,
+                EvaluationAssessment.case_run_id.in_(case_run_ids),
+            )
+            .order_by(EvaluationAssessment.created_at, EvaluationAssessment.id)
         )
         return list(result.scalars().all())
 

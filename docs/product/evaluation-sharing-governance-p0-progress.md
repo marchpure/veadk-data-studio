@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 3 — Evaluation feedback/advisor compatibility API slice complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API. Current slice: ready for Phase 3 MCP/Human UI and verification/regression review surfaces. Next slice: expose MCP wrappers and Human UI for suites/cases/runs/advisor review using the same service/auth serializers.
+CURRENT_PHASE: Phase 3/4 — Evaluation MCP surface slice complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers. Current slice: ready for Human UI and explicit advisor verify/regress/review/apply REST surfaces. Next slice: add Human UI workspace for suites/cases/runs/advisor/feedback review using the shared EvaluationService/auth serializers, then add verify/regress/apply review endpoints.
 
 ## Phase 0 Slice Checklist
 
@@ -380,3 +380,26 @@ Remaining Phase 3/4 work:
 - Add explicit advisor verify/regress/review endpoints and MCP wrappers around the same service calls.
 - Add Human UI surfaces for suite/case/run/advisor/feedback review.
 - Add end-to-end tests proving failed-set verification and full-suite regression are required before advisor apply/promotion.
+
+## 2026-08-16 18:43 CST - Phase 3/4 Evaluation MCP Wrappers And Shared Serializers
+
+Scope:
+
+- Added shared Evaluation serializers under `server/serializers/evaluation.py` and switched the REST Evaluation router to use them so REST and MCP return the same redacted run/case/advisor evidence shapes.
+- Added Evaluation service/repository read APIs for suite search/describe, case listing, run reports, run comparison, and failure summaries.
+- Added service-backed case draft creation for MCP/Human usage; draft cases validate `EvaluationExpectedContract`, update draft suite manifest/count, and write append-only audit events while published versions stay immutable.
+- Added Advisor verification/regression run creation via `EvaluationService.create_advisor_gate_run`; it queues immutable Evaluation runs and pins them onto the draft `AdvisorChangeSet` without applying patches.
+- Registered MCP tools: `search_evaluation_suites`, `describe_evaluation_suite`, `list_evaluation_cases`, `create_evaluation_case_draft`, `preview_evaluation_ground_truth`, `run_evaluation`, `get_evaluation_run`, `compare_evaluation_runs`, `describe_evaluation_failure`, `create_advisor_change_set`, `run_advisor_verification`, `run_advisor_regression`, and `submit_evaluation_feedback`.
+- MCP wrappers enforce tenant role scopes through the same dashboard action scopes already used by REST: read for inspect/report, query for run creation, edit for draft/advisor/feedback mutation; sensitive SQL/token/password fields are redacted in responses.
+
+Evidence:
+
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_evaluation_mcp_contract.py tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_evaluation_runner_service.py tests/test_evaluation_rest_api.py tests/test_evaluation_feedback_advisor_api.py tests/test_migration_chain_hardening.py -q` -> `25 passed, 18 warnings`.
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_evaluation_rest_api.py tests/test_evaluation_feedback_advisor_api.py -q` -> `5 passed, 11 warnings`.
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check mcp/tool_wrappers.py mcp/tools.py services/evaluation.py repositories/evaluation.py routers/evaluation.py serializers/evaluation.py tests/test_evaluation_mcp_contract.py tests/test_evaluation_rest_api.py tests/test_evaluation_feedback_advisor_api.py` -> passed with the existing removed-rule warning.
+
+Remaining Phase 3/4 work:
+
+- Add Human UI surfaces for suite inventory/detail, case editor, run compare, failure drawer, feedback review, and advisor staged patch review.
+- Add explicit REST review/apply endpoints for advisor verification/regression lifecycle if the UI needs review-specific shapes beyond the existing runner/promotion endpoints.
+- Add end-to-end browser/MCP parity tests showing failed-set verification plus full-suite regression evidence is visible before promotion/apply.
