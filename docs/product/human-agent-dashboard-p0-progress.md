@@ -126,6 +126,37 @@ Commit:
 
 - `be5e4a7` `dashboard: add manifest run schemas`
 
+### Phase 1 Persistence Slice: Asset, Version Metadata, Run, Audit Tables
+
+Status: implemented.
+
+Allowlist:
+
+- `server/models/dashboard.py`
+- `server/models/__init__.py` - conditional shared model registration; additive imports only.
+- `server/migrations/versions/add_governed_dashboard_assets.py`
+- `server/tests/test_dashboard_persistence_migration.py`
+- `server/tests/test_migration_chain_hardening.py`
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Behavior:
+
+- Added `DashboardAsset`, `DashboardRun`, and `DashboardAuditEvent` ORM models.
+- Existing `dashboards` rows remain the version table and keep `html_content`; new metadata columns are additive and nullable/defaulted for legacy compatibility.
+- Migration creates stable asset/run/audit tables and version metadata columns without deleting legacy data.
+- Migration head is now `add_governed_dashboard_assets`, extending the current worktree head `add_file_source_resource_type`.
+
+Tests:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed, `6 passed`.
+- `cd server && uv run ruff check models/dashboard.py models/__init__.py migrations/versions/add_governed_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed.
+- `cd server && uv run alembic heads` -> `add_governed_dashboard_assets (head)`.
+- `git diff --check` -> passed.
+
+Commit:
+
+- Pending.
+
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
@@ -133,6 +164,7 @@ Commit:
 | `4a4f4e1` | `dashboard: audit human agent contract` | Phase 0 | `pytest tests/test_dashboard_security_regressions.py` -> 1 strict xfail; `ruff check tests/test_dashboard_security_regressions.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `033b526` | `dashboard: enforce viewer query binding` | Phase 2 security slice | `pytest tests/test_dashboard_security_regressions.py` -> 5 passed; `ruff check routers/folders.py tests/test_dashboard_security_regressions.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `be5e4a7` | `dashboard: add manifest run schemas` | Phase 1 schema slice | `pytest tests/test_dashboard_contract_schemas.py` -> 7 passed; `ruff check schemas/dashboard.py tests/test_dashboard_contract_schemas.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| Pending | `dashboard: persist governed asset foundation` | Phase 1 persistence slice | `pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> 6 passed; `ruff check models/dashboard.py models/__init__.py migrations/versions/add_governed_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed; `alembic heads` -> `add_governed_dashboard_assets` | Pending |
 
 ## Acceptance Evidence
 

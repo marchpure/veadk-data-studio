@@ -1,4 +1,3 @@
-from server.models.analysis_artifacts import AnalysisArtifact
 from server.collaboration.models import (
     CollaborationConversation,
     CollaborationDeliveryTarget,
@@ -8,10 +7,11 @@ from server.collaboration.models import (
     CollaborationResponseRef,
     ExternalIdentity,
 )
+from server.models.analysis_artifacts import AnalysisArtifact
 from server.models.connections import Connection
 from server.models.conversation_evaluation import ConversationEvaluation
 from server.models.custom_skill import CustomSkill
-from server.models.dashboard import Dashboard
+from server.models.dashboard import Dashboard, DashboardAsset, DashboardAuditEvent, DashboardRun
 from server.models.datasets import Dataset
 from server.models.datasource_annotations import DatasourceAnnotation
 from server.models.files import File
@@ -79,6 +79,9 @@ __all__ = [
     "ConversationEvaluation",
     "CustomSkill",
     "Dashboard",
+    "DashboardAsset",
+    "DashboardAuditEvent",
+    "DashboardRun",
     "DatasourceAnnotation",
     "Dataset",
     "File",
