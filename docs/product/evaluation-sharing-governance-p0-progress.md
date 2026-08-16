@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 2 — DB-backed Evaluation runner and grader gate complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking. Current slice: ready to enter Phase 3. Next slice: Phase 3 feedback/advisor/promotion API and UI wiring.
+CURRENT_PHASE: Phase 3 — Evaluation REST runner and promotion API slice complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API. Current slice: ready for Phase 3 feedback-to-case/advisor review wiring. Next slice: expose feedback-to-evaluation-case and advisor review surfaces, then add MCP/Human UI integration.
 
 ## Phase 0 Slice Checklist
 
@@ -332,3 +332,27 @@ Phase 3 next steps:
 - Expose Evaluation suite/run/promotion primitives through REST/MCP APIs with tenant/action authorization.
 - Add UI/API wiring for feedback-to-evaluation-case and advisor change-set review.
 - Add end-to-end tests showing feedback creates cases, advisor changesets require Evaluation gates, and promotion evidence is visible without leaking secrets.
+
+## 2026-08-16 18:32 CST - Phase 3 Evaluation REST Runner And Promotion API
+
+Scope:
+
+- Added `server/routers/evaluation.py` and registered it under `/api/evaluation`.
+- Exposed tenant-scoped REST endpoints for Evaluation runner preflight, claim, heartbeat, stop, artifact recording, completion, and advisor change-set promotion decisions.
+- REST endpoints call the existing `EvaluationService` primitives rather than duplicating runner or promotion logic.
+- Runner endpoints require authenticated tenant action scope via existing dashboard query scope; promotion decisions require dashboard publish scope so member users cannot promote advisor changesets.
+- Response serializers return stable run/artifact/promotion evidence and omit raw artifact content, preventing submitted diagnostic payloads from leaking back through API responses.
+- Added API regression coverage for idempotent preflight, runner lease lifecycle, artifact redaction, completion gate summary, tenant scoping, and promotion authorization/evidence.
+
+Evidence:
+
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_evaluation_rest_api.py tests/test_evaluation_runner_service.py tests/test_evaluation_service.py -q` -> `9 passed, 18 warnings`.
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_evaluation_runner_service.py tests/test_evaluation_rest_api.py tests/test_migration_chain_hardening.py -q` -> `21 passed, 18 warnings`.
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check routers/evaluation.py tests/test_evaluation_rest_api.py ../server/main.py` -> passed with the existing removed-rule warning.
+- `git diff --check` -> passed.
+
+Remaining Phase 3 work:
+
+- Add feedback-to-evaluation-case REST adapter and compatibility hooks for `ConversationEvaluation` / `SkillSuggestion`.
+- Add advisor change-set review/apply surfaces that expose typed patch evidence while preserving Evaluation gate requirements.
+- Add MCP wrapper and Human UI wiring against the same service/auth serializers.

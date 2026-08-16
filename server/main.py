@@ -62,6 +62,7 @@ from server.routers import datasets as datasets_router  # Dataset management
 from server.routers import (
     datasources as datasources_router,
 )  # Unified datasources (connections + datasets)
+from server.routers import evaluation as evaluation_router
 from server.routers import exports as exports_router
 from server.routers import (
     file_upload as file_upload_router,
@@ -580,6 +581,7 @@ app.include_router(datasources_router.router, prefix="/api", tags=["datasources"
 app.include_router(semantic_models_router.router, prefix="/api", tags=["semantic-models"])
 
 app.include_router(dashboard_router.router, prefix="/api", tags=["dashboard"])
+app.include_router(evaluation_router.router, prefix="/api", tags=["evaluation"])
 
 app.include_router(analysis_artifacts_router.router, prefix="/api", tags=["analysis-artifacts"])
 app.include_router(assets_router.router, prefix="/api", tags=["assets"])
