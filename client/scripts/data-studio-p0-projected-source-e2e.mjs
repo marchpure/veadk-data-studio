@@ -8,6 +8,11 @@ const runId = process.env.RUN_ID || String(Date.now())
 const sourceName = `P0 projected revenue ${runId}`
 const modelId = `p0-projected-revenue-${runId}`
 const modelName = `P0 Projected Revenue ${runId}`
+const email = process.env.E2E_EMAIL
+const password = process.env.E2E_PASSWORD
+
+let accessToken = ''
+let browserContext
 
 mkdirSync(screenDir, { recursive: true })
 
@@ -34,6 +39,7 @@ const evidence = {
   runId,
   sourceName,
   modelId,
+  authMode: email && password ? 'password' : 'local',
   steps: [],
 }
 
@@ -42,12 +48,14 @@ function record(step, data = {}) {
 }
 
 async function api(path, options = {}) {
+  const headers = {
+    ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    ...(options.headers || {}),
+  }
   const response = await fetch(`${apiURL}${path}`, {
     ...options,
-    headers: {
-      ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
-      ...(options.headers || {}),
-    },
+    headers,
   })
   const text = await response.text()
   let body
@@ -60,6 +68,33 @@ async function api(path, options = {}) {
     throw new Error(`${options.method || 'GET'} ${path} failed: ${response.status} ${JSON.stringify(body)}`)
   }
   return body?.data ?? body
+}
+
+async function authenticate() {
+  if (!email || !password) return
+  const form = new URLSearchParams()
+  form.set('username', email)
+  form.set('password', password)
+  const response = await fetch(`${apiURL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form,
+  })
+  const text = await response.text()
+  let body
+  try {
+    body = text ? JSON.parse(text) : null
+  } catch {
+    body = { raw: text }
+  }
+  if (!response.ok || body?.success === false) {
+    throw new Error(`POST /api/auth/login failed: ${response.status} ${JSON.stringify(body)}`)
+  }
+  accessToken = body?.data?.access_token ?? body?.access_token ?? ''
+  if (!accessToken) {
+    throw new Error(`Login response did not include an access token: ${JSON.stringify(body)}`)
+  }
+  record('authenticate', { email })
 }
 
 async function uploadProjectedSource() {
@@ -179,8 +214,20 @@ async function publishAndQueryModel(model) {
 }
 
 async function makePage(browser, viewport) {
-  const page = await browser.newPage({ viewport })
-  await page.route('https://accounts.google.com/**', route => {
+  if (!browserContext) {
+    browserContext = await browser.newContext({ viewport, baseURL })
+    if (email && password) {
+      const login = await browserContext.request.post('/api/auth/login', {
+        form: { username: email, password },
+      })
+      if (!login.ok()) {
+        throw new Error(`Browser pre-authentication failed: ${login.status()} ${await login.text()}`)
+      }
+    }
+  }
+  const page = await browserContext.newPage()
+  await page.setViewportSize(viewport)
+  await browserContext.route('https://accounts.google.com/**', route => {
     route.fulfill({ status: 204, body: '' })
   })
   page.on('pageerror', error => {
@@ -290,6 +337,7 @@ async function runMobileJourney(browser, resource) {
 }
 
 async function main() {
+  await authenticate()
   await api('/api/app/config')
   const resource = await uploadProjectedSource()
   await reviewProjection(resource)
@@ -304,6 +352,7 @@ async function main() {
     await runDesktopJourney(browser, resource)
     await runMobileJourney(browser, resource)
   } finally {
+    await browserContext?.close()
     await browser.close()
   }
 
