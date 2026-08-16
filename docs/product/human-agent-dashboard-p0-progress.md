@@ -374,6 +374,40 @@ Commit:
 
 - `77bfd98` `dashboard: preserve share export compatibility`
 
+### Phase 5 Migration Slice: Legacy Asset Backfill
+
+Status: implemented; pending commit/push.
+
+Allowlist:
+
+- `server/migrations/versions/backfill_legacy_dashboard_assets.py`
+- `server/tests/test_dashboard_persistence_migration.py`
+- `server/tests/test_migration_chain_hardening.py`
+- `client/src/features/dashboard/pages/DashboardWorkspacePage.tsx`
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Behavior:
+
+- Added an additive Alembic migration that backfills one stable `dashboard_assets` row per legacy notebook/dashboard family where existing `dashboards.asset_id` is null.
+- Linked preserved legacy dashboard HTML version rows to the generated asset without parsing HTML, DOM, screenshots, or guessed query/tile intent.
+- Marked generated assets and linked rows as `legacy_unstructured`, with validation blockers requiring structured review before agent-ready publish.
+- Preserved existing `html_content`; `published_version_id` points to the latest legacy dashboard row and `manifest_json` remains null.
+- Downgrade unlinks and deletes only generated `legacy-*` assets while keeping the original dashboard HTML rows.
+- Updated migration-chain hardening so the branch Alembic head is `backfill_legacy_dashboard_assets`.
+- The human inventory now labels `legacy_unstructured` assets as needing structured review.
+
+Tests:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed, `7 passed`.
+- `cd server && uv run ruff check migrations/versions/backfill_legacy_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed.
+- `cd client && pnpm build:check` -> passed, with existing CSS/chunk warnings.
+- `cd client && pnpm lint` -> passed with existing `355 warnings` and `0 errors`.
+- `git diff --check` -> passed.
+
+Commit:
+
+- Pending `dashboard: backfill legacy dashboard assets`
+
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
@@ -389,6 +423,7 @@ Commit:
 | `33130f5` | `dashboard: render structured dashboard workspace` | Phase 4 human workspace inventory/view slice | `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `d9ac360` | `dashboard: add review reload workflow` | Phase 4 review/preview/publish/reload slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> 5 passed; `ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `77bfd98` | `dashboard: preserve share export compatibility` | Phase 4 share/export/legacy compatibility slice | `pytest tests/test_dashboard_rest_api.py` -> 2 passed; `ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| Pending | `dashboard: backfill legacy dashboard assets` | Phase 5 legacy asset backfill slice | `pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> 7 passed; `ruff check migrations/versions/backfill_legacy_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with existing 355 warnings | Pending push |
 
 ## Acceptance Evidence
 
