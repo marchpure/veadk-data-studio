@@ -241,7 +241,7 @@ Tests:
 
 Commit:
 
-- pending `dashboard: expose dashboard rest contract`
+- `4de07e7` `dashboard: expose dashboard rest contract`
 
 ## Commit Ledger
 
@@ -253,7 +253,7 @@ Commit:
 | `ad4f6f3` | `dashboard: persist governed asset foundation` | Phase 1 persistence slice | `pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> 6 passed; `ruff check models/dashboard.py models/__init__.py migrations/versions/add_governed_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed; `alembic heads` -> `add_governed_dashboard_assets` | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `da3b2d2` | `dashboard: add lifecycle service primitives` | Phase 1 lifecycle slice | `pytest tests/test_dashboard_lifecycle_service.py` -> 3 passed; `ruff check repositories/dashboard.py services/dashboard.py tests/test_dashboard_lifecycle_service.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `0d05215` | `dashboard: bind dashboard run execution` | Phase 2 execution slice | `pytest tests/test_dashboard_execution_service.py` -> 3 passed; `ruff check services/dashboard.py tests/test_dashboard_execution_service.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
-| pending | `dashboard: expose dashboard rest contract` | Phase 3 REST slice | `pytest tests/test_dashboard_rest_api.py` -> 2 passed; `ruff check routers/dashboard.py main.py repositories/dashboard.py auth/scopes.py tests/test_dashboard_rest_api.py` -> passed; `git diff --check` -> passed | Pending push |
+| `4de07e7` | `dashboard: expose dashboard rest contract` | Phase 3 REST slice | `pytest tests/test_dashboard_rest_api.py` -> 2 passed; `ruff check routers/dashboard.py main.py repositories/dashboard.py auth/scopes.py tests/test_dashboard_rest_api.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 
 ## Acceptance Evidence
 
