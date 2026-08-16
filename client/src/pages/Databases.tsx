@@ -1553,15 +1553,15 @@ export default function DatabasesPage() {
       setPdfSourceFile(null)
       return
     }
-    if (!/\.(pdf|csv|xlsx|xlsm|docx|pptx)$/i.test(file.name)) {
-      alert('Please select a PDF, CSV, Excel (.xlsx/.xlsm), Docx or PPTX file')
+    if (!/\.(pdf|csv|xlsx|xlsm|parquet|json|jsonl|docx|pptx)$/i.test(file.name)) {
+      alert('Please select a PDF, CSV, Excel (.xlsx/.xlsm), Parquet, JSON/JSONL, Docx or PPTX file')
       event.target.value = ''
       setPdfSourceFile(null)
       return
     }
     setPdfSourceFile(file)
     if (!uploadConnectionName.trim()) {
-      setUploadConnectionName(file.name.replace(/\.(pdf|csv|xlsx|xlsm|docx|pptx)$/i, ''))
+      setUploadConnectionName(file.name.replace(/\.(pdf|csv|xlsx|xlsm|parquet|json|jsonl|docx|pptx)$/i, ''))
     }
   }
 
@@ -1572,7 +1572,7 @@ export default function DatabasesPage() {
     }
     if (selectedType === 'pdf') {
       if (!pdfSourceFile) {
-        alert('Please select a PDF, CSV, Excel (.xlsx/.xlsm), Docx or PPTX file')
+        alert('Please select a PDF, CSV, Excel (.xlsx/.xlsm), Parquet, JSON/JSONL, Docx or PPTX file')
         return
       }
       createPdfSourceResourceMutation.mutate(
@@ -2458,7 +2458,7 @@ export default function DatabasesPage() {
 	                          <input
 	                            ref={sourceResourceFileInputRef}
 	                            type="file"
-	                            accept=".pdf,.csv,.xlsx,.xlsm,.docx,.pptx,application/pdf,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	                            accept=".pdf,.csv,.xlsx,.xlsm,.parquet,.json,.jsonl,.docx,.pptx,application/pdf,text/csv,application/json,application/x-ndjson,application/vnd.apache.parquet,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
 	                            onChange={handlePdfSourceFileChange}
 	                            disabled={createPdfSourceResourceMutation.isPending}
 	                            className="mt-2 block w-full text-sm text-gray-300 file:mr-4 file:rounded file:border-0 file:bg-brand-orange file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-orange/90"
@@ -2481,7 +2481,7 @@ export default function DatabasesPage() {
 	                            </div>
 	                          )}
 	                          <p className="mt-3 text-xs text-gray-400">
-	                            PDF, Docx and PPTX enter as context evidence. CSV and .xlsx/.xlsm Excel files also create a reviewed dataset projection for semantic modeling handoff.
+	                            PDF, Docx and PPTX enter as context evidence. CSV, .xlsx/.xlsm Excel, Parquet, JSON and JSONL files also create a reviewed dataset projection for semantic modeling handoff.
 	                          </p>
 	                        </div>
 	                        {directSourceResult && (

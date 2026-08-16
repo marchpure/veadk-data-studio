@@ -34,7 +34,7 @@ def test_data_studio_p0_source_matrix_covers_connector_catalog_and_statuses() ->
         "local_file_csv",
         "local_file_xlsx_xlsm",
         "local_file_pdf_docx_pptx",
-        "legacy_dataset_parquet_json",
+        "local_file_parquet_json_jsonl",
         "web_url",
         "feishu_doc_wiki",
         "feishu_sheet_base",

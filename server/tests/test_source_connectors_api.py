@@ -82,7 +82,9 @@ class FakeConnectorAdapter:
         ]
         return ResourceListResult(items=items, next_page_token="next-1")
 
-    async def sync_resource(self, *, session, connection: SourceConnection, resource: SourceResource) -> CapturedSnapshot:
+    async def sync_resource(
+        self, *, session, connection: SourceConnection, resource: SourceResource
+    ) -> CapturedSnapshot:
         self.sync_calls += 1
         assert connection.id == resource.source_connection_id
         raw = b"region,revenue\nEast,120\nWest,80\n"
@@ -150,7 +152,9 @@ class FakeFeishuConnectorAdapter:
         ]
         return ResourceListResult(items=items, next_page_token=None)
 
-    async def sync_resource(self, *, session, connection: SourceConnection, resource: SourceResource) -> CapturedSnapshot:
+    async def sync_resource(
+        self, *, session, connection: SourceConnection, resource: SourceResource
+    ) -> CapturedSnapshot:
         self.sync_calls += 1
         assert connection.id == resource.source_connection_id
         raw_payload: dict[str, Any] | None = None
@@ -186,7 +190,11 @@ class FakeFeishuConnectorAdapter:
                 ]
             }
         content = f"{resource.name}: Synced {resource.resource_type} from Feishu token {resource.external_id}."
-        raw_bytes = json.dumps(raw_payload, ensure_ascii=False, sort_keys=True).encode("utf-8") if raw_payload else content.encode("utf-8")
+        raw_bytes = (
+            json.dumps(raw_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            if raw_payload
+            else content.encode("utf-8")
+        )
         return CapturedSnapshot(
             raw_bytes=raw_bytes,
             content_text=content,
@@ -235,7 +243,9 @@ class _FakeTosObject:
 
 
 class _FakeTosListedObject:
-    def __init__(self, *, key: str, size: int = 24, etag: str = '"etag-1"', last_modified: str = "2026-08-14T00:00:00Z"):
+    def __init__(
+        self, *, key: str, size: int = 24, etag: str = '"etag-1"', last_modified: str = "2026-08-14T00:00:00Z"
+    ):
         self.key = key
         self.size = size
         self.etag = etag
@@ -409,7 +419,9 @@ async def test_connector_catalog_marks_only_real_connectors_available(test_clien
         "partial",
         "not_applicable",
     }
-    assert {gate["key"] for gate in by_id["sql_databases"]["readiness_gates"] if gate["status"] == "not_applicable"} == {
+    assert {
+        gate["key"] for gate in by_id["sql_databases"]["readiness_gates"] if gate["status"] == "not_applicable"
+    } == {
         "immutable_snapshot",
         "raw_artifact_uri",
         "context_index_status",
@@ -481,7 +493,9 @@ async def test_children_route_accepts_tos_external_ids_with_slashes(test_client,
             "connection_status": "connected",
         }
 
-    monkeypatch.setattr("server.routers.source_connections.source_connection_service.list_resources", fake_list_resources)
+    monkeypatch.setattr(
+        "server.routers.source_connections.source_connection_service.list_resources", fake_list_resources
+    )
     response = await test_client.get("/api/source-connections/conn_1/resources/sales-bucket/reports/children")
 
     assert response.status_code == 200
@@ -571,7 +585,9 @@ async def test_feishu_admin_config_and_oauth_callback_encrypt_tokens_and_isolate
     assert [item.id for item in same_tenant_connections] == [connection.id]
     assert other_tenant_connections == []
 
-    flow = await test_session.scalar(select(FeishuOAuthFlow).where(FeishuOAuthFlow.state_hash == FeishuOAuthStateStore.state_hash(state)))
+    flow = await test_session.scalar(
+        select(FeishuOAuthFlow).where(FeishuOAuthFlow.state_hash == FeishuOAuthStateStore.state_hash(state))
+    )
     assert flow is not None
     assert flow.status == "connected"
     assert flow.connection_id == connection.id
@@ -579,12 +595,16 @@ async def test_feishu_admin_config_and_oauth_callback_encrypt_tokens_and_isolate
     assert flow.result_json["connection_id"] == str(connection.id)
 
 
-async def test_feishu_admin_config_status_is_admin_only_and_never_returns_secret(test_client, test_session, monkeypatch):
+async def test_feishu_admin_config_status_is_admin_only_and_never_returns_secret(
+    test_client, test_session, monkeypatch
+):
     tenant = await _tenant(test_session)
     set_tenant_id(tenant.id)
     monkeypatch.setenv("BYAAN_FEISHU_APP_ID", "cli_hosted")
     monkeypatch.setenv("BYAAN_FEISHU_APP_SECRET", "hosted-secret")
-    monkeypatch.setenv("BYAAN_FEISHU_REDIRECT_URI", "http://127.0.0.1:8080/api/source-connections/feishu/oauth/callback")
+    monkeypatch.setenv(
+        "BYAAN_FEISHU_REDIRECT_URI", "http://127.0.0.1:8080/api/source-connections/feishu/oauth/callback"
+    )
 
     status_response = await test_client.get("/api/source-connections/feishu/status")
     assert status_response.status_code == 200
@@ -1101,7 +1121,9 @@ async def test_feishu_picker_import_syncs_real_resource_types_without_placeholde
     assert len(resources_after_reimport) == 4
     assert len(snapshots_after_reimport) == 4
 
-    sheet = next(result["resource"] for result in imported["results"] if result["resource"]["resource_type"] == "feishu_sheet")
+    sheet = next(
+        result["resource"] for result in imported["results"] if result["resource"]["resource_type"] == "feishu_sheet"
+    )
     sheet_dataset = await test_session.get(Dataset, sheet["projected_dataset_id"])
     assert sheet_dataset is not None
     sheet_schema = json.loads(sheet_dataset.schema_cache)
@@ -1158,7 +1180,9 @@ async def test_feishu_picker_import_syncs_real_resource_types_without_placeholde
         {"dataset_row": 2, "dataset_column": "target", "source_cell": "B3"},
     ]
 
-    base = next(result["resource"] for result in imported["results"] if result["resource"]["resource_type"] == "feishu_base")
+    base = next(
+        result["resource"] for result in imported["results"] if result["resource"]["resource_type"] == "feishu_base"
+    )
     base_snapshot = await test_session.get(SourceSnapshot, base["latest_snapshot_id"])
     assert base_snapshot is not None
     base_evidence = await test_session.scalar(
@@ -1313,6 +1337,108 @@ async def test_dataset_projection_failure_marks_failed_without_orphan_dataset(te
     assert files == []
 
 
+async def test_local_json_jsonl_source_upload_creates_governed_snapshot_evidence_and_projection(test_session):
+    tenant = await _tenant(test_session)
+    resource_service = SourceResourceService()
+
+    for filename, raw_bytes, parser_version in [
+        (
+            "records.json",
+            b'[{"region":"East","revenue":120},{"region":"West","revenue":80}]',
+            "tos-json-parser-v1",
+        ),
+        (
+            "records.jsonl",
+            b'{"region":"East","revenue":120}\n{"region":"West","revenue":80}\n',
+            "tos-jsonl-parser-v1",
+        ),
+    ]:
+        resource = await resource_service.create_file_resource_from_upload(
+            session=test_session,
+            tenant_id=tenant.id,
+            user_id=tenant.owner_id,
+            name=filename.rsplit(".", 1)[0],
+            filename=filename,
+            data=raw_bytes,
+        )
+
+        assert resource["status"] == "ready"
+        assert resource["resource_type"] == "file"
+        assert resource["projected_dataset_id"]
+        assert resource["latest_snapshot"]["parser_version"] == parser_version
+        assert resource["latest_snapshot"]["raw_storage_uri"].startswith(
+            f"file://source-resources/{resource['id']}/raw/"
+        )
+        assert resource["latest_snapshot"]["metadata_json"]["provider"] == "local_file_upload"
+        assert resource["latest_snapshot"]["metadata_json"]["file_type"] == "json"
+        assert resource["knowledge_resource"]["evidence_count"] == 1
+
+        projection = resource["sync_config_json"]["projected_dataset"]
+        assert projection["status"] == "ready"
+        assert projection["source_snapshot_id"] == str(resource["latest_snapshot_id"])
+        assert projection["files"][0]["filename"] == filename
+        assert projection["files"][0]["file_type"] == "json"
+        assert projection["files"][0]["source_locator"]["kind"] == "local_file_upload"
+        assert projection["files"][0]["source_locator"]["source_resource_id"] == str(resource["id"])
+        assert projection["files"][0]["source_locator"]["filename"] == filename
+
+        query_result = await DataFrameFileService.execute_duckdb_query_on_dataset(
+            session=test_session,
+            dataset_id=resource["projected_dataset_id"],
+            query="SELECT SUM(revenue) AS total_revenue FROM records",
+            limit=10,
+        )
+        assert query_result["success"] is True
+        assert query_result["result"][0]["total_revenue"] == 200
+
+
+async def test_local_parquet_source_upload_creates_governed_snapshot_evidence_and_projection(test_session):
+    duckdb = pytest.importorskip("duckdb")
+    tenant = await _tenant(test_session)
+    resource_service = SourceResourceService()
+
+    with tempfile.TemporaryDirectory() as parquet_dir:
+        parquet_path = Path(parquet_dir) / "revenue.parquet"
+        duckdb.sql(
+            f"COPY (SELECT 'East' AS region, 120 AS revenue UNION ALL SELECT 'West' AS region, 80 AS revenue) "
+            f"TO '{parquet_path}' (FORMAT PARQUET)"
+        )
+        resource = await resource_service.create_file_resource_from_upload(
+            session=test_session,
+            tenant_id=tenant.id,
+            user_id=tenant.owner_id,
+            name="revenue",
+            filename="revenue.parquet",
+            data=parquet_path.read_bytes(),
+        )
+
+    assert resource["status"] == "ready"
+    assert resource["resource_type"] == "file"
+    assert resource["projected_dataset_id"]
+    assert resource["latest_snapshot"]["parser_version"] == "tos-parquet-parser-v1"
+    assert resource["latest_snapshot"]["metadata_json"]["provider"] == "local_file_upload"
+    assert resource["latest_snapshot"]["metadata_json"]["file_type"] == "parquet"
+    assert resource["knowledge_resource"]["evidence_count"] == 1
+
+    projection = resource["sync_config_json"]["projected_dataset"]
+    assert projection["status"] == "ready"
+    assert projection["source_snapshot_id"] == str(resource["latest_snapshot_id"])
+    assert projection["files"][0]["filename"] == "revenue.parquet"
+    assert projection["files"][0]["file_type"] == "parquet"
+    assert projection["files"][0]["source_locator"]["kind"] == "local_file_upload"
+    assert projection["files"][0]["source_locator"]["source_resource_id"] == str(resource["id"])
+    assert projection["files"][0]["source_locator"]["filename"] == "revenue.parquet"
+
+    query_result = await DataFrameFileService.execute_duckdb_query_on_dataset(
+        session=test_session,
+        dataset_id=resource["projected_dataset_id"],
+        query="SELECT SUM(revenue) AS total_revenue FROM revenue",
+        limit=10,
+    )
+    assert query_result["success"] is True
+    assert query_result["result"][0]["total_revenue"] == 200
+
+
 async def test_sync_failure_keeps_previous_successful_snapshot(test_session):
     tenant = await _tenant(test_session)
     connection_service = SourceConnectionService()
@@ -1356,7 +1482,9 @@ async def test_sync_failure_keeps_previous_successful_snapshot(test_session):
     previous_snapshot_id = ready_resource["latest_snapshot_id"]
 
     class FailingAdapter(FakeConnectorAdapter):
-        async def sync_resource(self, *, session, connection: SourceConnection, resource: SourceResource) -> CapturedSnapshot:
+        async def sync_resource(
+            self, *, session, connection: SourceConnection, resource: SourceResource
+        ) -> CapturedSnapshot:
             raise ConnectorError("TOS permission denied", code="permission_lost", permanent=True)
 
     failed = await resource_service.import_resources(
@@ -1476,7 +1604,9 @@ async def test_tos_large_object_import_surfaces_confirmation_state(test_session)
     resource_service = SourceResourceService()
 
     class LargeObjectAdapter(FakeConnectorAdapter):
-        async def sync_resource(self, *, session, connection: SourceConnection, resource: SourceResource) -> CapturedSnapshot:
+        async def sync_resource(
+            self, *, session, connection: SourceConnection, resource: SourceResource
+        ) -> CapturedSnapshot:
             raise ConnectorError(
                 "TOS object is too large; confirmation required",
                 code="large_file_confirmation_required",
@@ -1730,7 +1860,9 @@ async def test_feishu_captured_snapshot_uses_configured_knowledge_provider(test_
     assert captured.parser_version == "feishu-openapi-v1"
 
 
-async def test_feishu_quick_locate_parses_links_and_returns_picker_item_without_creating_resource(test_session, monkeypatch):
+async def test_feishu_quick_locate_parses_links_and_returns_picker_item_without_creating_resource(
+    test_session, monkeypatch
+):
     tenant = await _tenant(test_session)
     adapter = FeishuConnectorAdapter()
     encrypted = await CryptoService.encrypt_config(
@@ -1847,7 +1979,9 @@ async def test_feishu_quick_locate_marks_already_added_resources(test_session, m
 
 async def test_tos_parser_contracts_cover_supported_formats_and_actionable_errors():
     csv_text, csv_parser, csv_hint = parse_object_bytes(key="revenue.csv", raw_bytes=b"region,revenue\nEast,120\n")
-    json_text, json_parser, json_hint = parse_object_bytes(key="records.json", raw_bytes=b'{"region":"East","revenue":120}')
+    json_text, json_parser, json_hint = parse_object_bytes(
+        key="records.json", raw_bytes=b'{"region":"East","revenue":120}'
+    )
     jsonl_text, jsonl_parser, jsonl_hint = parse_object_bytes(
         key="records.jsonl",
         raw_bytes=b'{"region":"East"}\n{"region":"West"}\n',

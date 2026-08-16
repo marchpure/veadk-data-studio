@@ -308,7 +308,9 @@ class SourceResourceService:
             raise ValueError("Source file exceeds the 50 MB limit")
         file_type = self._upload_file_type_from_name(filename)
         if file_type is None:
-            raise ValueError("Only PDF, CSV, Excel (.xlsx/.xlsm), Docx, and PPTX files are supported by this endpoint")
+            raise ValueError(
+                "Only PDF, CSV, Excel (.xlsx/.xlsm), Parquet, JSON/JSONL, Docx, and PPTX files are supported by this endpoint"
+            )
 
         resource = SourceResource(
             tenant_id=tenant_id,
@@ -343,7 +345,9 @@ class SourceResourceService:
                 parser_version=parser_version,
                 raw_storage_uri="pending://local-file-upload",
             )
-            snapshot = await self._capture_uploaded_file(session=session, resource=resource, captured=captured, filename=filename)
+            snapshot = await self._capture_uploaded_file(
+                session=session, resource=resource, captured=captured, filename=filename
+            )
             await self._maybe_project_dataset(
                 session=session,
                 resource=resource,
@@ -541,7 +545,7 @@ class SourceResourceService:
                 await session.scalar(
                     select(func.count(EvidenceFragment.id)).where(
                         EvidenceFragment.tenant_id == tenant_id,
-                        EvidenceFragment.knowledge_resource_id == knowledge_resource.id
+                        EvidenceFragment.knowledge_resource_id == knowledge_resource.id,
                     )
                 )
                 or 0
@@ -574,7 +578,10 @@ class SourceResourceService:
             message = "Source is ready. Snapshot, context index, and evidence are available."
             next_actions = ["Search evidence", "Attach to notebook"]
             connector_required = False
-        elif effective_status == "needs_confirmation" and (last_error or {}).get("code") == "large_file_confirmation_required":
+        elif (
+            effective_status == "needs_confirmation"
+            and (last_error or {}).get("code") == "large_file_confirmation_required"
+        ):
             stage = "needs_confirmation"
             message = "Object is too large for automatic sync. Review the object size and confirm large object sync before retrying."
             next_actions = ["Review object size", "Confirm large object sync"]
@@ -632,7 +639,11 @@ class SourceResourceService:
 
     def _resource_connection_status(self, connection: SourceConnection) -> str | None:
         if connection.status in {"reauthorization_required", "authorization_required", "disconnected"}:
-            return "reauthorization_required" if connection.status == "reauthorization_required" else "authorization_required"
+            return (
+                "reauthorization_required"
+                if connection.status == "reauthorization_required"
+                else "authorization_required"
+            )
         if connection.status == "failed":
             code = self._source_connection_error_code(connection)
             if code in {"permission_lost", "source_unavailable"}:
@@ -675,7 +686,9 @@ class SourceResourceService:
         snapshot_captured = resource.latest_snapshot_id is not None
         parsed = bool(knowledge_resource and knowledge_resource.parse_status == "parsed")
         projected_dataset_id = self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot)
-        table_detected = bool(projected_dataset_id or self._projection_payload(resource=resource, latest_snapshot=latest_snapshot))
+        table_detected = bool(
+            projected_dataset_id or self._projection_payload(resource=resource, latest_snapshot=latest_snapshot)
+        )
         context_indexed = bool(knowledge_resource and knowledge_resource.index_status == "indexed")
         has_semantic_suggestions = table_detected or context_indexed or evidence_count > 0
         ready = status_for_steps == "ready" and (context_indexed or table_detected or evidence_count > 0)
@@ -869,7 +882,9 @@ class SourceResourceService:
         resource = await self.get_resource(session=session, tenant_id=tenant_id, resource_id=resource_id)
         if resource is None:
             raise ValueError("Source resource not found")
-        latest_snapshot = await session.get(SourceSnapshot, resource.latest_snapshot_id) if resource.latest_snapshot_id else None
+        latest_snapshot = (
+            await session.get(SourceSnapshot, resource.latest_snapshot_id) if resource.latest_snapshot_id else None
+        )
         knowledge_resource = await self._latest_knowledge_resource(
             session=session,
             tenant_id=tenant_id,
@@ -897,7 +912,9 @@ class SourceResourceService:
             "resource_id": resource.id,
             "latest_snapshot_id": resource.latest_snapshot_id,
             "projected_dataset_id": self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot),
-            "parse_status": knowledge_resource.parse_status if knowledge_resource else self._parse_status_for_snapshot(latest_snapshot),
+            "parse_status": knowledge_resource.parse_status
+            if knowledge_resource
+            else self._parse_status_for_snapshot(latest_snapshot),
             "parser_version": latest_snapshot.parser_version if latest_snapshot else None,
             "parser_warnings": self._parser_warnings(metadata),
             "files": files,
@@ -921,7 +938,9 @@ class SourceResourceService:
         resource = await self.get_resource(session=session, tenant_id=tenant_id, resource_id=resource_id)
         if resource is None:
             raise ValueError("Source resource not found")
-        latest_snapshot = await session.get(SourceSnapshot, resource.latest_snapshot_id) if resource.latest_snapshot_id else None
+        latest_snapshot = (
+            await session.get(SourceSnapshot, resource.latest_snapshot_id) if resource.latest_snapshot_id else None
+        )
         knowledge_resource = await self._latest_knowledge_resource(
             session=session,
             tenant_id=tenant_id,
@@ -988,7 +1007,9 @@ class SourceResourceService:
                 {
                     "id": f"knowledge:{knowledge_resource.id}",
                     "node_type": "knowledge_resource",
-                    "label": knowledge_resource.context_uri or knowledge_resource.provider_resource_id or str(knowledge_resource.id),
+                    "label": knowledge_resource.context_uri
+                    or knowledge_resource.provider_resource_id
+                    or str(knowledge_resource.id),
                     "status": knowledge_resource.index_status,
                     "metadata": {
                         "provider": knowledge_resource.provider,
@@ -1043,7 +1064,9 @@ class SourceResourceService:
             tenant_id=tenant_id,
             resource_id=resource.id,
         )
-        latest_snapshot = await session.get(SourceSnapshot, resource.latest_snapshot_id) if resource.latest_snapshot_id else None
+        latest_snapshot = (
+            await session.get(SourceSnapshot, resource.latest_snapshot_id) if resource.latest_snapshot_id else None
+        )
         projected_dataset_id = self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot)
         source_ids = {str(resource.id)}
         projected_dataset_ids: set[str] = set()
@@ -1083,8 +1106,16 @@ class SourceResourceService:
                 knowledge_resource=knowledge_resource,
             )
         )
-        consumers.extend(await self._dashboard_consumers(session=session, tenant_id=tenant_id, notebook_ids=self._notebook_ids(consumers)))
-        consumers.extend(await self._analysis_artifact_consumers(session=session, tenant_id=tenant_id, notebook_ids=self._notebook_ids(consumers)))
+        consumers.extend(
+            await self._dashboard_consumers(
+                session=session, tenant_id=tenant_id, notebook_ids=self._notebook_ids(consumers)
+            )
+        )
+        consumers.extend(
+            await self._analysis_artifact_consumers(
+                session=session, tenant_id=tenant_id, notebook_ids=self._notebook_ids(consumers)
+            )
+        )
         counts: dict[str, int] = {}
         for consumer in consumers:
             counts[consumer["consumer_type"]] = counts.get(consumer["consumer_type"], 0) + 1
@@ -1136,7 +1167,9 @@ class SourceResourceService:
         if snapshot is None or snapshot.tenant_id != tenant_id:
             return None
 
-        resource = await self.get_resource(session=session, tenant_id=tenant_id, resource_id=knowledge_resource.resource_id)
+        resource = await self.get_resource(
+            session=session, tenant_id=tenant_id, resource_id=knowledge_resource.resource_id
+        )
         if resource is None:
             return None
 
@@ -1227,7 +1260,9 @@ class SourceResourceService:
         elif asset_type == "dataset":
             from server.models.datasets import Dataset
 
-            exists = await session.scalar(select(Dataset.id).where(Dataset.tenant_id == tenant_id, Dataset.id == asset_id))
+            exists = await session.scalar(
+                select(Dataset.id).where(Dataset.tenant_id == tenant_id, Dataset.id == asset_id)
+            )
         elif asset_type == "semantic_model":
             from server.models.semantic_models import SemanticModel
 
@@ -1397,7 +1432,9 @@ class SourceResourceService:
                     )
                 resource.latest_snapshot_id = existing_snapshot.id
                 resource.status = "ready"
-                self._finish_sync_run(resource=resource, sync_run=sync_run, status="succeeded", snapshot=existing_snapshot)
+                self._finish_sync_run(
+                    resource=resource, sync_run=sync_run, status="succeeded", snapshot=existing_snapshot
+                )
                 await session.flush()
                 return existing_snapshot
 
@@ -1638,7 +1675,11 @@ class SourceResourceService:
             resource=resource,
             metadata=metadata,
         )
-        filename = captured.metadata.get("original_filename") or (resource.sync_config_json or {}).get("original_filename") or resource.name
+        filename = (
+            captured.metadata.get("original_filename")
+            or (resource.sync_config_json or {}).get("original_filename")
+            or resource.name
+        )
         snapshot = await self._capture_uploaded_file(
             session=session,
             resource=resource,
@@ -1654,7 +1695,9 @@ class SourceResourceService:
         resource: SourceResource,
         metadata: dict[str, Any] | None = None,
     ) -> CapturedSnapshot:
-        latest_snapshot = await session.get(SourceSnapshot, resource.latest_snapshot_id) if resource.latest_snapshot_id else None
+        latest_snapshot = (
+            await session.get(SourceSnapshot, resource.latest_snapshot_id) if resource.latest_snapshot_id else None
+        )
         if latest_snapshot is None:
             raise ConnectorError(
                 "Uploaded source cannot be reindexed because it has no captured raw artifact. Re-upload the file.",
@@ -1715,7 +1758,9 @@ class SourceResourceService:
                 permanent=True,
             )
 
-        content_text, parser_version, fragment_hint = parse_object_bytes(key=str(original_filename), raw_bytes=raw_bytes)
+        content_text, parser_version, fragment_hint = parse_object_bytes(
+            key=str(original_filename), raw_bytes=raw_bytes
+        )
         generated_metadata_keys = {
             "content_preview_hash",
             "content_size",
@@ -1726,7 +1771,9 @@ class SourceResourceService:
             "projection_manifest",
             "raw_size",
         }
-        retained_metadata = {key: value for key, value in snapshot_metadata.items() if key not in generated_metadata_keys}
+        retained_metadata = {
+            key: value for key, value in snapshot_metadata.items() if key not in generated_metadata_keys
+        }
         return CapturedSnapshot(
             raw_bytes=raw_bytes,
             content_text=content_text,
@@ -1824,16 +1871,8 @@ class SourceResourceService:
                         "checksum": file_record.checksum,
                         "source_locator": file_spec.get("source_locator") or {},
                         "row_mappings": file_spec.get("row_mappings") or [],
-                        **(
-                            {"column_mappings": file_spec["column_mappings"]}
-                            if "column_mappings" in file_spec
-                            else {}
-                        ),
-                        **(
-                            {"cell_mappings": file_spec["cell_mappings"]}
-                            if "cell_mappings" in file_spec
-                            else {}
-                        ),
+                        **({"column_mappings": file_spec["column_mappings"]} if "column_mappings" in file_spec else {}),
+                        **({"cell_mappings": file_spec["cell_mappings"]} if "cell_mappings" in file_spec else {}),
                         **(
                             {"coordinate_system": file_spec["coordinate_system"]}
                             if "coordinate_system" in file_spec
@@ -1936,8 +1975,8 @@ class SourceResourceService:
             tables = []
             for entry in raw.get("tables") or []:
                 table = entry.get("table") or {}
-                records = ((entry.get("records") or {}).get("items") or [])
-                fields = ((entry.get("fields") or {}).get("items") or [])
+                records = (entry.get("records") or {}).get("items") or []
+                fields = (entry.get("fields") or {}).get("items") or []
                 tables.append(
                     {
                         "table_id": table.get("table_id"),
@@ -1978,7 +2017,9 @@ class SourceResourceService:
                     "data": self._rows_to_csv_bytes(values),
                     "source_locator": {
                         "kind": "feishu_sheet",
-                        "source_connection_id": str(resource.source_connection_id) if resource.source_connection_id else None,
+                        "source_connection_id": str(resource.source_connection_id)
+                        if resource.source_connection_id
+                        else None,
                         "source_resource_id": str(resource.id),
                         "spreadsheet_token": resource.external_id,
                         "sheet_id": sheet_id,
@@ -2008,21 +2049,25 @@ class SourceResourceService:
         files: list[dict[str, Any]] = []
         for index, table_entry in enumerate(raw.get("tables") or [], start=1):
             table = table_entry.get("table") or {}
-            fields = ((table_entry.get("fields") or {}).get("items") or [])
+            fields = (table_entry.get("fields") or {}).get("items") or []
             field_names = [field.get("field_name") for field in fields if field.get("field_name")]
             if not field_names:
                 continue
             rows = [field_names]
-            for record in ((table_entry.get("records") or {}).get("items") or []):
+            for record in (table_entry.get("records") or {}).get("items") or []:
                 values = record.get("fields") or {}
                 rows.append([self._cell_to_csv_value(values.get(name, "")) for name in field_names])
             if len(rows) <= 1:
                 continue
             table_id = table.get("table_id") or f"table_{index}"
-            view_id = table.get("view_id") or table_entry.get("view_id") or (resource.selection_config_json or {}).get("view_id")
+            view_id = (
+                table.get("view_id")
+                or table_entry.get("view_id")
+                or (resource.selection_config_json or {}).get("view_id")
+            )
             title = table.get("name") or table_id
             filename = f"{self._safe_filename(resource.name)}__{self._safe_filename(str(title))}.csv"
-            records = ((table_entry.get("records") or {}).get("items") or [])
+            records = (table_entry.get("records") or {}).get("items") or []
             field_mappings = [
                 {
                     "dataset_column": field.get("field_name"),
@@ -2039,7 +2084,9 @@ class SourceResourceService:
                     "data": self._rows_to_csv_bytes(rows),
                     "source_locator": {
                         "kind": "feishu_base",
-                        "source_connection_id": str(resource.source_connection_id) if resource.source_connection_id else None,
+                        "source_connection_id": str(resource.source_connection_id)
+                        if resource.source_connection_id
+                        else None,
                         "source_resource_id": str(resource.id),
                         "app_token": resource.external_id,
                         "table_id": table_id,
@@ -2075,7 +2122,9 @@ class SourceResourceService:
                 "data": captured.raw_bytes,
                 "source_locator": {
                     "kind": "tos_object",
-                    "source_connection_id": str(resource.source_connection_id) if resource.source_connection_id else None,
+                    "source_connection_id": str(resource.source_connection_id)
+                    if resource.source_connection_id
+                    else None,
                     "source_resource_id": str(resource.id),
                     "bucket": (captured.metadata or {}).get("bucket"),
                     "key": (captured.metadata or {}).get("key"),
@@ -2144,6 +2193,10 @@ class SourceResourceService:
             return "csv"
         if suffix in {"xlsx", "xlsm"}:
             return "excel"
+        if suffix == "parquet":
+            return "parquet"
+        if suffix in {"json", "jsonl"}:
+            return "json"
         return self._knowledge_file_type_from_name(filename)
 
     def _knowledge_file_type_from_name(self, filename: str) -> str | None:
@@ -2430,14 +2483,18 @@ class SourceResourceService:
         return snapshot.metadata_json if snapshot and isinstance(snapshot.metadata_json, dict) else {}
 
     def _projected_dataset_id(self, *, resource: SourceResource, latest_snapshot: SourceSnapshot | None) -> str | None:
-        value = (resource.sync_config_json or {}).get("projected_dataset_id") or self._snapshot_metadata(latest_snapshot).get(
-            "projected_dataset_id"
-        )
+        value = (resource.sync_config_json or {}).get("projected_dataset_id") or self._snapshot_metadata(
+            latest_snapshot
+        ).get("projected_dataset_id")
         return str(value) if value else None
 
-    def _projection_payload(self, *, resource: SourceResource, latest_snapshot: SourceSnapshot | None) -> dict[str, Any]:
+    def _projection_payload(
+        self, *, resource: SourceResource, latest_snapshot: SourceSnapshot | None
+    ) -> dict[str, Any]:
         metadata = self._snapshot_metadata(latest_snapshot)
-        projection = (resource.sync_config_json or {}).get("projected_dataset") or metadata.get("projected_dataset") or {}
+        projection = (
+            (resource.sync_config_json or {}).get("projected_dataset") or metadata.get("projected_dataset") or {}
+        )
         if not isinstance(projection, dict):
             projection = {}
         manifest = metadata.get("projection_manifest")
@@ -2454,10 +2511,16 @@ class SourceResourceService:
     ) -> list[dict[str, Any]]:
         value = projection.get(key)
         if isinstance(value, dict):
-            value = [{"name": name, **item} if isinstance(item, dict) else {"name": name, "value": item} for name, item in value.items()]
+            value = [
+                {"name": name, **item} if isinstance(item, dict) else {"name": name, "value": item}
+                for name, item in value.items()
+            ]
         if not isinstance(value, list):
             return []
-        return [self._parsed_asset_item(item=item, index=index, asset_type=asset_type) for index, item in enumerate(value, start=1)]
+        return [
+            self._parsed_asset_item(item=item, index=index, asset_type=asset_type)
+            for index, item in enumerate(value, start=1)
+        ]
 
     def _parsed_asset_items_from_metadata(
         self,
@@ -2469,7 +2532,10 @@ class SourceResourceService:
         value = metadata.get(key)
         if not isinstance(value, list):
             return []
-        return [self._parsed_asset_item(item=item, index=index, asset_type=asset_type) for index, item in enumerate(value, start=1)]
+        return [
+            self._parsed_asset_item(item=item, index=index, asset_type=asset_type)
+            for index, item in enumerate(value, start=1)
+        ]
 
     def _parsed_asset_item(self, *, item: Any, index: int, asset_type: str) -> dict[str, Any]:
         if isinstance(item, dict):
@@ -2482,11 +2548,7 @@ class SourceResourceService:
                 or f"{asset_type.title()} {index}"
             )
             locator = item.get("source_locator") or item.get("locator") or {}
-            metadata = {
-                key: value
-                for key, value in item.items()
-                if key not in {"source_locator", "locator", "data"}
-            }
+            metadata = {key: value for key, value in item.items() if key not in {"source_locator", "locator", "data"}}
             return {
                 "asset_type": asset_type,
                 "name": str(name),
@@ -2589,8 +2651,9 @@ class SourceResourceService:
         if not notebook_ids:
             return []
         result = await session.execute(
-            select(AnalysisArtifact)
-            .where(AnalysisArtifact.tenant_id == tenant_id, AnalysisArtifact.notebook_id.in_(notebook_ids))
+            select(AnalysisArtifact).where(
+                AnalysisArtifact.tenant_id == tenant_id, AnalysisArtifact.notebook_id.in_(notebook_ids)
+            )
         )
         return [
             self._consumer_item(
