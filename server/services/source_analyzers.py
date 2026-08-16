@@ -32,7 +32,7 @@ from server.services.connections import ConnectionService
 from server.services.semantic_model_service import SemanticModelService
 
 DATABASE_ANALYZER_VERSION = "database-source-analyzer-v1"
-DATABASE_CONNECTION_TYPES = {"oracle", "pg", "postgres", "postgresql", "mysql", "sqlite"}
+DATABASE_CONNECTION_TYPES = {"oracle", "pg", "postgres", "postgresql", "mysql", "sqlite", "mssql"}
 SOURCE_SKILL_CANDIDATE_VERSION = 1
 SOURCE_SKILL_GENERATOR = f"{DATABASE_ANALYZER_VERSION}:metadata-profile"
 
@@ -135,8 +135,7 @@ class SourceAnalyzer(Protocol):
     provider: str
     supported_connection_types: set[str]
 
-    async def analyze(self, *, session: AsyncSession, request: SourceAnalyzerRequest) -> dict[str, Any]:
-        ...
+    async def analyze(self, *, session: AsyncSession, request: SourceAnalyzerRequest) -> dict[str, Any]: ...
 
 
 class DatabaseSourceAnalyzer:
@@ -164,12 +163,12 @@ class SourceUnderstandingService:
     ) -> dict[str, Any]:
         connection = await self.resolve_connection(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
         latest_run = await self._latest_run(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
-        resources = await self._list_database_resources(session=session, connection_id=connection.id, tenant_id=tenant_id)
+        resources = await self._list_database_resources(
+            session=session, connection_id=connection.id, tenant_id=tenant_id
+        )
         candidates = await self._list_candidates(session=session, run_id=latest_run.id if latest_run else None)
         evidence_ids = {
-            str(evidence_id)
-            for candidate in candidates
-            for evidence_id in (candidate.evidence_ids_json or [])
+            str(evidence_id) for candidate in candidates for evidence_id in (candidate.evidence_ids_json or [])
         }
         evidence = await self._evidence_by_ids(session=session, evidence_ids=evidence_ids, tenant_id=tenant_id)
         evidence_by_id = {str(item.id): item for item in evidence}
@@ -215,7 +214,9 @@ class SourceUnderstandingService:
     ) -> dict[str, Any]:
         connection = await self.resolve_connection(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
         if _normalize_connection_type(connection.type) not in DATABASE_CONNECTION_TYPES:
-            raise ValueError("Source Understanding currently supports Oracle, PostgreSQL, MySQL, and SQLite connections")
+            raise ValueError(
+                "Source Understanding currently supports Oracle, PostgreSQL, MySQL, SQLite, and SQL Server connections"
+            )
 
         schema = await self._load_schema(session=session, connection=connection, refresh_schema=refresh_schema)
         normalized = self._normalize_schema(connection=connection, schema=schema, scope=scope or [])
@@ -577,7 +578,9 @@ class SourceUnderstandingService:
         connection = await self.resolve_connection(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
         return connection.created_by is not None and str(connection.created_by) == str(user_id)
 
-    async def _load_schema(self, *, session: AsyncSession, connection: Connection, refresh_schema: bool) -> dict[str, Any]:
+    async def _load_schema(
+        self, *, session: AsyncSession, connection: Connection, refresh_schema: bool
+    ) -> dict[str, Any]:
         if refresh_schema or not connection.schema_cache:
             _, schema = await ConnectionService.refresh_connection_schema(str(connection.id), session)
             return schema
@@ -599,7 +602,9 @@ class SourceUnderstandingService:
         datasource_type = _normalize_connection_type(
             str(root.get("datasource_type") or root.get("database_type") or connection.type)
         )
-        datasource_name = str(root.get("datasource_name") or root.get("database_name") or connection.name or connection.type)
+        datasource_name = str(
+            root.get("datasource_name") or root.get("database_name") or connection.name or connection.type
+        )
         catalog = str(root.get("database_name") or root.get("datasource_name") or connection.name or connection.id)
         default_schema = str(root.get("selected_schema") or ("public" if datasource_type == "pg" else datasource_type))
         wanted = {item.upper() for item in scope if item}
@@ -612,7 +617,9 @@ class SourceUnderstandingService:
                 table_info = {"columns": table_info if isinstance(table_info, list) else []}
             table_schema = str(table_info.get("schema") or default_schema)
             sample_rows = tuple(
-                row for row in table_info.get("sample_rows") or table_info.get("sample_data") or [] if isinstance(row, dict)
+                row
+                for row in table_info.get("sample_rows") or table_info.get("sample_data") or []
+                if isinstance(row, dict)
             )
             row_count = self._coerce_int(
                 table_info.get("row_count")
@@ -701,7 +708,16 @@ class SourceUnderstandingService:
             nullable = bool(raw.get("nullable", raw.get("is_nullable", True)))
             profile = {
                 key: raw[key]
-                for key in ("null_rate", "nullRate", "distinct_count", "distinctCount", "min", "max", "top_values", "topValues")
+                for key in (
+                    "null_rate",
+                    "nullRate",
+                    "distinct_count",
+                    "distinctCount",
+                    "min",
+                    "max",
+                    "top_values",
+                    "topValues",
+                )
                 if key in raw
             }
             profile = self._normalize_column_profile(
@@ -734,7 +750,9 @@ class SourceUnderstandingService:
         if "null_rate" in raw_profile or "nullRate" in raw_profile:
             profile["null_rate"] = _safe_float(raw_profile.get("null_rate", raw_profile.get("nullRate")))
         if "distinct_count" in raw_profile or "distinctCount" in raw_profile:
-            profile["distinct_count"] = self._coerce_int(raw_profile.get("distinct_count", raw_profile.get("distinctCount")))
+            profile["distinct_count"] = self._coerce_int(
+                raw_profile.get("distinct_count", raw_profile.get("distinctCount"))
+            )
         if "top_values" in raw_profile or "topValues" in raw_profile:
             profile["top_values"] = raw_profile.get("top_values", raw_profile.get("topValues")) or []
         for key in ("min", "max"):
@@ -790,7 +808,9 @@ class SourceUnderstandingService:
             if not isinstance(fk, dict):
                 continue
             from_columns = fk.get("column") or fk.get("columns") or fk.get("constrained_columns") or fk.get("from")
-            to_table = fk.get("ref_table") or fk.get("referred_table") or fk.get("foreign_table_name") or fk.get("to_table")
+            to_table = (
+                fk.get("ref_table") or fk.get("referred_table") or fk.get("foreign_table_name") or fk.get("to_table")
+            )
             to_columns = fk.get("ref_column") or fk.get("referred_columns") or fk.get("to")
             if isinstance(from_columns, str):
                 from_columns = [from_columns]
@@ -916,7 +936,9 @@ class SourceUnderstandingService:
             "sampled_orphans": len(missing),
             "orphan_rate": orphan_rate,
             "unique_rate": unique_rate,
-            "message": "Sampled join values matched target sample." if orphan_rate == 0 else "Sampled join values include unmatched rows.",
+            "message": "Sampled join values matched target sample."
+            if orphan_rate == 0
+            else "Sampled join values include unmatched rows.",
         }
 
     def _relationship_validation_sql(self, relationship: NormalizedRelationship) -> dict[str, Any]:
@@ -947,7 +969,11 @@ class SourceUnderstandingService:
             return "pii"
         if lower in {"id", "uuid"} or lower.endswith("_id"):
             return "id"
-        if any(token in lower for token in ("date", "time", "_at", "month", "year")) or "date" in type_lower or "time" in type_lower:
+        if (
+            any(token in lower for token in ("date", "time", "_at", "month", "year"))
+            or "date" in type_lower
+            or "time" in type_lower
+        ):
             return "time"
         if any(token in lower for token in ("amount", "revenue", "price", "cost", "total", "target", "quantity")):
             return "measure" if "quantity" in lower else "amount"
@@ -1050,11 +1076,18 @@ class SourceUnderstandingService:
                         "sample_rows": list(table.sample_rows[:5]),
                         "columns": fields,
                     },
-                    "evidence_ids": [str(item.id) for item in [evidence.get("table"), evidence.get("sample")] if item is not None]
+                    "evidence_ids": [
+                        str(item.id) for item in [evidence.get("table"), evidence.get("sample")] if item is not None
+                    ]
                     + [str(item.id) for item in evidence.get("columns", [])],
-                    "confidence": 0.86 if table.sample_rows or any(column.profile for column in table.columns) else 0.71,
+                    "confidence": 0.86
+                    if table.sample_rows or any(column.profile for column in table.columns)
+                    else 0.71,
                     "validation_status": "passed" if table.columns else "failed",
-                    "validation": {"status": "passed" if table.columns else "failed", "sample_rows": len(table.sample_rows)},
+                    "validation": {
+                        "status": "passed" if table.columns else "failed",
+                        "sample_rows": len(table.sample_rows),
+                    },
                 }
             )
             self._append_quality_candidates(candidates, table, table_evidence_ids)
@@ -1081,7 +1114,9 @@ class SourceUnderstandingService:
                                 {"from": f"{table.name}.{src}", "to": f"{relationship.to_table}.{dst}"}
                                 for src, dst in zip(relationship.from_columns, relationship.to_columns, strict=False)
                             ],
-                            "cardinality": "many-to-one" if target and target.category == "dimension" else "one-to-many",
+                            "cardinality": "many-to-one"
+                            if target and target.category == "dimension"
+                            else "one-to-many",
                             "fk_evidence": relationship.source,
                             "unique_rate": relationship.validation.get("unique_rate"),
                             "orphan_rate": relationship.validation.get("orphan_rate"),
@@ -1089,7 +1124,9 @@ class SourceUnderstandingService:
                             "validation_sql": validation_sql,
                         },
                         "evidence_ids": [
-                            str(item.id) for item in [evidence.get("table"), *evidence.get("constraints", [])] if item is not None
+                            str(item.id)
+                            for item in [evidence.get("table"), *evidence.get("constraints", [])]
+                            if item is not None
                         ],
                         "confidence": relationship.confidence,
                         "validation_status": validation_status,
@@ -1131,12 +1168,17 @@ class SourceUnderstandingService:
                     "pii_columns": pii_columns,
                     "nullable_primary_key": nullable_pk,
                     "missing_primary_key": missing_pk,
-                    "policy": "mask_pii_and_require_key_review" if pii_columns or missing_pk else "metadata_checks_passed",
+                    "policy": "mask_pii_and_require_key_review"
+                    if pii_columns or missing_pk
+                    else "metadata_checks_passed",
                 },
                 "evidence_ids": table_evidence_ids,
                 "confidence": 0.93 if pii_columns or missing_pk else 0.72,
                 "validation_status": "warning" if pii_columns or nullable_pk or missing_pk else "passed",
-                "validation": {"status": "warning" if pii_columns or nullable_pk or missing_pk else "passed", "risk_count": len(risks)},
+                "validation": {
+                    "status": "warning" if pii_columns or nullable_pk or missing_pk else "passed",
+                    "risk_count": len(risks),
+                },
             }
         )
 
@@ -1171,11 +1213,16 @@ class SourceUnderstandingService:
                         "lineage": [f"{table.name}.{column.name}"],
                     },
                     "evidence_ids": [
-                        str(item.id) for item in [evidence.get("table"), *evidence.get("columns", [])] if item is not None
+                        str(item.id)
+                        for item in [evidence.get("table"), *evidence.get("columns", [])]
+                        if item is not None
                     ],
                     "confidence": 0.78,
                     "validation_status": "warning",
-                    "validation": {"status": "warning", "reason": "Needs reviewer confirmation of business definition."},
+                    "validation": {
+                        "status": "warning",
+                        "reason": "Needs reviewer confirmation of business definition.",
+                    },
                 }
             )
 
@@ -1361,7 +1408,9 @@ class SourceUnderstandingService:
                 }
             )
         for index in table.indexes:
-            index_name = str(index.get("name") or index.get("index_name") or index.get("constraint_name") or "unnamed_index")
+            index_name = str(
+                index.get("name") or index.get("index_name") or index.get("constraint_name") or "unnamed_index"
+            )
             raw_columns = index.get("columns") or index.get("column_names") or index.get("column") or []
             if isinstance(raw_columns, str):
                 raw_columns = [raw_columns]
@@ -1578,9 +1627,7 @@ class SourceUnderstandingService:
         )
         if entity is None:
             count = len(
-                (
-                    await session.execute(select(SemanticModelEntity.id).where(SemanticModelEntity.model_id == model.id))
-                )
+                (await session.execute(select(SemanticModelEntity.id).where(SemanticModelEntity.model_id == model.id)))
                 .scalars()
                 .all()
             )
@@ -1608,7 +1655,9 @@ class SourceUnderstandingService:
         existing_fields = {
             source_field.lower()
             for source_field in (
-                await session.execute(select(SemanticModelField.source_field).where(SemanticModelField.entity_id == entity.id))
+                await session.execute(
+                    select(SemanticModelField.source_field).where(SemanticModelField.entity_id == entity.id)
+                )
             )
             .scalars()
             .all()
@@ -1650,7 +1699,9 @@ class SourceUnderstandingService:
             return
         count = len(
             (
-                await session.execute(select(SemanticModelRelationship.id).where(SemanticModelRelationship.model_id == model.id))
+                await session.execute(
+                    select(SemanticModelRelationship.id).where(SemanticModelRelationship.model_id == model.id)
+                )
             )
             .scalars()
             .all()
@@ -1686,7 +1737,9 @@ class SourceUnderstandingService:
     ) -> None:
         slug = payload.get("metric_slug") or _snake(payload.get("business_name", "metric"))
         existing = await session.scalar(
-            select(SemanticModelMetric).where(SemanticModelMetric.model_id == model.id, SemanticModelMetric.slug == slug)
+            select(SemanticModelMetric).where(
+                SemanticModelMetric.model_id == model.id, SemanticModelMetric.slug == slug
+            )
         )
         if existing:
             existing.lineage_json = _json_dump([*json.loads(existing.lineage_json or "[]"), lineage])
@@ -1722,7 +1775,11 @@ class SourceUnderstandingService:
 
     async def _apply_dimensions_from_entities(self, *, session: AsyncSession, model: SemanticModel) -> None:
         existing = set(
-            (await session.execute(select(SemanticModelDimension.slug).where(SemanticModelDimension.model_id == model.id)))
+            (
+                await session.execute(
+                    select(SemanticModelDimension.slug).where(SemanticModelDimension.model_id == model.id)
+                )
+            )
             .scalars()
             .all()
         )
@@ -1759,30 +1816,26 @@ class SourceUnderstandingService:
 
     async def _apply_metric_dimension_links(self, *, session: AsyncSession, model: SemanticModel) -> None:
         entities = (
-            (
-                await session.execute(select(SemanticModelEntity).where(SemanticModelEntity.model_id == model.id))
-            )
+            (await session.execute(select(SemanticModelEntity).where(SemanticModelEntity.model_id == model.id)))
             .scalars()
             .all()
         )
         dimensions = (
-            (
-                await session.execute(select(SemanticModelDimension).where(SemanticModelDimension.model_id == model.id))
-            )
+            (await session.execute(select(SemanticModelDimension).where(SemanticModelDimension.model_id == model.id)))
             .scalars()
             .all()
         )
         relationships = (
             (
-                await session.execute(select(SemanticModelRelationship).where(SemanticModelRelationship.model_id == model.id))
+                await session.execute(
+                    select(SemanticModelRelationship).where(SemanticModelRelationship.model_id == model.id)
+                )
             )
             .scalars()
             .all()
         )
         metrics = (
-            (
-                await session.execute(select(SemanticModelMetric).where(SemanticModelMetric.model_id == model.id))
-            )
+            (await session.execute(select(SemanticModelMetric).where(SemanticModelMetric.model_id == model.id)))
             .scalars()
             .all()
         )
@@ -1801,11 +1854,7 @@ class SourceUnderstandingService:
                     reachable_entities.add(relationship.to_entity)
                 if relationship.to_entity == base_entity and relationship.validation_status == "valid":
                     reachable_entities.add(relationship.from_entity)
-            allowed = [
-                dimension.slug
-                for dimension in dimensions
-                if dimension.entity_slug in reachable_entities
-            ]
+            allowed = [dimension.slug for dimension in dimensions if dimension.entity_slug in reachable_entities]
             if allowed:
                 metric.dimensions_json = _json_dump(allowed)
 
@@ -1820,7 +1869,9 @@ class SourceUnderstandingService:
             "validation": candidate.validation_json,
         }
 
-    def _summary_payload(self, normalized: NormalizedDatabaseSchema, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    def _summary_payload(
+        self, normalized: NormalizedDatabaseSchema, candidates: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         candidate_counts: dict[str, int] = {}
         for candidate in candidates:
             candidate_counts[candidate["candidate_type"]] = candidate_counts.get(candidate["candidate_type"], 0) + 1
@@ -1921,7 +1972,9 @@ class SourceUnderstandingService:
             "status": resource.status,
         }
 
-    def _candidate_to_payload(self, candidate: SourceSkillCandidate, evidence: list[EvidenceFragment]) -> dict[str, Any]:
+    def _candidate_to_payload(
+        self, candidate: SourceSkillCandidate, evidence: list[EvidenceFragment]
+    ) -> dict[str, Any]:
         return {
             "id": candidate.id,
             "run_id": candidate.run_id,

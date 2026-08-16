@@ -129,6 +129,60 @@ SQLITE_SALES_SCHEMA = {
 }
 
 
+MSSQL_SALES_SCHEMA = {
+    "datasource_type": "mssql",
+    "datasource_name": "SQL Server Sales",
+    "database_name": "sales_dw",
+    "selected_schema": "dbo",
+    "schema": {
+        "orders": {
+            "schema": "dbo",
+            "description": "SQL Server order header at submitted order grain.",
+            "row_count": 1200,
+            "columns": [
+                {"name": "order_id", "type": "BIGINT", "nullable": False},
+                {"name": "customer_id", "type": "BIGINT", "nullable": False},
+                {"name": "order_status", "type": "NVARCHAR(32)", "nullable": False},
+                {"name": "paid_at", "type": "DATETIME2", "nullable": True},
+                {"name": "net_amount", "type": "DECIMAL(18,2)", "nullable": False},
+            ],
+            "primary_key": ["order_id"],
+            "foreign_keys": [
+                {
+                    "constraint_name": "FK_orders_customers",
+                    "column": ["customer_id"],
+                    "ref_table": "customers",
+                    "ref_column": ["customer_id"],
+                    "orphan_rate": 0,
+                    "unique_rate": 100,
+                }
+            ],
+            "sample_rows": [
+                {
+                    "order_id": 1001,
+                    "customer_id": 501,
+                    "order_status": "PAID",
+                    "paid_at": "2026-08-01T10:30:00",
+                    "net_amount": 120.5,
+                }
+            ],
+        },
+        "customers": {
+            "schema": "dbo",
+            "description": "SQL Server customer dimension.",
+            "row_count": 500,
+            "columns": [
+                {"name": "customer_id", "type": "BIGINT", "nullable": False},
+                {"name": "customer_tier", "type": "NVARCHAR(24)", "nullable": True},
+                {"name": "email", "type": "NVARCHAR(255)", "nullable": True},
+            ],
+            "primary_key": ["customer_id"],
+            "sample_rows": [{"customer_id": 501, "customer_tier": "Gold", "email": "masked@example.com"}],
+        },
+    },
+}
+
+
 async def _create_connection_dataset(
     test_session,
     tenant_id,
@@ -211,7 +265,9 @@ async def test_database_source_understanding_generates_profile_relationship_evid
         for item in understanding["candidates"]
         if item["candidate_type"] == "data_profile" and item["structured_payload_json"]["table"] == "ORDERS"
     )
-    net_amount = next(field for field in profile["structured_payload_json"]["columns"] if field["source_field"] == "NET_AMOUNT")
+    net_amount = next(
+        field for field in profile["structured_payload_json"]["columns"] if field["source_field"] == "NET_AMOUNT"
+    )
     assert net_amount["profile"]["sample_size"] == 1
     assert net_amount["profile"]["distinct_count"] == 1
     assert net_amount["profile"]["min"] == 120.5
@@ -228,9 +284,7 @@ async def test_database_source_understanding_generates_profile_relationship_evid
     )
 
     assert review_response.status_code == 200
-    reviewed_metric = next(
-        item for item in review_response.json()["data"]["candidates"] if item["id"] == metric["id"]
-    )
+    reviewed_metric = next(item for item in review_response.json()["data"]["candidates"] if item["id"] == metric["id"])
     assert reviewed_metric["review_status"] == "verified"
     assert reviewed_metric["structured_payload_json"]["business_name"] == "Paid Revenue"
     assert reviewed_metric["review_note"] == "Reviewed with finance owner."
@@ -254,11 +308,9 @@ async def test_verified_source_candidates_create_semantic_model_draft_with_linea
     analyze_response = await test_client.post(f"/api/datasources/{dataset.id}/understanding/analyze", json={})
     assert analyze_response.status_code == 200
     candidates = analyze_response.json()["data"]["candidates"]
-    selected = [
-        item
-        for item in candidates
-        if item["candidate_type"] in {"schema_map", "relationship", "data_truth"}
-    ][:4]
+    selected = [item for item in candidates if item["candidate_type"] in {"schema_map", "relationship", "data_truth"}][
+        :4
+    ]
     assert selected
 
     for candidate in selected:
@@ -321,11 +373,7 @@ async def test_sqlite_source_understanding_creates_semantic_model_draft(test_cli
     assert understanding["profile"]["relationship_count"] == 1
 
     candidates = understanding["candidates"]
-    selected = [
-        item
-        for item in candidates
-        if item["candidate_type"] in {"schema_map", "relationship", "data_truth"}
-    ]
+    selected = [item for item in candidates if item["candidate_type"] in {"schema_map", "relationship", "data_truth"}]
     assert {item["candidate_type"] for item in selected} >= {"schema_map", "relationship", "data_truth"}
 
     for candidate in selected:
@@ -356,6 +404,77 @@ async def test_sqlite_source_understanding_creates_semantic_model_draft(test_cli
     assert any(relationship["fromEntity"] == "orders" for relationship in model["relationships"])
 
 
+async def test_mssql_source_understanding_creates_snapshots_evidence_and_semantic_model_draft(
+    test_client, test_session
+):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+    _, dataset = await _create_connection_dataset(
+        test_session,
+        tenant.id,
+        tenant.owner_id,
+        schema=MSSQL_SALES_SCHEMA,
+        connection_type="mssql",
+        name="SQL Server Sales",
+        connection_obj={"host": "mssql.local", "database": "sales_dw", "schema": "dbo"},
+    )
+
+    analyze_response = await test_client.post(f"/api/datasources/{dataset.id}/understanding/analyze", json={})
+
+    assert analyze_response.status_code == 200
+    understanding = analyze_response.json()["data"]
+    assert understanding["datasource_type"] == "mssql"
+    assert understanding["latest_run"]["status"] == "completed"
+    assert understanding["profile"]["table_count"] == 2
+    assert understanding["profile"]["relationship_count"] == 1
+
+    resources = (await test_session.execute(select(SourceResource))).scalars().all()
+    snapshots = (await test_session.execute(select(SourceSnapshot))).scalars().all()
+    evidence = (await test_session.execute(select(EvidenceFragment))).scalars().all()
+    assert {resource.resource_type for resource in resources} >= {
+        "database_catalog",
+        "database_schema",
+        "database_table",
+    }
+    assert len(snapshots) == 4
+    assert any(
+        snapshot.raw_storage_uri and f"/database:{dataset.connection_id}:" in snapshot.raw_storage_uri
+        for snapshot in snapshots
+    )
+    assert len(evidence) >= 8
+
+    candidates = understanding["candidates"]
+    selected = [item for item in candidates if item["candidate_type"] in {"schema_map", "relationship", "data_truth"}]
+    assert {item["candidate_type"] for item in selected} >= {"schema_map", "relationship", "data_truth"}
+
+    for candidate in selected:
+        review_response = await test_client.post(
+            f"/api/datasources/{dataset.id}/understanding/candidates/{candidate['id']}/review",
+            json={"action": "accept"},
+        )
+        assert review_response.status_code == 200
+
+    apply_response = await test_client.post(
+        f"/api/datasources/{dataset.id}/understanding/semantic-model-draft",
+        json={
+            "model_id": "mssql-sales-source-draft",
+            "name": "MSSQL Sales Source Draft",
+            "domain": "Sales / Orders",
+            "owner": "Revenue Analytics",
+            "candidate_ids": [item["id"] for item in selected],
+        },
+    )
+
+    assert apply_response.status_code == 200
+    payload = apply_response.json()["data"]
+    model = payload["model"]
+    assert model["datasourceKind"] == "mssql"
+    assert model["datasourceId"] == str(dataset.id)
+    assert any(entity["table"] == "orders" for entity in model["entities"])
+    assert any(metric["id"] == "orders_net_amount" for metric in model["metrics"])
+    assert any(relationship["fromEntity"] == "orders" for relationship in model["relationships"])
+
+
 async def test_source_understanding_detects_drift_and_marks_previous_verified_candidates_stale(
     test_client,
     test_session,
@@ -366,7 +485,9 @@ async def test_source_understanding_detects_drift_and_marks_previous_verified_ca
 
     first = await test_client.post(f"/api/datasources/{dataset.id}/understanding/analyze", json={})
     assert first.status_code == 200
-    schema_candidate = next(item for item in first.json()["data"]["candidates"] if item["candidate_type"] == "schema_map")
+    schema_candidate = next(
+        item for item in first.json()["data"]["candidates"] if item["candidate_type"] == "schema_map"
+    )
     accepted = await test_client.post(
         f"/api/datasources/{dataset.id}/understanding/candidates/{schema_candidate['id']}/review",
         json={"action": "accept"},
