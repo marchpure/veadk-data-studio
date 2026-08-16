@@ -188,7 +188,7 @@ Evidence:
 
 ## 2026-08-16 15:31 CST - Phase 0 Share And MCP Error Redaction
 
-Commit: pending at time of entry.
+Commit: `b4310756f9682eca81ca10e8da417ef120f71c0a`.
 
 Scope:
 
@@ -203,3 +203,22 @@ Evidence:
 - `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest server/tests/test_error_sanitizer.py server/tests/test_share_secret_redaction.py server/tests/test_share_object_authorization.py server/tests/test_dashboard_execution_service.py server/tests/test_dashboard_rest_api.py server/tests/test_dashboard_mcp_contract.py server/tests/test_dashboard_security_regressions.py -q` -> `43 passed, 80 warnings`.
 - `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check server/utils/error_sanitizer.py server/utils/custom_logger.py server/routers/exports.py server/mcp/tool_wrappers.py server/tests/test_error_sanitizer.py server/tests/test_share_secret_redaction.py server/tests/test_dashboard_mcp_contract.py` -> passed with existing removed-rule warning.
 - `git diff --check` -> passed.
+
+## 2026-08-16 15:41 CST - Dashboard Full Validation Refresh
+
+Scope:
+
+- Re-ran the dashboard validation matrix from the integration worktree without mutating or restarting the existing `127.0.0.1:8080` runtime.
+- Used a fresh isolated SQLite database and app server at `127.0.0.1:18080`.
+- Validated both Vite dev frontend at `127.0.0.1:15173` and production preview frontend at `127.0.0.1:15174`.
+- Browser smoke seeded structured, policy-guarded, and legacy dashboard fixtures, then covered direct `/notebook/{id}/preview`, governed dashboard data, lineage, policy denial, legacy fallback, and mobile rendering.
+
+Evidence:
+
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_dashboard_contract_schemas.py tests/test_dashboard_execution_service.py tests/test_dashboard_legacy_tool_gating.py tests/test_dashboard_lifecycle_service.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_persistence_migration.py tests/test_dashboard_rest_api.py tests/test_dashboard_security_regressions.py tests/test_filter_bootstrap.py tests/test_filter_pipeline.py tests/test_filter_tools_config_merge.py tests/test_share_object_authorization.py tests/test_share_secret_redaction.py tests/test_migration_chain_hardening.py -q` -> `106 passed, 87 warnings`.
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check server/services/dashboard.py server/routers/dashboard.py server/mcp/tool_wrappers.py server/tests/test_dashboard_execution_service.py server/tests/test_dashboard_rest_api.py server/tests/test_dashboard_mcp_contract.py server/tests/test_dashboard_security_regressions.py server/tests/test_filter_pipeline.py` -> passed.
+- `cd client && pnpm lint` -> passed with existing `0 errors, 357 warnings`.
+- `cd client && pnpm build:check` -> passed with existing CSS/chunk warnings.
+- `BASE_URL=http://127.0.0.1:15173 API_URL=http://127.0.0.1:18080 SCREEN_DIR=/tmp/byaan-dashboard-full-verify-NNsQJt/screens pnpm smoke:dashboard` -> `ok: true`, `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`.
+- `BASE_URL=http://127.0.0.1:15174 API_URL=http://127.0.0.1:18080 SCREEN_DIR=/tmp/byaan-dashboard-full-verify-NNsQJt/screens-preview pnpm smoke:dashboard` -> `ok: true`, `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`.
+- Screenshots retained under `/tmp/byaan-dashboard-full-verify-NNsQJt/screens` and `/tmp/byaan-dashboard-full-verify-NNsQJt/screens-preview`.
