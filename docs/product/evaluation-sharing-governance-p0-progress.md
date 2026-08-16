@@ -27,7 +27,8 @@ Preflight evidence:
 
 Pending immediate checks:
 
-- Initial integration worktree `server && uv run alembic heads` is still waiting on first-time `uv` dependency setup and must be recorded before the Dashboard merge gate is claimed.
+- Initial integration base Alembic head: `add_file_source_resource_type`.
+- Direct `uv run alembic heads` in the new worktree stalled during first-time dependency setup, before running Alembic. It was interrupted because it was this session's own command, then re-run with `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m alembic heads` against the integration worktree code.
 - Dashboard merge has not started.
 
 Current status: `INTEGRATION_WORKTREE_INITIALIZED`.
