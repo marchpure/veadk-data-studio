@@ -24,11 +24,11 @@ whole-product READY claim is made here.
 | Field | Evidence |
 |---|---|
 | BASE_SHA | `e9358ea56554cc0ecdf93b723359eee711cb13b1` |
-| Verification HEAD | `d78c6aa866410764bf844f0caf9d2a38fbfef702` |
+| Verification HEAD | `03eb6fdcbea41d9a566592049f0f30c5183ae30d` |
 | Verification branch | `verification/data-studio-commercial-p0` |
-| Exact remote branch | `veadk-data-studio/verification/data-studio-commercial-p0` -> `d78c6aa866410764bf844f0caf9d2a38fbfef702` |
+| Exact remote branch | `veadk-data-studio/verification/data-studio-commercial-p0` -> `03eb6fdcbea41d9a566592049f0f30c5183ae30d` |
 | Stale wrong-baseline backup | Old remote tip `9c2a2d9cfb1280569df927ded583bfec7c7a591c` preserved as `veadk-data-studio/backup/verification-data-studio-commercial-p0-86fbace-remote`. |
-| Auxiliary safe branch | `veadk-data-studio/verification/data-studio-commercial-p0-e9358ea` also points to `d78c6aa866410764bf844f0caf9d2a38fbfef702`. |
+| Auxiliary safe branch | `veadk-data-studio/verification/data-studio-commercial-p0-e9358ea` also points to `03eb6fdcbea41d9a566592049f0f30c5183ae30d`. |
 | Worktree | `/Users/bytedance/worktrees/byaan-commercial-verification-p0` |
 | Backend port | `18123` |
 | Frontend port | `15179` |
