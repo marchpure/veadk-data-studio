@@ -715,8 +715,14 @@ async function runEditReviewScene(page, fixtures, viewport) {
   await page.getByText('Filter removed').waitFor()
   await page.getByRole('button', { name: 'Validate' }).click()
   await page.getByText(/1 blockers/i).waitFor()
+  const previewResponse = page.waitForResponse(response => (
+    response.request().method() === 'POST'
+    && response.url().includes(`/api/dashboard-assets/${fixtures.editAssetId}/preview`)
+    && response.status() === 200
+  ))
   await page.getByRole('button', { name: 'Preview' }).click()
-  await page.getByText('Preview executed against draft version').waitFor()
+  await previewResponse
+  await page.getByText('Preview run').waitFor()
   await page.getByText(/Review diff/i).waitFor()
   await capture(page, 'edit-review', viewport)
 }
