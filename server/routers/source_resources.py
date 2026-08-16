@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.auth.dependencies import AuthContext, require_any_scope, require_scope
 from server.auth.scopes import Scope
 from server.db.session import get_async_session
 from server.schemas.source_resources import (
-    EvidenceReadResponse,
     KnowledgeSearchRequest,
     KnowledgeSearchResponse,
     NotebookAssetCreate,
@@ -46,30 +45,6 @@ async def create_source_resource(
     return success_response(data=data, message="Source resource created")
 
 
-@router.post("/source-resources/pdf", response_model=StandardResponse[SourceResourceRead], status_code=status.HTTP_201_CREATED)
-async def create_pdf_source_resource(
-    file: UploadFile = File(...),
-    name: str | None = Form(None),
-    visibility: str = Form("workspace"),
-    auth: AuthContext = Depends(require_scope(Scope.DATASET_CREATE)),
-    session: AsyncSession = Depends(get_async_session),
-):
-    try:
-        data = await file.read()
-        payload = await source_resource_service.create_pdf_resource_from_upload(
-            session=session,
-            tenant_id=auth.tenant_id,
-            user_id=auth.user_id,
-            name=name or file.filename or "PDF document",
-            filename=file.filename or "document.pdf",
-            data=data,
-            visibility=visibility,
-        )
-        return success_response(data=payload, message="PDF source resource created")
-    except ValueError as error:
-        raise _bad_request_or_not_found(error)
-
-
 @router.post("/source-resources/import", response_model=StandardResponse[dict], status_code=status.HTTP_201_CREATED)
 async def import_source_resources(
     payload: SourceResourceImportRequest,
@@ -95,23 +70,6 @@ async def list_source_resources(
 ):
     items = await source_resource_service.list_resources(session=session, tenant_id=auth.tenant_id)
     return success_response(data={"items": items, "total": len(items)}, message="Retrieved source resources")
-
-
-@router.get("/source-resources/{resource_id}/snapshots", response_model=StandardResponse[dict])
-async def list_source_resource_snapshots(
-    resource_id: str,
-    auth: AuthContext = Depends(require_scope(Scope.DATASET_READ)),
-    session: AsyncSession = Depends(get_async_session),
-):
-    try:
-        data = await source_resource_service.list_snapshots(
-            session=session,
-            tenant_id=auth.tenant_id,
-            resource_id=resource_id,
-        )
-        return success_response(data=data, message="Retrieved source resource snapshots")
-    except ValueError as error:
-        raise _bad_request_or_not_found(error)
 
 
 @router.get("/source-resources/{resource_id}", response_model=StandardResponse[SourceResourceRead])
@@ -225,22 +183,6 @@ async def search_knowledge(
         "total": len(items),
     }
     return success_response(data=data, message="Knowledge search completed")
-
-
-@router.get("/evidence/{evidence_id}", response_model=StandardResponse[EvidenceReadResponse])
-async def read_evidence(
-    evidence_id: str,
-    auth: AuthContext = Depends(require_scope(Scope.DATASET_READ)),
-    session: AsyncSession = Depends(get_async_session),
-):
-    data = await source_resource_service.read_evidence(
-        session=session,
-        tenant_id=auth.tenant_id,
-        evidence_id=evidence_id,
-    )
-    if data is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence fragment not found")
-    return success_response(data=data, message="Retrieved evidence fragment")
 
 
 @router.post("/notebooks/{notebook_id}/assets", response_model=StandardResponse[NotebookAssetRead])

@@ -124,6 +124,11 @@ def normalize_feishu_message_event(raw_event: Any, installation_id: UUID, bot_ex
             "chat_id": chat_id,
             "root_id": root_id,
             "chat_type": raw_chat_type,
+            "sender_id": {
+                key: sender_id[key]
+                for key in ("open_id", "user_id", "union_id")
+                if sender_id.get(key)
+            },
         },
     )
 

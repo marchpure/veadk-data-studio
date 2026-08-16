@@ -10,7 +10,6 @@ from server.auth.scopes import Scope
 from server.db.session import get_async_session
 from server.schemas.analysis_artifacts import (
     AnalysisArtifactCreate,
-    AnalysisArtifactLatestSnapshotResponse,
     AnalysisArtifactListResponse,
     AnalysisArtifactRead,
     AnalysisArtifactRenderResponse,
@@ -139,24 +138,6 @@ async def render_analysis_artifact(
         data={"artifact_id": artifact.id, "format": format, "content": content},
         message="Rendered analysis artifact",
     )
-
-
-@router.get(
-    "/analysis-artifacts/{artifact_id}/snapshots/latest-successful",
-    response_model=StandardResponse[AnalysisArtifactLatestSnapshotResponse],
-)
-async def get_latest_successful_analysis_artifact_snapshot(
-    artifact_id: UUID,
-    auth: AuthContext = Depends(require_scope(Scope.NOTEBOOK_READ_OWN)),
-    session: AsyncSession = Depends(get_async_session),
-):
-    artifact = await artifact_service.get_artifact(session=session, tenant_id=auth.tenant_id, artifact_id=artifact_id)
-    if artifact is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis artifact not found")
-    snapshot = artifact_service.latest_successful_snapshot(artifact)
-    if snapshot is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No successful result snapshot found")
-    return success_response(data=snapshot, message="Retrieved latest successful analysis artifact snapshot")
 
 
 @router.post("/analysis-artifacts/{artifact_id}/publish", response_model=StandardResponse[AnalysisArtifactRead])

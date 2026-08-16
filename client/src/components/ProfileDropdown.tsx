@@ -132,7 +132,7 @@ export function ProfileDropdown({ isExpanded, onExpandSidebar }: ProfileDropdown
   }
 
   const handleCollaborationClick = () => {
-    navigate('/integrations')
+    setFeishuModalOpen(true)
     setIsOpen(false)
   }
 

@@ -73,14 +73,6 @@ export const createAuthSlice: StateCreator<
       }
     }
 
-    // Browser builds store refresh state in httpOnly cookies. If there is no
-    // session hint at all, skip the expected unauthenticated refresh request so
-    // the login page does not emit a noisy 401 console error on first load.
-    if (!isTauriApp() && !document.cookie.includes('csrf_token=') && !getRefreshToken()) {
-      set({ isAuthenticated: false, isLoading: false })
-      return
-    }
-
     set({ isLoading: true })
     try {
       const refreshed = await get().refreshAccessToken()
@@ -106,7 +98,7 @@ export const createAuthSlice: StateCreator<
       const { access_token, refresh_token } = response
       setAccessToken(access_token)
       set({ token: access_token, isAuthenticated: true })
-      if (refresh_token) {
+      if (isTauriApp()) {
         setRefreshToken(refresh_token)
       }
 
@@ -140,7 +132,7 @@ export const createAuthSlice: StateCreator<
       const { access_token, refresh_token } = response
       setAccessToken(access_token)
       set({ token: access_token, isAuthenticated: true })
-      if (refresh_token) {
+      if (isTauriApp()) {
         setRefreshToken(refresh_token)
       }
 
@@ -274,12 +266,12 @@ export const createAuthSlice: StateCreator<
 
   refreshAccessToken: async () => {
     try {
-      const refreshToken = getRefreshToken()
+      const refreshToken = isTauriApp() ? getRefreshToken() : undefined
       const response = await ApiService.authRefreshToken(refreshToken || undefined)
       const { access_token, refresh_token } = response
       setAccessToken(access_token)
       set({ token: access_token })
-      if (refresh_token) {
+      if (isTauriApp() && refresh_token) {
         setRefreshToken(refresh_token)
       }
       return true

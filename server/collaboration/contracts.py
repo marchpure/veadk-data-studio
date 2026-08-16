@@ -63,7 +63,9 @@ class ChannelEvent:
 
     @property
     def conversation_root_id(self) -> str | None:
-        return self.root_message_id or self.parent_message_id
+        if self.chat_type == ChannelChatType.P2P:
+            return self.root_message_id or self.parent_message_id
+        return self.root_message_id or self.parent_message_id or self.message_id
 
 
 @dataclass(slots=True)

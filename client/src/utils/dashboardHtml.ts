@@ -21,23 +21,6 @@ const normalizeBackendUrl = (url?: string): string => {
   }
 }
 
-const normalizeViewerApiBase = (apiBase?: string): string => {
-  const normalizedBackend = normalizeBackendUrl()
-  const fallback = `${normalizedBackend.replace(/\/$/, '')}/api/viewer`
-  if (!apiBase) {
-    return fallback
-  }
-
-  const trimmed = apiBase.replace(/\/$/, '')
-  if (/^https?:\/\//i.test(trimmed)) {
-    return trimmed
-  }
-  if (trimmed.startsWith('/')) {
-    return `${normalizedBackend.replace(/\/$/, '')}${trimmed}`
-  }
-  return trimmed
-}
-
 export const getBackendUrlForHtmlProcessing = async (): Promise<string | undefined> => {
   if (isTauriApp()) {
     return getBackendUrl()
@@ -108,7 +91,7 @@ const serializeForScript = (value: unknown): string => JSON.stringify(value).rep
 export const injectViewerConfig = (
   htmlContent: string,
   dashboardId?: string,
-  apiBase: string = normalizeViewerApiBase(),
+  apiBase: string = '/api/viewer',
   fetchCredentials: 'omit' | 'same-origin' | 'include' = 'same-origin',
   tenantId?: string | null,
   initialFilterValues?: Record<string, unknown> | null,
@@ -117,7 +100,7 @@ export const injectViewerConfig = (
   if (!htmlContent) return htmlContent
 
   const safeDashboardId = dashboardId ? escapeForScript(dashboardId) : ''
-  const safeApiBase = escapeForScript(normalizeViewerApiBase(apiBase))
+  const safeApiBase = escapeForScript(apiBase)
   const safeCredentials = escapeForScript(fetchCredentials)
   const safeTenantId = tenantId ? escapeForScript(tenantId) : ''
   const serializedInitialFilterValues = serializeForScript(initialFilterValues || {})
@@ -272,9 +255,6 @@ export const injectViewerConfig = (
         if (!response || typeof response.clone !== 'function' || typeof Response === 'undefined') {
           return Promise.resolve(response);
         }
-        if (response.ok === false) {
-          return Promise.resolve(createViewerBatchErrorResponse(response, 'Dashboard data request failed'));
-        }
         try {
           return response.clone().json().then(function(payload) {
             if (!payload || typeof payload !== 'object') {
@@ -299,75 +279,12 @@ export const injectViewerConfig = (
               statusText: response.statusText,
               headers: headers,
             });
-          }).catch(function(error) {
-            return createViewerBatchErrorResponse(response, 'Dashboard data response was not JSON', error);
+          }).catch(function() {
+            return response;
           });
         } catch (e) {
-          return Promise.resolve(createViewerBatchErrorResponse(response, 'Dashboard data response could not be read', e));
+          return Promise.resolve(response);
         }
-      }
-
-      function createViewerBatchErrorResponse(response, message, error) {
-        if (typeof Response === 'undefined') {
-          return response;
-        }
-
-        var status = response && typeof response.status === 'number' ? response.status : 0;
-        var payload = {
-          success: false,
-          message: message || 'Dashboard data request failed',
-          data: [],
-          partial_success: false,
-          total_queries: 0,
-          successful_queries: 0,
-          failed_queries: 0,
-          total_execution_time_ms: 0,
-          _viewer_fetch_error: true,
-          _viewer_status: status,
-          _viewer_error: error && error.message ? String(error.message) : null
-        };
-
-        var headers = typeof Headers !== 'undefined'
-          ? new Headers({ 'content-type': 'application/json' })
-          : { 'content-type': 'application/json' };
-
-        return new Response(JSON.stringify(payload), {
-          status: 200,
-          statusText: 'OK',
-          headers: headers,
-        });
-      }
-
-      function waitForViewerRetry(delayMs) {
-        return new Promise(function(resolve) {
-          setTimeout(resolve, delayMs);
-        });
-      }
-
-      function shouldRetryViewerBatchResponse(response) {
-        if (!response) return true;
-        var status = typeof response.status === 'number' ? response.status : 0;
-        return status === 0 || status === 400 || status === 408 || status === 409 || status === 429 || status >= 500;
-      }
-
-      function fetchViewerBatchWithRetry(fetchThis, fetchInput, fetchInit, attempt) {
-        var currentAttempt = attempt || 0;
-        var retryDelays = [350, 1000, 2500];
-        return originalFetch.call(fetchThis, fetchInput, fetchInit).then(function(response) {
-          if (shouldRetryViewerBatchResponse(response) && currentAttempt < retryDelays.length) {
-            return waitForViewerRetry(retryDelays[currentAttempt]).then(function() {
-              return fetchViewerBatchWithRetry(fetchThis, fetchInput, fetchInit, currentAttempt + 1);
-            });
-          }
-          return normalizeBatchResponse(response);
-        }).catch(function(error) {
-          if (currentAttempt < retryDelays.length) {
-            return waitForViewerRetry(retryDelays[currentAttempt]).then(function() {
-              return fetchViewerBatchWithRetry(fetchThis, fetchInput, fetchInit, currentAttempt + 1);
-            });
-          }
-          return createViewerBatchErrorResponse(null, 'Dashboard data request failed', error);
-        });
       }
 
       var originalFetch = window.fetch;
@@ -375,35 +292,9 @@ export const injectViewerConfig = (
         window.fetch = function(input, init) {
           var isViewerBatchRequest = false;
           try {
-            var urlStr = input && typeof input === 'object' && input.url ? String(input.url) : String(input);
-            var apiBase = String(window.__VIEWER_API_BASE__ || '/api/viewer').replace(/\\/$/, '');
+            var urlStr = String(input);
+            var apiBase = window.__VIEWER_API_BASE__ || '/api/viewer';
             var dashboardId = window.__VIEWER_DASHBOARD_ID__;
-            var relativeViewerApiBase = '/api/viewer';
-
-            function getViewerOrigin() {
-              try {
-                if (window.location && window.location.origin && window.location.origin !== 'null') {
-                  return window.location.origin;
-                }
-              } catch (e) {}
-              try {
-                if (window.parent && window.parent.location && window.parent.location.origin && window.parent.location.origin !== 'null') {
-                  return window.parent.location.origin;
-                }
-              } catch (e) {}
-              return '';
-            }
-
-            function toAbsoluteViewerUrl(value) {
-              var text = String(value || '');
-              if (text.indexOf(relativeViewerApiBase) === 0) {
-                var origin = getViewerOrigin();
-                return origin ? origin + text : text;
-              }
-              return text;
-            }
-
-            apiBase = toAbsoluteViewerUrl(apiBase).replace(/\\/$/, '');
 
             // Redirect /api/queries/batch to viewer batch endpoint
             if (dashboardId && (urlStr === '/api/queries/batch' || urlStr.endsWith('/api/queries/batch'))) {
@@ -411,12 +302,8 @@ export const injectViewerConfig = (
               urlStr = input;
             }
 
-            var isViewerRequest = urlStr.startsWith(apiBase) || urlStr.startsWith(relativeViewerApiBase);
+            var isViewerRequest = urlStr.startsWith(apiBase) || urlStr.startsWith('/api/viewer');
             if (isViewerRequest) {
-              if (urlStr.startsWith(relativeViewerApiBase)) {
-                input = toAbsoluteViewerUrl(urlStr);
-                urlStr = String(input);
-              }
               isViewerBatchRequest = urlStr.indexOf('/queries/batch') !== -1;
               init = init || {};
               if (!init.credentials) {
@@ -442,10 +329,13 @@ export const injectViewerConfig = (
               }
             }
           } catch (e) {}
+          var requestPromise = originalFetch.call(this, input, init);
           if (isViewerBatchRequest) {
-            return fetchViewerBatchWithRetry(this, input, init, 0);
+            return requestPromise.then(function(response) {
+              return normalizeBatchResponse(response);
+            });
           }
-          return originalFetch.call(this, input, init);
+          return requestPromise;
         };
       }
 

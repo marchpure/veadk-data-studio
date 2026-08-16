@@ -1,6 +1,7 @@
 from uuid import UUID
 
 import pytest
+from cryptography.exceptions import InvalidTag
 from sqlalchemy import func, select
 
 from server.auth.dependencies import _get_auth_context_local
@@ -245,7 +246,7 @@ async def test_app_encryption_key_is_bound_to_current_tenant(test_session) -> No
     clear_encryption_key_cache()
     set_tenant_id(other_tenant.id)
 
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         await CryptoService.decrypt_config(encrypted, test_session)
 
     clear_encryption_key_cache()

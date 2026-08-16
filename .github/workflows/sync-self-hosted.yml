@@ -1,0 +1,93 @@
+name: Sync Self-Hosted Files
+
+on:
+  release:
+    types: [published]
+  push:
+    paths:
+      - 'docs/self-hosted/**'
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-self-hosted-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync-to-r2:
+    name: Sync to R2
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      REF_TYPE: ${{ github.ref_type }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate trusted sync source
+        run: |
+          if [ "$GITHUB_ACTOR" != "hadijaveed" ]; then
+            echo "Only hadijaveed may publish self-hosted files to R2."
+            echo "Current actor: $GITHUB_ACTOR"
+            exit 1
+          fi
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] \
+            && [ "$GITHUB_REF" != "refs/heads/main" ] \
+            && [ "$GITHUB_REF" != "refs/heads/develop" ]; then
+            echo "Self-hosted sync must be dispatched from main or develop."
+            echo "Current ref: $GITHUB_REF"
+            exit 1
+          fi
+
+          if [ "$EVENT_NAME" = "release" ] && [ "$REF_TYPE" = "tag" ] \
+            && ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release tag must point to a commit contained in origin/main before production credentials are loaded."
+            echo "Current SHA: $GITHUB_SHA"
+            exit 1
+          fi
+
+          echo "Trusted sync source verified."
+
+      - name: Fetch secrets from Infisical
+        uses: Infisical/secrets-action@8a06c1bdcd5b8635d510c52d4b57a92c1ccef785 # v1.0.9
+        with:
+          method: "universal"
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: "https://app.infisical.com"
+          env-slug: "prod"
+          project-slug: "byaan-app-secrets-i-ffg"
+
+      - name: Sync self-hosted folder to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ env.R2_ENDPOINT }}
+          R2_BUCKET: ${{ env.R2_BUCKET_NAME }}
+        run: |
+          echo "Files to sync:"
+          ls -la docs/self-hosted/
+          echo ""
+
+          echo "Syncing docs/self-hosted/ to R2..."
+          aws s3 sync docs/self-hosted/ "s3://${R2_BUCKET}/docker/" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read
+
+          echo ""
+          echo "Uploaded files:"
+          aws s3 ls "s3://${R2_BUCKET}/docker/" --endpoint-url "$AWS_ENDPOINT_URL"
+
+          echo ""
+          echo "=== Install Command ==="
+          echo "curl -fsSL https://downloads.byaan.ai/docker/install.sh | bash"

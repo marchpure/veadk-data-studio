@@ -30,9 +30,7 @@ def get_persistent_data_path() -> Path:
         return Path.home() / ".local" / "share" / app_name
 
 
-if os.getenv("DATA_DIR"):
-    DEFAULT_DATA_DIR = Path(os.path.expandvars(os.path.expanduser(os.environ["DATA_DIR"]))).resolve()
-elif getattr(sys, "frozen", False) and platform.system() in ["Darwin", "Windows", "Linux"]:
+if getattr(sys, "frozen", False) and platform.system() in ["Darwin", "Windows", "Linux"]:
     DEFAULT_DATA_DIR = get_persistent_data_path()
 else:
     DEFAULT_DATA_DIR = BASE_DIR / ".data"
@@ -41,7 +39,6 @@ else:
 DEFAULT_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_DATASETS_DIR = DEFAULT_DATA_DIR / "datasets"
-DEFAULT_SOURCE_RESOURCES_DIR = DEFAULT_DATA_DIR / "source_resources"
 
 
 def _resolve_path(value: str | None, fallback: Path) -> Path:
@@ -88,19 +85,4 @@ def dataset_directory(dataset_id: str) -> Path:
     base = datasets_root() / str(dataset_id)
     (base / "raw").mkdir(parents=True, exist_ok=True)
     (base / "duckdb").mkdir(parents=True, exist_ok=True)
-    return base
-
-
-@lru_cache(maxsize=1)
-def source_resources_root() -> Path:
-    """Return the root directory for immutable source-resource snapshots."""
-    path = _resolve_path(os.getenv("SOURCE_RESOURCES_STORAGE_DIR"), DEFAULT_SOURCE_RESOURCES_DIR)
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def source_resource_directory(resource_id: str) -> Path:
-    """Return the directory dedicated to a source resource."""
-    base = source_resources_root() / str(resource_id)
-    (base / "raw").mkdir(parents=True, exist_ok=True)
     return base

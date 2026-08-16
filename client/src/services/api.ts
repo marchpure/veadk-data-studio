@@ -164,30 +164,6 @@ function extractErrorMessage(errorData: any): string {
   return 'An unknown error occurred'
 }
 
-function extractErrorCode(errorData: any): string | undefined {
-  if (!errorData || typeof errorData !== 'object') return undefined
-  if (typeof errorData.code === 'string') return errorData.code
-  if (errorData.data && typeof errorData.data === 'object' && typeof errorData.data.code === 'string') {
-    return errorData.data.code
-  }
-  if (errorData.detail && typeof errorData.detail === 'object' && typeof errorData.detail.code === 'string') {
-    return errorData.detail.code
-  }
-  return undefined
-}
-
-export class ApiRequestError extends Error {
-  code?: string
-  status: number
-
-  constructor(message: string, status: number, code?: string) {
-    super(message)
-    this.name = 'ApiRequestError'
-    this.status = status
-    this.code = code
-  }
-}
-
 function normalizeDashboardFilterConfig(responseData: any): DashboardFilterConfigResponse {
   const extracted = extractData<any>(responseData)
   const rawFilters = Array.isArray(extracted?.filters) ? extracted.filters : []
@@ -654,44 +630,116 @@ export interface CollaborationInstallation {
   external_tenant_id: string
   external_tenant_name: string | null
   app_id: string | null
-  connection_mode: 'websocket' | 'webhook' | string
+  connection_mode: 'websocket' | string
   default_llm_connection_id: string | null
   bot_external_id: string | null
   is_active: boolean
   health_status: string
+  admin_state?: string
   health_error: string | null
+  callback?: {
+    url_verification?: string
+    event_ingress?: string
+    verification_token_configured?: boolean
+    encrypt_key_configured?: boolean
+    last_url_verification_at?: string | null
+  }
+  event_subscription?: {
+    mode?: string
+    required_event_types?: string[]
+    remote_status?: string
+    first_event_observed_at?: string | null
+    last_event_observed_at?: string | null
+    last_event_id?: string | null
+    ready?: boolean
+    operator_action?: string | null
+  }
+  required_scopes?: string[]
+  data_use?: string | null
+  tenant_token_expires_at?: string | null
   last_connected_at: string | null
   last_event_at: string | null
+  reconnect_count?: number
   created_at: string | null
   updated_at: string | null
+}
+
+export interface CollaborationInstallationHealth {
+  id: string
+  platform: 'feishu' | 'slack' | string
+  connection_mode: 'websocket' | string
+  is_active: boolean
+  health_status: string
+  admin_state?: string
+  health_error: string | null
+  tenant_token_expires_at?: string | null
+  callback?: CollaborationInstallation['callback']
+  event_subscription?: CollaborationInstallation['event_subscription']
+  last_connected_at: string | null
+  last_event_at: string | null
+  reconnect_count: number
+  owner_id: string | null
+  lease_expires_at: string | null
+}
+
+export interface FeishuChat {
+  chat_id: string
+  name: string
+  chat_type?: string | null
+  avatar?: string | null
 }
 
 export interface FeishuDeliveryTarget {
   id: string
   target_type: string
   chat_id: string
-  root_id?: string | null
-  display_name?: string | null
+  root_id: string | null
+  display_name: string | null
   is_verified: boolean
-  confirm_non_production: boolean
-  chat_type?: string | null
+  is_enabled: boolean
+  created_at: string | null
+  updated_at: string | null
+  source?: string | null
+  status?: string | null
+  last_error?: string | null
+  last_failed_at?: string | null
+  authorized_by_target_id?: string | null
+}
+
+export interface CollaborationEvent {
+  id: string
+  event_id: string
+  event_type: string
+  chat_id?: string | null
+  sender_id?: string | null
+  conversation_id?: string | null
+  notebook_id?: string | null
+  run_id?: string | null
+  status: string
+  attempt_count: number
+  response_ref?: {
+    message_id: string
+    status: string
+    sequence: number
+  } | null
+  error?: string | null
   created_at?: string | null
   updated_at?: string | null
 }
 
-export interface FeishuChatItem {
-  chat_id: string
-  name: string
-  description?: string | null
-  chat_type: string
-  selected_target?: FeishuDeliveryTarget | null
-}
-
-export interface FeishuChatListResponse {
-  items: FeishuChatItem[]
-  selected_targets: FeishuDeliveryTarget[]
-  next_page_token?: string | null
-  has_more: boolean
+export interface FeishuExternalIdentity {
+  id: string
+  external_user_id: string
+  union_id: string | null
+  status: string
+  user_id: string | null
+  byaan_user_id: string | null
+  mapped_user: {
+    id: string
+    email: string
+    full_name?: string | null
+  } | null
+  last_seen_at: string | null
 }
 
 export interface ProviderConfig {
@@ -959,33 +1007,11 @@ export interface SourceConnectionCreateRequest {
 
 export interface FeishuAdminConfigStatus {
   configured: boolean
-  mode?: 'hosted' | 'self_built' | 'not_configured' | string
-  status?: string
   app_id?: string | null
   redirect_uri?: string | null
-  generated_redirect_uri?: string | null
-  secret_configured?: boolean
-  can_configure_custom_app?: boolean
   scopes: string[]
   required_scopes: string[]
   missing_scopes: string[]
-}
-
-export interface FeishuAdminConfigValidation {
-  configured: boolean
-  mode?: string | null
-  secret_configured: boolean
-  redirect_uri: string
-  required_scopes: string[]
-  missing_scopes: string[]
-  checks: Record<string, {
-    ok: boolean
-    message: string
-    expected?: string
-    actual?: string
-    missing_scopes?: string[]
-  }>
-  app_id?: string | null
 }
 
 export interface FeishuStatus {
@@ -993,36 +1019,11 @@ export interface FeishuStatus {
   connection?: SourceConnection | null
   configured: boolean
   connected: boolean
-  status: string
-  source_authorization?: {
-    status: string
-    purpose: string
-    scopes: string[]
-    revoke_action: string
-  }
-  collaboration_bot?: {
-    status: string
-    purpose: string
-    scopes: string[]
-    revoke_action: string
-  }
 }
 
 export interface FeishuOAuthStartResponse {
   authorization_url: string
   state: string
-  result_url: string
-  expires_in: number
-  status: string
-}
-
-export interface FeishuOAuthResult {
-  status: string
-  purpose: string
-  expires_at: string
-  connection_id?: string | null
-  result?: Record<string, any> | null
-  error?: { code: string; message: string } | null
 }
 
 export interface SourceResourcePickerItem {
@@ -1178,7 +1179,6 @@ export interface SemanticMetricQueryResponse {
   modelVersion: string
   status?: string
   result: any
-  error?: string
   freshness: string
   lineage: string[]
   policyDecision: string
@@ -1262,7 +1262,7 @@ function getCsrfToken(): string | undefined {
 async function doRefreshTokens(): Promise<boolean> {
   try {
     const apiUrl = await getApiBaseUrl()
-    const refreshToken = getRefreshToken()
+    const refreshToken = isTauriApp() ? getRefreshToken() : undefined
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
 
@@ -1289,7 +1289,7 @@ async function doRefreshTokens(): Promise<boolean> {
     const json = await response.json()
     const data = json.data || json
     setAccessToken(data.access_token)
-    if (data.refresh_token) {
+    if (isTauriApp() && data.refresh_token) {
       setRefreshToken(data.refresh_token)
     }
     return true
@@ -2075,30 +2075,6 @@ export class ApiService {
     }
   }
 
-  static async createPdfSourceResource(file: File, name: string): Promise<SourceResource> {
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('name', name)
-
-      const response = await apiFetch(`${API_BASE_URL}/source-resources/pdf`, {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
-      }
-
-      const responseData = await response.json()
-      return extractData<SourceResource>(responseData)
-    } catch (error) {
-      console.error('Error creating PDF source resource:', error)
-      throw error
-    }
-  }
-
   // ----------------------------
   // Datasets API - NEW
   // ----------------------------
@@ -2282,25 +2258,6 @@ export class ApiService {
       return extractData<any>(responseData)
     } catch (error) {
       console.error(`Error fetching semantic model ${modelSlug}:`, error)
-      throw error
-    }
-  }
-
-  static async updateSemanticModel(modelSlug: string, payload: Record<string, any>): Promise<any> {
-    try {
-      const response = await apiFetch(`${API_BASE_URL}/data-models/${modelSlug}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
-      }
-      const responseData = await response.json()
-      return extractData<any>(responseData)
-    } catch (error) {
-      console.error(`Error updating semantic model ${modelSlug}:`, error)
       throw error
     }
   }
@@ -2785,62 +2742,6 @@ export class ApiService {
     }
   }
 
-  static async getFeishuAdminConfig(): Promise<FeishuAdminConfigStatus> {
-    try {
-      const response = await apiFetch(`${API_BASE_URL}/source-connections/feishu/admin-config`)
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
-      }
-      const responseData = await response.json()
-      return extractData<FeishuAdminConfigStatus>(responseData)
-    } catch (error) {
-      console.error('Error getting Feishu admin config:', error)
-      throw error
-    }
-  }
-
-  static async saveFeishuAdminConfig(data: {
-    app_id: string
-    app_secret: string
-    redirect_uri: string
-    scopes: string[]
-  }): Promise<FeishuAdminConfigStatus> {
-    try {
-      const response = await apiFetch(`${API_BASE_URL}/source-connections/feishu/admin-config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
-      }
-      const responseData = await response.json()
-      return extractData<FeishuAdminConfigStatus>(responseData)
-    } catch (error) {
-      console.error('Error saving Feishu admin config:', error)
-      throw error
-    }
-  }
-
-  static async validateFeishuAdminConfig(): Promise<FeishuAdminConfigValidation> {
-    try {
-      const response = await apiFetch(`${API_BASE_URL}/source-connections/feishu/admin-config/validate`, {
-        method: 'POST',
-      })
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
-      }
-      const responseData = await response.json()
-      return extractData<FeishuAdminConfigValidation>(responseData)
-    } catch (error) {
-      console.error('Error validating Feishu admin config:', error)
-      throw error
-    }
-  }
-
   static async startFeishuOAuth(): Promise<FeishuOAuthStartResponse> {
     try {
       const response = await apiFetch(`${API_BASE_URL}/source-connections/feishu/oauth/start`, {
@@ -2854,21 +2755,6 @@ export class ApiService {
       return extractData<FeishuOAuthStartResponse>(responseData)
     } catch (error) {
       console.error('Error starting Feishu OAuth:', error)
-      throw error
-    }
-  }
-
-  static async getFeishuOAuthResult(state: string): Promise<FeishuOAuthResult> {
-    try {
-      const response = await apiFetch(`${API_BASE_URL}/source-connections/feishu/oauth/result?state=${encodeURIComponent(state)}`)
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
-      }
-      const responseData = await response.json()
-      return extractData<FeishuOAuthResult>(responseData)
-    } catch (error) {
-      console.error('Error polling Feishu OAuth result:', error)
       throw error
     }
   }
@@ -2896,11 +2782,7 @@ export class ApiService {
       const response = await apiFetch(`${API_BASE_URL}/source-connections/${connectionId}/resources${query ? `?${query}` : ''}`)
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
-        throw new ApiRequestError(
-          extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`,
-          response.status,
-          extractErrorCode(errorData),
-        )
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
       }
       const responseData = await response.json()
       return extractData<SourceResourcePickerResponse>(responseData)
@@ -6112,9 +5994,11 @@ export class ApiService {
 
   static async connectFeishuInstallation(data: {
     app_id: string
-    app_secret: string
-    connection_mode: 'websocket' | 'webhook'
+    app_secret?: string | null
+    connection_mode: 'websocket'
     default_llm_connection_id?: string | null
+    verification_token?: string | null
+    encrypt_key?: string | null
   }): Promise<CollaborationInstallation> {
     const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/feishu`, {
       method: 'POST',
@@ -6124,40 +6008,6 @@ export class ApiService {
     if (!response.ok) {
       const errorData = await response.json()
       throw new Error(extractErrorMessage(errorData) || 'Failed to configure Feishu')
-    }
-    const json = await response.json()
-    return json.data
-  }
-
-  static async listFeishuChats(id: string, params?: { page_token?: string | null; page_size?: number }): Promise<FeishuChatListResponse> {
-    const search = new URLSearchParams()
-    if (params?.page_token) search.set('page_token', params.page_token)
-    if (params?.page_size) search.set('page_size', String(params.page_size))
-    const suffix = search.toString() ? `?${search.toString()}` : ''
-    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/feishu/chats${suffix}`)
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(extractErrorMessage(errorData) || 'Failed to fetch Feishu chats')
-    }
-    const json = await response.json()
-    return json.data
-  }
-
-  static async selectFeishuChat(id: string, data: {
-    chat_id: string
-    name?: string | null
-    chat_type?: string
-    root_id?: string | null
-    confirm_non_production: boolean
-  }): Promise<FeishuDeliveryTarget> {
-    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/feishu/chats`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(extractErrorMessage(errorData) || 'Failed to select Feishu chat')
     }
     const json = await response.json()
     return json.data
@@ -6193,11 +6043,139 @@ export class ApiService {
     return json.data
   }
 
-  static async getCollaborationInstallationHealth(id: string): Promise<any> {
+  static async getCollaborationInstallationHealth(id: string): Promise<CollaborationInstallationHealth> {
     const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/health`)
     if (!response.ok) {
       const errorData = await response.json()
       throw new Error(extractErrorMessage(errorData) || 'Failed to fetch collaboration health')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async listCollaborationEvents(id: string, limit = 10): Promise<CollaborationEvent[]> {
+    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/events?limit=${limit}`)
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to fetch collaboration events')
+    }
+    const json = await response.json()
+    return json.data?.items || []
+  }
+
+  static async listFeishuChats(id: string): Promise<FeishuChat[]> {
+    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/feishu/chats`)
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to load Feishu chats')
+    }
+    const json = await response.json()
+    return json.data?.items || []
+  }
+
+  static async listFeishuExternalIdentities(id: string): Promise<FeishuExternalIdentity[]> {
+    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/feishu/identities`)
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to load Feishu identities')
+    }
+    const json = await response.json()
+    return json.data?.items || []
+  }
+
+  static async listFeishuDeliveryTargets(id: string): Promise<FeishuDeliveryTarget[]> {
+    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/feishu/delivery-targets`)
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to load Feishu delivery targets')
+    }
+    const json = await response.json()
+    return json.data?.items || []
+  }
+
+  static async bindFeishuDeliveryTarget(id: string, data: {
+    chat_id: string
+    root_id?: string | null
+    target_type?: string
+    display_name?: string | null
+  }): Promise<FeishuDeliveryTarget> {
+    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/feishu/delivery-targets`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to bind Feishu delivery target')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async pauseFeishuDeliveryTarget(installationId: string, targetId: string): Promise<FeishuDeliveryTarget> {
+    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${installationId}/feishu/delivery-targets/${targetId}/pause`, {
+      method: 'POST',
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to pause Feishu delivery target')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async resumeFeishuDeliveryTarget(installationId: string, targetId: string): Promise<FeishuDeliveryTarget> {
+    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${installationId}/feishu/delivery-targets/${targetId}/resume`, {
+      method: 'POST',
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to resume Feishu delivery target')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async unbindFeishuDeliveryTarget(installationId: string, targetId: string): Promise<FeishuDeliveryTarget> {
+    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${installationId}/feishu/delivery-targets/${targetId}`, {
+      method: 'DELETE',
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to unbind Feishu delivery target')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async mapFeishuExternalIdentity(
+    installationId: string,
+    identityId: string,
+    userId: string
+  ): Promise<FeishuExternalIdentity> {
+    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${installationId}/feishu/identities/${identityId}/mapping`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }),
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to map Feishu identity')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async unmapFeishuExternalIdentity(
+    installationId: string,
+    identityId: string
+  ): Promise<FeishuExternalIdentity> {
+    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${installationId}/feishu/identities/${identityId}/mapping`, {
+      method: 'DELETE',
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to unmap Feishu identity')
     }
     const json = await response.json()
     return json.data
@@ -6211,13 +6189,7 @@ export class ApiService {
     }
   }
 
-  static async testFeishuMessage(id: string, data: {
-    target_id?: string | null
-    chat_id?: string | null
-    text: string
-    root_id?: string | null
-    confirm_non_production: boolean
-  }): Promise<any> {
+  static async testFeishuMessage(id: string, data: { chat_id: string; text: string; root_id?: string | null }): Promise<any> {
     const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/test-message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -6226,6 +6198,25 @@ export class ApiService {
     if (!response.ok) {
       const errorData = await response.json()
       throw new Error(extractErrorMessage(errorData) || 'Failed to send Feishu test message')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async sendFeishuOutboundMessage(id: string, data: {
+    delivery_target_id: string
+    text: string
+    idempotency_key: string
+    confirm: boolean
+  }): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/feishu/outbound-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to send Feishu outbound message')
     }
     const json = await response.json()
     return json.data
@@ -6365,6 +6356,238 @@ export class ApiService {
       throw new Error(extractErrorMessage(errorData) || 'Failed to revoke MCP key')
     }
     return response.json()
+  }
+
+  static async listDataModels(): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models`)
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to fetch Data Models')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async listDataModelProfiles(): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/profiles`)
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to fetch datasource profiles')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async getDataModel(modelId: string): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}`)
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to fetch Data Model')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async createDataModelGenerationJob(payload: any): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/generation-jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to create generation job')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async advanceDataModelGenerationJob(jobId: string): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/generation-jobs/${encodeURIComponent(jobId)}/advance`, {
+      method: 'POST',
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to advance generation job')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async updateDataModelRelationship(modelId: string, relationshipId: string, patch: any): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/relationships/${encodeURIComponent(relationshipId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to update relationship')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async fixDataModelRelationshipFanout(modelId: string, relationshipId: string): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/relationships/${encodeURIComponent(relationshipId)}/fix-fanout`, {
+      method: 'POST',
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to fix relationship')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async rejectDataModelRelationship(modelId: string, relationshipId: string): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/relationships/${encodeURIComponent(relationshipId)}/reject`, {
+      method: 'POST',
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to reject relationship')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async updateDataModelMetric(modelId: string, metricId: string, patch: any): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/metrics/${encodeURIComponent(metricId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to update metric')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async updateDataModelExplore(modelId: string, patch: any): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/explore`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to update Explore')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async saveDataModelExploreArtifact(modelId: string, kind: string): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/explore/artifacts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind }),
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to save Explore artifact')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async updateDataModelSuggestion(modelId: string, suggestionId: string, action: string): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/suggestions/${encodeURIComponent(suggestionId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to update suggestion')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async validateDataModel(modelId: string): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/validate`, { method: 'POST' })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to validate Data Model')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async openDataModelReview(modelId: string): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/review/open`, { method: 'POST' })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to open review')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async markDataModelReviewed(modelId: string): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/review/mark`, { method: 'POST' })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to mark review')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async updateDataModelPublishNotes(modelId: string, notes: string): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/review/notes`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes }),
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to update publish notes')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async publishDataModel(modelId: string): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/publish`, { method: 'POST' })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to publish Data Model')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async setDataModelRawSqlFallback(modelId: string, enabled: boolean): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/mcp/raw-sql-fallback`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to update MCP policy')
+    }
+    const json = await response.json()
+    return json.data
+  }
+
+  static async runDataModelMcpQueryMetric(modelId: string, payload: any): Promise<any> {
+    const response = await apiFetch(`${API_BASE_URL}/data-models/${encodeURIComponent(modelId)}/mcp/query_metric`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(extractErrorMessage(errorData) || 'Failed to run MCP query_metric')
+    }
+    const json = await response.json()
+    return json.data
   }
 
 }

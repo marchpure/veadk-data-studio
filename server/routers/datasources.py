@@ -313,8 +313,6 @@ async def list_all_datasources(
             .order_by(SourceResource.updated_at.desc())
         )
         for resource in source_resources_result.scalars().all():
-            if ((resource.sync_config_json or {}).get("deletion_marker") or {}).get("status") == "removed":
-                continue
             projected_dataset_id = (resource.sync_config_json or {}).get("projected_dataset_id")
             datasources.append(
                 {

@@ -6,7 +6,7 @@ import { ObjectTree } from './ObjectTree'
 import { ModelInspector } from './ModelInspector'
 import { MetricEditor } from './MetricEditor'
 import { DataProfileWorkspace } from '../profile/DataProfileWorkspace'
-import { CheckLine, Panel, PanelHeader, ScoreBar, SectionTitle, StatusPill, Surface, modelingStyles, readinessTone } from '../components/modelingUi'
+import { CheckLine, Panel, PanelHeader, ScoreBar, SectionTitle, StatusPill, readinessTone } from '../components/modelingUi'
 import { useDataModelingStore } from '../store/useDataModelingStore'
 import type { Entity, Relationship, SemanticModel } from '../types'
 
@@ -39,15 +39,10 @@ export function SemanticGraphWorkspace({ model }: { model: SemanticModel }) {
   }
 
   return (
-    <main className={`grid min-h-0 flex-1 bg-[#0f1113] ${hasInspector ? (treeCollapsed ? 'lg:grid-cols-[56px_minmax(0,1fr)_360px]' : 'lg:grid-cols-[272px_minmax(0,1fr)_360px]') : (treeCollapsed ? 'lg:grid-cols-[56px_minmax(0,1fr)]' : 'lg:grid-cols-[272px_minmax(0,1fr)]')}`}>
-      <aside className="hidden min-h-0 border-r border-[#30363a] bg-[#14181b] lg:block">
-        <div className="flex items-center justify-between border-b border-[#30363a] px-3 py-2">
-          {!treeCollapsed && (
-            <div>
-              <span className="text-xs font-semibold text-[#d6dde2]">Model Objects</span>
-              <div className="mt-0.5 text-[11px] text-[#818c95]">{model.entities.length} entities · {model.metrics.length} metrics</div>
-            </div>
-          )}
+    <main className={`grid min-h-0 flex-1 bg-[#171717] ${hasInspector ? (treeCollapsed ? 'lg:grid-cols-[56px_minmax(0,1fr)_360px]' : 'lg:grid-cols-[260px_minmax(0,1fr)_360px]') : (treeCollapsed ? 'lg:grid-cols-[56px_minmax(0,1fr)]' : 'lg:grid-cols-[260px_minmax(0,1fr)]')}`}>
+      <aside className="hidden min-h-0 border-r border-[#2a2a2a] bg-[#1b1b1b] lg:block">
+        <div className="flex items-center justify-between border-b border-[#2a2a2a] px-3 py-2">
+          {!treeCollapsed && <span className="text-xs font-medium text-[#a8a8a8]">Objects</span>}
           <Button size="icon" variant="ghost" onClick={() => setTreeCollapsed(value => !value)} aria-label={treeCollapsed ? 'Expand object tree' : 'Collapse object tree'}>
             {treeCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
           </Button>
@@ -80,9 +75,9 @@ export function SemanticGraphWorkspace({ model }: { model: SemanticModel }) {
       </section>
 
       {hasInspector && (
-        <div className="hidden min-h-0 border-l border-[#30363a] bg-[#14181b] lg:block">
-          <div className="flex items-center justify-between border-b border-[#30363a] px-4 py-2">
-            <span className="text-sm font-medium text-[#f3f5f5]">Inspector</span>
+        <div className="hidden min-h-0 lg:block">
+          <div className="flex items-center justify-between border-b border-[#2a2a2a] bg-[#1b1b1b] px-4 py-2">
+            <span className="text-sm font-medium text-white">Inspector</span>
             <Button size="icon" variant="ghost" onClick={() => selectObject('')} aria-label="Close inspector"><X className="h-4 w-4" /></Button>
           </div>
           <div className="h-[calc(100%-49px)] min-h-0">
@@ -92,8 +87,8 @@ export function SemanticGraphWorkspace({ model }: { model: SemanticModel }) {
       )}
 
       <Dialog open={treeOpen} onOpenChange={setTreeOpen}>
-        <DialogContent className="left-0 top-0 h-full max-h-none w-[88vw] max-w-sm translate-x-0 translate-y-0 overflow-hidden border-[#30363a] bg-[#15181b] p-0 text-[#f3f5f5] sm:rounded-none">
-          <DialogHeader className="border-b border-[#30363a] p-4">
+        <DialogContent className="left-0 top-0 h-full max-h-none w-[88vw] max-w-sm translate-x-0 translate-y-0 overflow-hidden border-[#2a2a2a] bg-[#1b1b1b] p-0 text-white sm:rounded-none">
+          <DialogHeader className="border-b border-[#2a2a2a] p-4">
             <DialogTitle className="text-base">Model Objects</DialogTitle>
           </DialogHeader>
           <ObjectTree model={model} selectedObjectId={selectedObjectId} onSelect={(id) => { selectObject(id); setTreeOpen(false) }} />
@@ -101,8 +96,8 @@ export function SemanticGraphWorkspace({ model }: { model: SemanticModel }) {
       </Dialog>
 
       <Dialog open={inspectorOpen} onOpenChange={setInspectorOpen}>
-        <DialogContent className="left-auto right-0 top-0 h-full max-h-none w-[92vw] max-w-md translate-x-0 translate-y-0 overflow-hidden border-[#30363a] bg-[#15181b] p-0 text-[#f3f5f5] sm:rounded-none">
-          <DialogHeader className="border-b border-[#30363a] p-4">
+        <DialogContent className="left-auto right-0 top-0 h-full max-h-none w-[92vw] max-w-md translate-x-0 translate-y-0 overflow-hidden border-[#2a2a2a] bg-[#1b1b1b] p-0 text-white sm:rounded-none">
+          <DialogHeader className="border-b border-[#2a2a2a] p-4">
             <DialogTitle className="text-base">Model Inspector</DialogTitle>
           </DialogHeader>
           <div className="h-[calc(100%-57px)] min-h-0">
@@ -112,8 +107,8 @@ export function SemanticGraphWorkspace({ model }: { model: SemanticModel }) {
       </Dialog>
 
       <Dialog open={validationOpen} onOpenChange={setValidationOpen}>
-        <DialogContent className="max-h-[88vh] max-w-4xl overflow-y-auto border-[#30363a] bg-[#15181b] p-0 text-[#f3f5f5] custom-scrollbar">
-          <DialogHeader className="border-b border-[#30363a] p-4">
+        <DialogContent className="max-h-[88vh] max-w-4xl overflow-y-auto border-[#2a2a2a] bg-[#1a1a1a] p-0 text-white custom-scrollbar">
+          <DialogHeader className="border-b border-[#2a2a2a] p-4">
             <DialogTitle className="text-base">Model Validation</DialogTitle>
           </DialogHeader>
           <ValidationDrawer model={model} onValidate={validateModel} />
@@ -121,8 +116,8 @@ export function SemanticGraphWorkspace({ model }: { model: SemanticModel }) {
       </Dialog>
 
       <Dialog open={advancedOpen} onOpenChange={setAdvancedOpen}>
-        <DialogContent className="max-h-[88vh] max-w-5xl overflow-y-auto border-[#30363a] bg-[#15181b] p-0 text-[#f3f5f5] custom-scrollbar">
-          <DialogHeader className="border-b border-[#30363a] p-4">
+        <DialogContent className="max-h-[88vh] max-w-5xl overflow-y-auto border-[#2a2a2a] bg-[#1a1a1a] p-0 text-white custom-scrollbar">
+          <DialogHeader className="border-b border-[#2a2a2a] p-4">
             <DialogTitle className="text-base">Model Advanced DSL</DialogTitle>
           </DialogHeader>
           <AdvancedDsl model={model} />
@@ -136,31 +131,17 @@ function RelationshipCanvas({ model, selectedObjectId, onSelect }: { model: Sema
   const relationships = useMemo(() => model.relationships.filter(rel => rel.status !== 'rejected'), [model.relationships])
 
   return (
-      <Panel className="overflow-hidden">
-      <PanelHeader
-        title="Relationship Canvas"
-        subtitle="Business entities, candidate joins, fanout risk, and validation evidence in one modeling surface."
-        action={<StatusPill tone={model.readinessLevel === 'ready' ? 'ready' : model.readinessLevel === 'blocked' ? 'blocked' : 'warning'}>{model.readiness}% ready</StatusPill>}
-      />
+    <Panel className="overflow-hidden">
+      <PanelHeader title="Advanced Relationship Canvas" subtitle="Customers -> Orders -> Order Items -> Products, with Stores, Channels, and Refunds connected to Orders." />
       <div className="p-4">
-        <div
-          className="relative min-h-[620px] overflow-hidden rounded-md border border-[#273038] bg-[#0f1113]"
-          style={{
-            backgroundImage: 'linear-gradient(#1f252a 1px, transparent 1px), linear-gradient(90deg, #1f252a 1px, transparent 1px)',
-            backgroundSize: '28px 28px',
-          }}
-        >
-          <div className="absolute left-4 top-4 z-10 flex flex-wrap gap-2">
-            <StatusPill tone="info">{relationships.length} relationships</StatusPill>
-            <StatusPill tone={model.relationships.some(rel => rel.fanoutRisk === 'high' && rel.status !== 'rejected') ? 'blocked' : 'ready'}>fanout check</StatusPill>
-          </div>
+        <div className="relative min-h-[620px] overflow-hidden rounded-md border border-[#2a2a2a] bg-[#151515]">
           <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
-            {relationships.map((rel, index) => <RelationshipLine key={`${rel.id}-line-${index}`} relationship={rel} selected={selectedObjectId === rel.id} />)}
+            {relationships.map(rel => <RelationshipLine key={rel.id} relationship={rel} selected={selectedObjectId === rel.id} />)}
           </svg>
           {model.entities.map(entity => (
             <EntityNode key={entity.id} entity={entity} selected={selectedObjectId === entity.id} onSelect={() => onSelect(entity.id)} />
           ))}
-          {relationships.map((rel, index) => <RelationshipHotspot key={`${rel.id}-hotspot-${index}`} relationship={rel} selected={selectedObjectId === rel.id} onSelect={() => onSelect(rel.id)} />)}
+          {relationships.map(rel => <RelationshipHotspot key={rel.id} relationship={rel} selected={selectedObjectId === rel.id} onSelect={() => onSelect(rel.id)} />)}
         </div>
       </div>
     </Panel>
@@ -183,8 +164,8 @@ function RelationshipHotspot({ relationship, selected, onSelect }: { relationshi
     <button
       type="button"
       onClick={onSelect}
-      className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-md border px-2 py-1 text-xs shadow-[0_10px_24px_rgba(0,0,0,0.22)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
-        selected ? 'border-brand-orange bg-brand-orange text-white' : 'border-[#3a4147] bg-[#1b2025] text-[#d6dde2] hover:border-brand-orange/60 hover:bg-[#242b31]'
+      className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-md border px-2 py-1 text-xs shadow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
+        selected ? 'border-brand-orange bg-brand-orange text-white' : 'border-[#3a3a3a] bg-[#202020] text-[#d6d6d6] hover:border-brand-orange/60'
       }`}
       style={{ left: `${left}%`, top: `${top}%` }}
     >
@@ -195,33 +176,23 @@ function RelationshipHotspot({ relationship, selected, onSelect }: { relationshi
 
 function EntityNode({ entity, selected, onSelect }: { entity: Entity; selected: boolean; onSelect: () => void }) {
   const pos = positions[entity.id] ?? { x: 50, y: 50 }
-  const kind = entityKind(entity)
   return (
     <button
       type="button"
       onClick={onSelect}
-      className={`absolute w-[176px] -translate-x-1/2 -translate-y-1/2 rounded-md border p-3 text-left shadow-[0_18px_34px_rgba(0,0,0,0.26)] transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
-        selected ? 'border-brand-orange bg-brand-orange/15 ring-1 ring-brand-orange/20' : 'border-[#384149] bg-[#191d21] hover:border-brand-orange/50 hover:bg-[#20262b]'
+      className={`absolute w-[170px] -translate-x-1/2 -translate-y-1/2 rounded-md border p-3 text-left shadow transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
+        selected ? 'border-brand-orange bg-brand-orange/15' : 'border-[#333] bg-[#1f1f1f] hover:border-brand-orange/50'
       }`}
       style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
     >
       <div className="flex items-center gap-2">
         <TableProperties className="h-4 w-4 text-brand-orange" />
-        <span className="truncate text-sm font-semibold text-[#f3f5f5]">{entity.businessName}</span>
+        <span className="truncate text-sm font-semibold text-white">{entity.businessName}</span>
       </div>
-      <div className="mt-1 truncate text-xs text-[#9aa4ac]">{entity.table} · PK {entity.primaryKey}</div>
-      <div className="mt-2 flex items-center justify-between text-xs text-[#cdd3d8]">
-        <span>{entity.fields.length} fields</span>
-        <span className="rounded border border-[#303840] bg-[#111417] px-1.5 py-0.5 text-[10px] uppercase text-[#818c95]">{kind}</span>
-      </div>
+      <div className="mt-1 truncate text-xs text-[#9a9a9a]">{entity.table} · PK {entity.primaryKey}</div>
+      <div className="mt-2 text-xs text-[#cfcfcf]">{entity.fields.length} fields</div>
     </button>
   )
-}
-
-function entityKind(entity: Entity) {
-  if (entity.id.includes('order_items')) return 'detail'
-  if (entity.id.includes('orders') || entity.id.includes('refunds')) return 'fact'
-  return 'dim'
 }
 
 function ValidationDrawer({ model, onValidate }: { model: SemanticModel; onValidate: () => void }) {
@@ -230,8 +201,8 @@ function ValidationDrawer({ model, onValidate }: { model: SemanticModel; onValid
       <Panel>
         <PanelHeader title="Agent Readiness" subtitle="Scores do not override blockers." action={<Button size="sm" variant="brand-primary" onClick={onValidate}><Play className="h-4 w-4" /> Validate</Button>} />
         <div className="space-y-4 p-4">
-          {model.readinessDetail.components.map((component, index) => (
-            <div key={`${component.id}-${index}`}>
+          {model.readinessDetail.components.map(component => (
+            <div key={component.id}>
               <div className="mb-1 flex justify-between text-sm">
                 <span className="text-white">{component.name}</span>
                 <StatusPill tone={readinessTone(component.status)}>{component.status}</StatusPill>
@@ -265,21 +236,21 @@ function AdvancedDsl({ model }: { model: SemanticModel }) {
   }
   return (
     <div className="p-4">
-      <pre className="overflow-x-auto rounded-md border border-[#2d3338] bg-[#101214] p-4 text-xs text-[#d6dde2] custom-scrollbar">{JSON.stringify(compact, null, 2)}</pre>
+      <pre className="overflow-x-auto rounded-md border border-[#2a2a2a] bg-[#101010] p-4 text-xs text-[#d4d4d4] custom-scrollbar">{JSON.stringify(compact, null, 2)}</pre>
     </div>
   )
 }
 
 function IssueBlock({ title, tone, items, empty }: { title: string; tone: 'ready' | 'warning' | 'blocked'; items: string[]; empty?: string }) {
   return (
-    <Surface className="p-3">
+    <div className="rounded-md border border-[#2a2a2a] bg-[#181818] p-3">
       <div className="mb-2 flex items-center justify-between">
         <SectionTitle>{title}</SectionTitle>
         <StatusPill tone={tone}>{items.length}</StatusPill>
       </div>
       <div className="space-y-2">
-        {(items.length ? items : [empty ?? 'None']).map((item, index) => <CheckLine key={`${item}-${index}`} tone={items.length ? tone : 'ready'}>{item}</CheckLine>)}
+        {(items.length ? items : [empty ?? 'None']).map(item => <CheckLine key={item} tone={items.length ? tone : 'ready'}>{item}</CheckLine>)}
       </div>
-    </Surface>
+    </div>
   )
 }

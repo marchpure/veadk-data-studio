@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+
 from server.db.session import AsyncSessionFactory
 from server.schemas.standard_response import success_response
 from server.services.community_setup import get_local_bootstrap

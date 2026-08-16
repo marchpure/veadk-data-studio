@@ -1,7 +1,7 @@
 """add collaboration integration tables
 
 Revision ID: add_collaboration_integration_tables
-Revises: harden_semantic_versions
+Revises: add_multi_source_assets
 Create Date: 2026-08-14
 
 Adds platform-neutral collaboration tables for Slack compatibility and Feishu
@@ -16,7 +16,7 @@ from alembic import op
 from fastapi_users_db_sqlalchemy.generics import GUID
 
 revision = "add_collaboration_integration_tables"
-down_revision = "harden_semantic_versions"
+down_revision = "add_multi_source_assets"
 branch_labels = None
 depends_on = None
 
@@ -40,6 +40,7 @@ def upgrade() -> None:
         sa.Column("health_error", sa.Text(), nullable=True),
         sa.Column("last_connected_at", sa.TIMESTAMP(), nullable=True),
         sa.Column("last_event_at", sa.TIMESTAMP(), nullable=True),
+        sa.Column("reconnect_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("config_json", sa.JSON(), nullable=True),
         sa.Column("installed_by", GUID(), nullable=True),
         sa.Column("created_at", sa.TIMESTAMP(), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=False),
@@ -217,14 +218,14 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("channel_delivery_target_id", GUID(), nullable=True))
         batch_op.add_column(sa.Column("channel_message_id", sa.String(128), nullable=True))
         batch_op.create_foreign_key(
-            "fk_skill_suggestions_reviewer_identity",
+            "fk_skill_suggestions_reviewer_external_identity_id_external_identities",
             "external_identities",
             ["reviewer_external_identity_id"],
             ["id"],
             ondelete="SET NULL",
         )
         batch_op.create_foreign_key(
-            "fk_skill_suggestions_channel_target",
+            "fk_skill_suggestions_channel_delivery_target_id_collaboration_delivery_targets",
             "collaboration_delivery_targets",
             ["channel_delivery_target_id"],
             ["id"],
@@ -235,8 +236,14 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_schedules_delivery_target_id", table_name="schedules")
     with op.batch_alter_table("skill_suggestions") as batch_op:
-        batch_op.drop_constraint("fk_skill_suggestions_channel_target", type_="foreignkey")
-        batch_op.drop_constraint("fk_skill_suggestions_reviewer_identity", type_="foreignkey")
+        batch_op.drop_constraint(
+            "fk_skill_suggestions_channel_delivery_target_id_collaboration_delivery_targets",
+            type_="foreignkey",
+        )
+        batch_op.drop_constraint(
+            "fk_skill_suggestions_reviewer_external_identity_id_external_identities",
+            type_="foreignkey",
+        )
         batch_op.drop_column("channel_message_id")
         batch_op.drop_column("channel_delivery_target_id")
         batch_op.drop_column("reviewer_external_identity_id")

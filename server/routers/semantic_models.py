@@ -43,24 +43,6 @@ async def get_data_model(
     return await _get_model(model_slug, auth, session, "Retrieved Data Model")
 
 
-@router.patch("/data-models/{model_slug}")
-async def update_data_model(
-    model_slug: str,
-    payload: dict[str, Any],
-    auth: AuthContext = Depends(require_any_scope(Scope.DATASET_UPDATE, Scope.DATASET_UPDATE_OWN)),
-    session: AsyncSession = Depends(get_async_session),
-):
-    try:
-        model = await SemanticModelService.update_model(session, auth.tenant_id, model_slug, payload, auth.user_id)
-    except RuntimeError as error:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
-    except ValueError as error:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error))
-    if model is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data Model not found")
-    return success_response(data=model, message="Data Model updated")
-
-
 @router.post("/data-models/{model_slug}/validate")
 async def validate_data_model(
     model_slug: str,

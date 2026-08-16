@@ -16,7 +16,6 @@ from server.repositories.dashboard import DashboardRepository
 from server.repositories.datasets import DatasetRepository
 from server.repositories.queries import QueryRepository
 from server.repositories.settings import SettingRepository
-from server.services.assets import AssetService
 from server.services.connections import ConnectionService
 from server.services.database_operations import DatabaseOperationsService
 from server.services.dataset import DatasetService
@@ -1303,84 +1302,6 @@ async def search_datasets(ctx: RunContextWrapper[Any], query: str = "") -> str:
     tenant_id = ctx.context.get("tenant_id")
 
     return await _search_datasets_impl(tenant_id, query)
-
-
-@function_tool
-async def search_assets(ctx: RunContextWrapper[Any], query: str = "", asset_types: list[str] | None = None) -> str:
-    """
-    Search all analysis assets available to the current notebook.
-
-    Unlike search_datasets(), this includes structured datasets, semantic models,
-    and knowledge resources. Use it when a task may need both calculable facts and
-    cited document evidence.
-    """
-    tenant_id = ctx.context.get("tenant_id")
-    notebook_id = ctx.context.get("notebook_id")
-
-    try:
-        async for session in get_async_session():
-            try:
-                set_tenant_id(tenant_id)
-                service = AssetService()
-                items = await service.search_assets(
-                    session=session,
-                    tenant_id=UUID(str(tenant_id)),
-                    notebook_id=UUID(str(notebook_id)) if notebook_id else None,
-                    query=query,
-                    asset_types=asset_types or [],
-                    limit=50,
-                )
-                return json.dumps(
-                    {
-                        "success": True,
-                        "assets": items,
-                        "total": len(items),
-                        "message": f"Found {len(items)} asset(s)",
-                    },
-                    indent=2,
-                    default=str,
-                    ensure_ascii=False,
-                )
-            finally:
-                await session.close()
-    except Exception as e:
-        logger.error(f"Error in search_assets: {str(e)}", exc_info=True)
-        return json.dumps({"success": False, "error": str(e)}, indent=2, default=str)
-
-
-@function_tool
-async def describe_asset(ctx: RunContextWrapper[Any], asset_type: str, asset_id: str) -> str:
-    """
-    Describe one analysis asset before choosing an executor.
-
-    Use this after search_assets() to inspect execution modes, freshness,
-    provenance, and evidence locator contract.
-    """
-    tenant_id = ctx.context.get("tenant_id")
-
-    try:
-        async for session in get_async_session():
-            try:
-                set_tenant_id(tenant_id)
-                service = AssetService()
-                item = await service.describe_asset(
-                    session=session,
-                    tenant_id=UUID(str(tenant_id)),
-                    asset_type=asset_type,
-                    asset_id=asset_id,
-                )
-                if item is None:
-                    return json.dumps(
-                        {"success": False, "error": f"{asset_type} asset {asset_id} not found"},
-                        indent=2,
-                        ensure_ascii=False,
-                    )
-                return json.dumps({"success": True, "asset": item}, indent=2, default=str, ensure_ascii=False)
-            finally:
-                await session.close()
-    except Exception as e:
-        logger.error(f"Error in describe_asset: {str(e)}", exc_info=True)
-        return json.dumps({"success": False, "error": str(e)}, indent=2, default=str)
 
 
 def _filter_redacted_from_schema(

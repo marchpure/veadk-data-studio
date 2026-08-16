@@ -14,7 +14,6 @@ import HomePage from './pages/HomePage'
 import FoldersPage from './pages/FoldersPage'
 import FolderDetailPage from './pages/FolderDetailPage'
 import GitHubIntegrations from './pages/GitHubIntegrations'
-import IntegrationsPage from './pages/Integrations'
 import { Login, Register, ForgotPassword, ResetPassword, CheckEmail, AcceptInvitation, SetPassword } from './pages/auth'
 import SetupWorkspace from './pages/auth/SetupWorkspace'
 import { AuthGuard } from './components/AuthGuard'
@@ -254,18 +253,6 @@ function App() {
             }
           />
           <Route
-            path="/integrations"
-            element={
-              <AuthGuard>
-                <ViewerRedirect>
-                  <Layout>
-                    <IntegrationsPage />
-                  </Layout>
-                </ViewerRedirect>
-              </AuthGuard>
-            }
-          />
-          <Route
             path="/folders"
             element={
               <AuthGuard>
@@ -347,7 +334,6 @@ function App() {
             <Route path="/data-models" element={<DataModelsHomePage />} />
             <Route path="/data-models/:modelId" element={<DataModelBuilderPage />} />
             <Route path="/github" element={<GitHubIntegrations />} />
-            <Route path="/integrations" element={<IntegrationsPage />} />
             <Route path="/folders" element={<FoldersPage />} />
             <Route path="/folders/:id" element={<FolderDetailPage />} />
             <Route path="/dashboard/:dashboardId" element={<HomePage />} />
@@ -391,7 +377,6 @@ function App() {
             <Route path="/data-models" element={<DataModelsHomePage />} />
             <Route path="/data-models/:modelId" element={<DataModelBuilderPage />} />
             <Route path="/github" element={<GitHubIntegrations />} />
-            <Route path="/integrations" element={<IntegrationsPage />} />
             <Route path="/folders" element={<FoldersPage />} />
             <Route path="/folders/:id" element={<FolderDetailPage />} />
             <Route path="/dashboard/:dashboardId" element={<HomePage />} />

@@ -2685,18 +2685,6 @@ Please modify this element to: `
           return
         }
 
-        if (htmlEditHappenedRef.current) {
-          if (htmlEditInProgressRef.current) {
-            await handleHtmlEditComplete()
-          }
-          if (!userClosedPreviewRef.current) {
-            setIsPreviewOpen(true)
-            setPreviewPanelTab("preview")
-          }
-          updateMessage(assistantMessageId, "Dashboard updated.")
-          return
-        }
-
         throw new Error("No response received from the assistant")
       }
     } catch (error) {
@@ -2708,19 +2696,6 @@ Please modify this element to: `
         if (!accumulatedContent) {
           updateMessage(assistantMessageId, "[Response interrupted]")
         }
-        return
-      }
-
-      if (htmlEditHappenedRef.current) {
-        console.warn('Agent stream ended after dashboard update:', error)
-        if (htmlEditInProgressRef.current) {
-          await handleHtmlEditComplete()
-        }
-        if (!userClosedPreviewRef.current) {
-          setIsPreviewOpen(true)
-          setPreviewPanelTab("preview")
-        }
-        updateMessage(assistantMessageId, accumulatedContent || "Dashboard updated.")
         return
       }
 

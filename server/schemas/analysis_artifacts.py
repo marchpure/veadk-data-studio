@@ -54,11 +54,3 @@ class AnalysisArtifactRunResponse(BaseModel):
     status: Literal["not_started", "queued"]
     message: str
     required_bindings: list[str] = Field(default_factory=list)
-    dependency_summary: dict[str, Any] = Field(default_factory=dict)
-    blocking_issues: list[str] = Field(default_factory=list)
-
-
-class AnalysisArtifactLatestSnapshotResponse(BaseModel):
-    artifact_id: UUID
-    snapshot_id: str
-    snapshot: dict[str, Any]

@@ -81,7 +81,14 @@ CONNECTOR_CATALOG: tuple[ConnectorDefinition, ...] = (
             "snapshot_sync",
             "knowledge_evidence",
         ),
-        config_schema={"fields": [], "admin_config_endpoint": "/api/source-connections/feishu/admin-config"},
+        config_schema={
+            "admin_fields": [
+                _field("app_id", "string"),
+                _field("app_secret", "string", secret=True),
+                _field("redirect_uri", "url"),
+                _field("scopes", "string[]", required=False),
+            ]
+        },
         resource_picker_schema={
             "scopes": ["recent", "drive", "wiki", "search"],
             "supports_children": True,

@@ -1,0 +1,823 @@
+name: Release Build (Tauri)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version number (e.g., 0.1.0) - optional, defaults to tauri.conf.json"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-artifacts:
+    name: Build ${{ matrix.arch }} macOS
+    permissions:
+      contents: read
+    environment: production
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      REF_TYPE: ${{ github.ref_type }}
+      RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
+      RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+      VERSION_INPUT: ${{ inputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+            target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+            backend_name: backend-x86_64-apple-darwin
+          - runner: macos-latest
+            arch: aarch64
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+            backend_name: backend-aarch64-apple-darwin
+
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate trusted release source
+        run: |
+          if [ "$GITHUB_ACTOR" != "hadijaveed" ]; then
+            echo "Only hadijaveed may run production release workflows."
+            echo "Current actor: $GITHUB_ACTOR"
+            exit 1
+          fi
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Release builds with production credentials must be dispatched from main."
+            echo "Current ref: $GITHUB_REF"
+            exit 1
+          fi
+
+          if [ "$REF_TYPE" = "tag" ] && ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release tag must point to a commit contained in origin/main before production credentials are loaded."
+            echo "Current SHA: $GITHUB_SHA"
+            exit 1
+          fi
+
+          echo "Trusted release source verified."
+
+      - name: Fetch secrets from Infisical
+        uses: Infisical/secrets-action@8a06c1bdcd5b8635d510c52d4b57a92c1ccef785 # v1.0.9
+        with:
+          method: "universal"
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: "https://app.infisical.com"
+          env-slug: "prod"
+          project-slug: "byaan-app-secrets-i-ffg"
+
+      - name: Export signing keys and config for updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ env.TAURI_UPDATER_PUBLIC_KEY }}
+          R2_PUBLIC_URL: ${{ env.R2_PUBLIC_URL }}
+        run: |
+          # Export private key (can be multiline)
+          echo "TAURI_SIGNING_PRIVATE_KEY<<EOF" >> $GITHUB_ENV
+          echo "$TAURI_SIGNING_PRIVATE_KEY" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+          # Export password (single line)
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" >> $GITHUB_ENV
+
+          # Export public key (can be multiline)
+          echo "TAURI_UPDATER_PUBLIC_KEY<<EOF" >> $GITHUB_ENV
+          echo "$TAURI_UPDATER_PUBLIC_KEY" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+          # Export R2 URL (single line)
+          echo "R2_PUBLIC_URL=$R2_PUBLIC_URL" >> $GITHUB_ENV
+
+          echo "✓ Signing keys and updater config exported"
+
+      - name: Compatibility symlink (backend -> server)
+        run: |
+          if [ ! -e backend ]; then
+            ln -s server backend
+          fi
+
+      - name: Setup Rust
+        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.18.3 --activate
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Prepare macOS keychain and import certificate
+        env:
+          KEYCHAIN: build.keychain-db
+          KEYCHAIN_PASSWORD: buildkeychain
+          MAC_CERTIFICATE: ${{ env.MAC_CERTIFICATE }}
+          MAC_CERTIFICATE_PASSWORD: ${{ env.MAC_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$MAC_CERTIFICATE" | base64 --decode > cert.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed 's/"//g')
+          security default-keychain -s "$KEYCHAIN"
+          security import cert.p12 -k "$KEYCHAIN" -P "$MAC_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/productbuild
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          rm -f cert.p12
+          security find-identity -v -p codesigning || true
+
+      - name: Create runtime configuration (before backend build)
+        env:
+          VITE_PUBLIC_POSTHOG_KEY: ${{ env.VITE_PUBLIC_POSTHOG_KEY }}
+          VITE_PUBLIC_POSTHOG_HOST: ${{ env.VITE_PUBLIC_POSTHOG_HOST }}
+          WORKER_URL: ${{ env.WORKER_URL }}
+          GITHUB_OAUTH_CLIENT_ID: ${{ env.GITHUB_OAUTH_CLIENT_ID }}
+        run: |
+          mkdir -p client/src-tauri/resources
+
+          if [ -n "$VITE_PUBLIC_POSTHOG_KEY" ]; then
+            echo "Creating config.json with PostHog credentials..."
+            cat > client/src-tauri/resources/config.json << 'EOF'
+          {
+            "deployment": {
+              "isHosted": false
+            },
+            "posthog": {
+              "api_key": "$VITE_PUBLIC_POSTHOG_KEY",
+              "host": "$VITE_PUBLIC_POSTHOG_HOST"
+            },
+            "waitlist": {
+              "worker_url": "$WORKER_URL"
+            },
+            "github": {
+              "client_id": "$GITHUB_OAUTH_CLIENT_ID"
+            }
+          }
+          EOF
+            sed -i.bak "s|\$VITE_PUBLIC_POSTHOG_KEY|$VITE_PUBLIC_POSTHOG_KEY|g" client/src-tauri/resources/config.json
+            sed -i.bak "s|\$VITE_PUBLIC_POSTHOG_HOST|$VITE_PUBLIC_POSTHOG_HOST|g" client/src-tauri/resources/config.json
+            sed -i.bak "s|\$WORKER_URL|$WORKER_URL|g" client/src-tauri/resources/config.json
+            sed -i.bak "s|\$GITHUB_OAUTH_CLIENT_ID|$GITHUB_OAUTH_CLIENT_ID|g" client/src-tauri/resources/config.json
+            rm -f client/src-tauri/resources/config.json.bak
+          else
+            echo "Creating config.json with PostHog disabled..."
+            cat > client/src-tauri/resources/config.json << 'EOF'
+          {
+            "deployment": {
+              "isHosted": false
+            },
+            "posthog": {
+              "api_key": null,
+              "host": "https://us.i.posthog.com"
+            },
+            "waitlist": {
+              "worker_url": "$WORKER_URL"
+            },
+            "github": {
+              "client_id": "$GITHUB_OAUTH_CLIENT_ID"
+            }
+          }
+          EOF
+            sed -i.bak "s|\$WORKER_URL|$WORKER_URL|g" client/src-tauri/resources/config.json
+            sed -i.bak "s|\$GITHUB_OAUTH_CLIENT_ID|$GITHUB_OAUTH_CLIENT_ID|g" client/src-tauri/resources/config.json
+            rm -f client/src-tauri/resources/config.json.bak
+          fi
+          echo "✓ Config created (required by backend.spec)"
+
+      - name: Extract version and check if on main
+        id: version
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$VERSION_INPUT" ]; then
+            VERSION="$VERSION_INPUT"
+          elif [ "$REF_TYPE" = "tag" ]; then
+            VERSION="${RELEASE_TAG_NAME:-${GITHUB_REF_NAME:-${GITHUB_REF#refs/tags/}}}"
+          else
+            VERSION=$(grep -o '"version": *"[^"]*"' client/src-tauri/tauri.conf.json | grep -o '"[0-9][^"]*"' | tr -d '"')
+          fi
+          VERSION="${VERSION#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $VERSION"
+            echo "Use a semver tag such as v0.1.3 or 0.1.3."
+            exit 1
+          fi
+          echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+          # Check if the current commit is on main branch
+          if git merge-base --is-ancestor ${{ github.sha }} origin/main 2>/dev/null; then
+            echo "is_main=true" >> $GITHUB_OUTPUT
+            echo "✓ Tag is on main branch - will publish to stable"
+          else
+            echo "is_main=false" >> $GITHUB_OUTPUT
+            echo "⚠ Tag is NOT on main branch - will only publish to versions/"
+          fi
+
+      - name: Build backend (per-arch)
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -e
+          uv pip install --system pyinstaller
+          mkdir -p client/src-tauri/binaries
+
+          uv run pyinstaller backend.spec --clean --noconfirm
+
+          # Verify backend directory exists
+          if [ ! -d "dist/backend" ]; then
+            echo "❌ Backend directory not found at dist/backend"
+            exit 1
+          fi
+
+          # Verify DuckDB extensions are bundled
+          echo "Checking for DuckDB extension files..."
+          find dist/backend -name "*.duckdb_extension" -o -name "*duckdb*extension*" | head -20
+          echo "Checking for excel-related files..."
+          find dist/backend -iname "*excel*" | head -20
+          echo "✓ Extension check complete"
+
+          # --- SIGNING STEP (Before packaging) ---
+          echo "Signing backend binaries with identity: $APPLE_SIGNING_IDENTITY"
+          BACKEND_DIR="dist/backend"
+
+          # Clear extended attributes first
+          xattr -cr "$BACKEND_DIR"
+
+          # Sign the main Python executable in the bundle with entitlements
+          # We reuse the entitlements from source
+          ENTITLEMENTS="client/src-tauri/entitlements.plist"
+          if [ -f "$BACKEND_DIR/backend" ]; then
+            echo "Signing main backend executable..."
+            codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$APPLE_SIGNING_IDENTITY" "$BACKEND_DIR/backend"
+          else
+            echo "❌ Backend executable not found at $BACKEND_DIR/backend"
+            exit 1
+          fi
+          echo "✓ Backend resources signed"
+          # ---------------------------------------
+
+          # Package backend into tarball for embedding
+          echo "Packaging backend into tarball..."
+          # Create tarball in server/ directory so launcher.rs can include it
+          tar -czf server/backend.tar.gz -C dist backend
+
+          echo "✓ Backend tarball created: server/backend.tar.gz"
+          ls -lh server/backend.tar.gz
+
+          # Compile Rust shim (Self-Extracting Sidecar)
+          echo "Compiling launcher shim for ${{ matrix.target }} with version $APP_VERSION..."
+          rm -f "client/src-tauri/binaries/${{ matrix.backend_name }}"
+
+          # Use APP_VERSION from environment for the rust compilation
+          rustc server/launcher.rs --target ${{ matrix.target }} -o "client/src-tauri/binaries/${{ matrix.backend_name }}"
+          chmod +x "client/src-tauri/binaries/${{ matrix.backend_name }}"
+
+          echo "✓ Launcher shim created: client/src-tauri/binaries/${{ matrix.backend_name }}"
+
+      - name: Create backend symlink for Tauri
+        run: |
+          cd client/src-tauri/binaries
+          ln -sf ${{ matrix.backend_name }} backend
+          ls -la
+          echo "✓ Created symlink: backend -> ${{ matrix.backend_name }}"
+
+      - name: Inject version into tauri.conf.json
+        run: |
+          cd client/src-tauri
+          if [ -z "$APP_VERSION" ]; then
+            echo "❌ APP_VERSION is not set. Aborting."
+            exit 1
+          fi
+          # Inject the version dynamically (already stripped of 'v' prefix)
+          jq --arg version "$APP_VERSION" \
+            '.version = $version' \
+            tauri.conf.json > tauri.conf.json.tmp
+          mv tauri.conf.json.tmp tauri.conf.json
+          echo "✅ Version $APP_VERSION injected into tauri.conf.json"
+
+      - name: Install frontend dependencies
+        run: cd client && pnpm install --frozen-lockfile
+
+      - name: Sync Python dependencies
+        run: |
+          echo "Syncing Python dependencies..."
+          uv sync
+          echo "✓ Python dependencies synced"
+
+      - name: Regenerate seed database
+        run: |
+          rm -f client/src-tauri/resources/.data/app.db
+          mkdir -p client/src-tauri/resources/.data
+          touch client/src-tauri/resources/.keep
+
+          TEMP_DB="client/src-tauri/resources/.data/app.db"
+          export DATABASE_URL="sqlite+aiosqlite:///$PWD/$TEMP_DB"
+
+          echo "Running migrations on seed database..."
+          uv run python -c "from server.utils.migrations import run_migrations; run_migrations()"
+
+          if [ ! -f "$TEMP_DB" ]; then
+            echo "❌ Seed database not created"
+            exit 1
+          fi
+          echo "✓ Seed database created"
+
+      - name: Build frontend
+        env:
+          VITE_PUBLIC_POSTHOG_KEY: ${{ env.VITE_PUBLIC_POSTHOG_KEY }}
+          VITE_PUBLIC_POSTHOG_HOST: ${{ env.VITE_PUBLIC_POSTHOG_HOST }}
+        run: cd client && pnpm build
+
+      - name: Inject public key into tauri.conf.json
+        run: |
+          cd client/src-tauri
+          if [ -z "$TAURI_UPDATER_PUBLIC_KEY" ]; then
+            echo "❌ TAURI_UPDATER_PUBLIC_KEY is not set. Aborting."
+            exit 1
+          fi
+          # Inject the public key dynamically
+          jq --arg pubkey "$TAURI_UPDATER_PUBLIC_KEY" \
+            '.plugins.updater.pubkey = $pubkey' \
+            tauri.conf.json > tauri.conf.json.tmp
+          mv tauri.conf.json.tmp tauri.conf.json
+          echo "✅ Public key injected into tauri.conf.json"
+
+      - name: Pre-build cleanup (x86_64 only)
+        if: matrix.arch == 'x86_64'
+        run: |
+          echo "Cleaning up stale disk images and temporary files..."
+          # Unmount any stale disk images
+          hdiutil info | grep "/dev/disk" | awk '{print $1}' | xargs -I {} hdiutil detach {} -force 2>/dev/null || true
+          # Clean up temporary DMG files
+          rm -f /tmp/*.dmg /tmp/rw.*.dmg 2>/dev/null || true
+          # Check available disk space
+          df -h
+          echo "✓ Cleanup completed"
+
+      - name: Build with Tauri
+        run: |
+          attempt=1
+          until [ "$attempt" -gt "$MAX_ATTEMPTS" ]; do
+            if (cd client && pnpm tauri build ${{ matrix.args }}); then
+              exit 0
+            fi
+            if [ "$attempt" -eq "$MAX_ATTEMPTS" ]; then
+              echo "Tauri build failed after $attempt attempt(s)"
+              exit 1
+            fi
+            echo "Tauri build failed on attempt $attempt; retrying in 10 seconds"
+            attempt=$((attempt + 1))
+            sleep 10
+          done
+        env:
+          MAX_ATTEMPTS: ${{ matrix.arch == 'x86_64' && 3 || 1 }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          APPLE_CERTIFICATE: ${{ env.MAC_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ env.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ env.APPLE_ID }}
+          APPLE_PASSWORD: ${{ env.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ env.APPLE_TEAM_ID }}
+
+          VITE_PUBLIC_POSTHOG_KEY: ${{ env.VITE_PUBLIC_POSTHOG_KEY }}
+          VITE_PUBLIC_POSTHOG_HOST: ${{ env.VITE_PUBLIC_POSTHOG_HOST }}
+
+      - name: Find and rename DMG artifact
+        id: rename-dmg
+        run: |
+          DMG_PATH=$(find client/src-tauri/target/${{ matrix.target }}/release/bundle/dmg -name "*.dmg" -type f | head -n 1)
+          if [ -z "$DMG_PATH" ] || [ ! -f "$DMG_PATH" ]; then
+            echo "❌ DMG not found"
+            exit 1
+          fi
+
+          mkdir -p artifacts
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            DMG_FILENAME="Byaan_${{ steps.version.outputs.version }}_x64.dmg"
+          else
+            DMG_FILENAME="Byaan_${{ steps.version.outputs.version }}_arm64.dmg"
+          fi
+
+          cp "$DMG_PATH" "artifacts/$DMG_FILENAME"
+          echo "dmg_path=artifacts/$DMG_FILENAME" >> $GITHUB_OUTPUT
+          echo "✓ DMG prepared: $DMG_FILENAME"
+          ls -lh artifacts/
+
+      - name: Find and prepare updater artifacts
+        id: updater-artifacts
+        run: |
+          # Find the .tar.gz updater bundle (macOS creates tar.gz for updates)
+          UPDATER_BUNDLE=$(find client/src-tauri/target/${{ matrix.target }}/release/bundle/macos -name "*.app.tar.gz" -type f | head -n 1)
+          UPDATER_SIG=$(find client/src-tauri/target/${{ matrix.target }}/release/bundle/macos -name "*.app.tar.gz.sig" -type f | head -n 1)
+
+          if [ -z "$UPDATER_BUNDLE" ] || [ ! -f "$UPDATER_BUNDLE" ]; then
+            echo "❌ Updater bundle (.tar.gz) not found"
+            exit 1
+          fi
+
+          if [ -z "$UPDATER_SIG" ] || [ ! -f "$UPDATER_SIG" ]; then
+            echo "❌ Updater signature (.sig) not found"
+            exit 1
+          fi
+
+          mkdir -p artifacts
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            BUNDLE_NAME="Byaan_${{ steps.version.outputs.version }}_x64.app.tar.gz"
+            SIG_NAME="Byaan_${{ steps.version.outputs.version }}_x64.app.tar.gz.sig"
+          else
+            BUNDLE_NAME="Byaan_${{ steps.version.outputs.version }}_arm64.app.tar.gz"
+            SIG_NAME="Byaan_${{ steps.version.outputs.version }}_arm64.app.tar.gz.sig"
+          fi
+
+          cp "$UPDATER_BUNDLE" "artifacts/$BUNDLE_NAME"
+          cp "$UPDATER_SIG" "artifacts/$SIG_NAME"
+
+          # Read the signature content for later use in latest.json
+          SIGNATURE=$(cat "$UPDATER_SIG")
+
+          echo "bundle_path=artifacts/$BUNDLE_NAME" >> $GITHUB_OUTPUT
+          echo "sig_path=artifacts/$SIG_NAME" >> $GITHUB_OUTPUT
+          echo "signature=$SIGNATURE" >> $GITHUB_OUTPUT
+          echo "✓ Updater artifacts prepared"
+          ls -lh artifacts/
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Byaan_${{ steps.version.outputs.version }}_${{ matrix.arch == 'x86_64' && 'x64' || 'arm64' }}
+          path: ${{ steps.rename-dmg.outputs.dmg_path }}
+          if-no-files-found: error
+
+      - name: Upload to R2 (Versioned)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ env.R2_ENDPOINT }}
+          R2_BUCKET: ${{ env.R2_BUCKET_NAME }}
+        run: |
+          ARCH_NAME="${{ matrix.arch == 'x86_64' && 'x64' || 'arm64' }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          DMG_FILE="${{ steps.rename-dmg.outputs.dmg_path }}"
+          BUNDLE_FILE="${{ steps.updater-artifacts.outputs.bundle_path }}"
+          SIG_FILE="${{ steps.updater-artifacts.outputs.sig_path }}"
+
+          # Upload DMG to versioned directory
+          R2_PATH="versions/v${VERSION}/${ARCH_NAME}/$(basename $DMG_FILE)"
+          echo "Uploading DMG to R2: $R2_PATH"
+          aws s3 cp "$DMG_FILE" "s3://${R2_BUCKET}/${R2_PATH}" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read
+          echo "✓ DMG uploaded"
+
+          # Upload updater bundle (.tar.gz)
+          BUNDLE_PATH="versions/v${VERSION}/${ARCH_NAME}/$(basename $BUNDLE_FILE)"
+          echo "Uploading updater bundle to R2: $BUNDLE_PATH"
+          aws s3 cp "$BUNDLE_FILE" "s3://${R2_BUCKET}/${BUNDLE_PATH}" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read
+          echo "✓ Updater bundle uploaded"
+
+          # Upload signature (.sig)
+          SIG_PATH="versions/v${VERSION}/${ARCH_NAME}/$(basename $SIG_FILE)"
+          echo "Uploading signature to R2: $SIG_PATH"
+          aws s3 cp "$SIG_FILE" "s3://${R2_BUCKET}/${SIG_PATH}" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read
+          echo "✓ Signature uploaded"
+
+          echo ""
+          echo "✓ All artifacts uploaded to R2:"
+          echo "  - $R2_PATH"
+          echo "  - $BUNDLE_PATH"
+          echo "  - $SIG_PATH"
+
+      - name: Upload to R2 Stable Channel
+        if: github.ref_type == 'tag' && steps.version.outputs.is_main == 'true' && github.event.release.prerelease != true
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ env.R2_ENDPOINT }}
+          R2_BUCKET: ${{ env.R2_BUCKET_NAME }}
+        run: |
+          ARCH_NAME="${{ matrix.arch == 'x86_64' && 'x64' || 'arm64' }}"
+          DMG_FILE="${{ steps.rename-dmg.outputs.dmg_path }}"
+          BUNDLE_FILE="${{ steps.updater-artifacts.outputs.bundle_path }}"
+          SIG_FILE="${{ steps.updater-artifacts.outputs.sig_path }}"
+
+          # Upload DMG to stable (no version in filename)
+          echo "Uploading DMG to stable channel: stable/${ARCH_NAME}/Byaan.dmg"
+          aws s3 cp "$DMG_FILE" "s3://${R2_BUCKET}/stable/${ARCH_NAME}/Byaan.dmg" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read
+          echo "✓ DMG uploaded to stable"
+
+          # Upload updater bundle (.tar.gz) - no version in filename
+          echo "Uploading updater bundle to stable: stable/${ARCH_NAME}/Byaan.app.tar.gz"
+          aws s3 cp "$BUNDLE_FILE" "s3://${R2_BUCKET}/stable/${ARCH_NAME}/Byaan.app.tar.gz" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read
+          echo "✓ Updater bundle uploaded to stable"
+
+          # Upload signature (.sig) - no version in filename
+          echo "Uploading signature to stable: stable/${ARCH_NAME}/Byaan.app.tar.gz.sig"
+          aws s3 cp "$SIG_FILE" "s3://${R2_BUCKET}/stable/${ARCH_NAME}/Byaan.app.tar.gz.sig" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read
+          echo "✓ Signature uploaded to stable"
+
+          echo ""
+          echo "✓ All stable channel artifacts uploaded:"
+          echo "  - stable/${ARCH_NAME}/Byaan.dmg"
+          echo "  - stable/${ARCH_NAME}/Byaan.app.tar.gz"
+          echo "  - stable/${ARCH_NAME}/Byaan.app.tar.gz.sig"
+
+  create-release:
+    name: Create Release
+    needs: [build-artifacts]
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: write
+    environment: production
+    env:
+      REF_TYPE: ${{ github.ref_type }}
+      RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate trusted release source
+        run: |
+          if [ "$GITHUB_ACTOR" != "hadijaveed" ]; then
+            echo "Only hadijaveed may create production releases from this workflow."
+            echo "Current actor: $GITHUB_ACTOR"
+            exit 1
+          fi
+
+          if [ "$REF_TYPE" = "tag" ] && ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release tag must point to a commit contained in origin/main before the GitHub token can create a release."
+            echo "Current SHA: $GITHUB_SHA"
+            exit 1
+          fi
+
+          echo "Trusted release source verified."
+
+      - name: Extract version and check if on main
+        id: version
+        run: |
+          if [ "$REF_TYPE" = "tag" ]; then
+            VERSION="${RELEASE_TAG_NAME:-${GITHUB_REF_NAME:-${GITHUB_REF#refs/tags/}}}"
+          else
+            VERSION=$(grep -o '"version": *"[^"]*"' client/src-tauri/tauri.conf.json | grep -o '"[0-9][^"]*"' | tr -d '"')
+          fi
+          VERSION="${VERSION#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $VERSION"
+            echo "Use a semver tag such as v0.1.3 or 0.1.3."
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Creating release for version: v$VERSION"
+
+          # Check if the current commit is on main branch
+          if git merge-base --is-ancestor ${{ github.sha }} origin/main 2>/dev/null; then
+            echo "is_main=true" >> $GITHUB_OUTPUT
+            echo "✓ Tag is on main branch"
+          else
+            echo "is_main=false" >> $GITHUB_OUTPUT
+            echo "⚠ Tag is NOT on main branch"
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+
+      - name: Display structure of downloaded files
+        run: |
+          echo "=== Downloaded artifacts structure ==="
+          ls -R
+          echo ""
+          echo "=== All DMG files found ==="
+          find . -name "*.dmg" -type f
+
+      - name: Prepare DMG files for release
+        run: |
+          mkdir -p release-artifacts
+          echo "Copying DMG files to release-artifacts..."
+          find . -name "*.dmg" -type f -exec cp {} release-artifacts/ \;
+          echo ""
+          echo "=== DMG files ready for release ==="
+          ls -lh release-artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          files: release-artifacts/*.dmg
+          draft: false
+          prerelease: ${{ github.event.release.prerelease }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  generate-update-manifest:
+    name: Generate Update Manifest
+    needs: [build-artifacts]
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: read
+    environment: production
+    env:
+      REF_TYPE: ${{ github.ref_type }}
+      RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate trusted release source
+        run: |
+          if [ "$GITHUB_ACTOR" != "hadijaveed" ]; then
+            echo "Only hadijaveed may publish production update manifests."
+            echo "Current actor: $GITHUB_ACTOR"
+            exit 1
+          fi
+
+          if [ "$REF_TYPE" = "tag" ] && ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release tag must point to a commit contained in origin/main before production credentials are loaded."
+            echo "Current SHA: $GITHUB_SHA"
+            exit 1
+          fi
+
+          echo "Trusted release source verified."
+
+      - name: Fetch secrets from Infisical
+        uses: Infisical/secrets-action@8a06c1bdcd5b8635d510c52d4b57a92c1ccef785 # v1.0.9
+        with:
+          method: "universal"
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          domain: "https://app.infisical.com"
+          env-slug: "prod"
+          project-slug: "byaan-app-secrets-i-ffg"
+
+      - name: Extract version and check if on main
+        id: version
+        run: |
+          if [ "$REF_TYPE" = "tag" ]; then
+            VERSION="${RELEASE_TAG_NAME:-${GITHUB_REF_NAME:-${GITHUB_REF#refs/tags/}}}"
+          else
+            VERSION=$(grep -o '"version": *"[^"]*"' client/src-tauri/tauri.conf.json | grep -o '"[0-9][^"]*"' | tr -d '"')
+          fi
+          VERSION="${VERSION#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $VERSION"
+            echo "Use a semver tag such as v0.1.3 or 0.1.3."
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building manifest for version: $VERSION"
+
+          # Check if the current commit is on main branch
+          if git merge-base --is-ancestor ${{ github.sha }} origin/main 2>/dev/null; then
+            echo "is_main=true" >> $GITHUB_OUTPUT
+            echo "✓ Tag is on main branch - will update stable/latest.json"
+          else
+            echo "is_main=false" >> $GITHUB_OUTPUT
+            echo "⚠ Tag is NOT on main branch - skipping stable/latest.json update"
+          fi
+
+      - name: Generate and upload stable/latest.json (main only)
+        if: steps.version.outputs.is_main == 'true' && github.event.release.prerelease != true
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ env.R2_ENDPOINT }}
+          R2_BUCKET: ${{ env.R2_BUCKET_NAME }}
+          R2_PUBLIC_URL: ${{ env.R2_PUBLIC_URL }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Download signature files from stable channel
+          echo "Downloading signature files from stable channel..."
+          aws s3 cp "s3://${R2_BUCKET}/stable/x64/Byaan.app.tar.gz.sig" x64.sig \
+            --endpoint-url "$AWS_ENDPOINT_URL"
+          aws s3 cp "s3://${R2_BUCKET}/stable/arm64/Byaan.app.tar.gz.sig" arm64.sig \
+            --endpoint-url "$AWS_ENDPOINT_URL"
+
+          X64_SIG=$(cat x64.sig)
+          ARM64_SIG=$(cat arm64.sig)
+
+          # Get release notes from latest commit
+          NOTES=$(git log -1 --pretty=%B | head -n 1)
+
+          # Generate latest.json pointing to stable channel
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "$NOTES" \
+            --arg pub_date "$PUB_DATE" \
+            --arg x64_sig "$X64_SIG" \
+            --arg arm64_sig "$ARM64_SIG" \
+            --arg r2_url "$R2_PUBLIC_URL" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-x86_64": {
+                  signature: $x64_sig,
+                  url: ($r2_url + "/stable/x64/Byaan.app.tar.gz")
+                },
+                "darwin-aarch64": {
+                  signature: $arm64_sig,
+                  url: ($r2_url + "/stable/arm64/Byaan.app.tar.gz")
+                }
+              }
+            }' > latest.json
+
+          echo "✓ Generated latest.json:"
+          cat latest.json
+
+          # Upload to stable directory (controls auto-updater)
+          echo "Uploading latest.json to stable channel..."
+          aws s3 cp latest.json "s3://${R2_BUCKET}/stable/latest.json" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read \
+            --content-type "application/json"
+
+          echo ""
+          echo "✓ Update manifest uploaded: ${R2_BUCKET}/stable/latest.json"
+
+          # Generate download.json with DMG download URLs
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "$NOTES" \
+            --arg pub_date "$PUB_DATE" \
+            --arg r2_url "$R2_PUBLIC_URL" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-x86_64": {
+                  url: ($r2_url + "/stable/x64/Byaan.dmg")
+                },
+                "darwin-aarch64": {
+                  url: ($r2_url + "/stable/arm64/Byaan.dmg")
+                }
+              }
+            }' > download.json
+
+          echo "✓ Generated download.json:"
+          cat download.json
+
+          # Upload download.json to stable directory
+          echo "Uploading download.json to stable channel..."
+          aws s3 cp download.json "s3://${R2_BUCKET}/stable/download.json" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read \
+            --content-type "application/json"
+
+          echo ""
+          echo "✓ Download manifest uploaded: ${R2_BUCKET}/stable/download.json"

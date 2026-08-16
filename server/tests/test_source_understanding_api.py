@@ -74,76 +74,13 @@ SALES_SCHEMA = {
 }
 
 
-SQLITE_SALES_SCHEMA = {
-    "datasource_type": "sqlite",
-    "datasource_name": "Sales Demo SQLite",
-    "database_name": "sales_demo.sqlite",
-    "selected_schema": "main",
-    "schema": {
-        "orders": {
-            "schema": "main",
-            "description": "Order header at submitted order grain.",
-            "row_count": 12,
-            "columns": [
-                {"name": "order_id", "type": "INTEGER", "nullable": False},
-                {"name": "customer_id", "type": "INTEGER", "nullable": False},
-                {"name": "order_status", "type": "TEXT", "nullable": False},
-                {"name": "paid_at", "type": "TEXT", "nullable": True},
-                {"name": "net_amount", "type": "REAL", "nullable": False},
-            ],
-            "primary_key": ["order_id"],
-            "indexes": [{"name": "idx_orders_customer", "columns": ["customer_id"], "unique": False}],
-            "foreign_keys": [
-                {
-                    "constraint_name": "fk_orders_customers",
-                    "column": ["customer_id"],
-                    "ref_table": "customers",
-                    "ref_column": ["customer_id"],
-                    "orphan_rate": 0,
-                    "unique_rate": 100,
-                }
-            ],
-            "sample_rows": [
-                {
-                    "order_id": 1001,
-                    "customer_id": 501,
-                    "order_status": "PAID",
-                    "paid_at": "2026-08-01T10:30:00",
-                    "net_amount": 120.5,
-                }
-            ],
-        },
-        "customers": {
-            "schema": "main",
-            "description": "Customer dimension.",
-            "row_count": 5,
-            "columns": [
-                {"name": "customer_id", "type": "INTEGER", "nullable": False},
-                {"name": "customer_tier", "type": "TEXT", "nullable": True},
-                {"name": "email", "type": "TEXT", "nullable": True},
-            ],
-            "primary_key": ["customer_id"],
-            "sample_rows": [{"customer_id": 501, "customer_tier": "Gold", "email": "masked@example.com"}],
-        },
-    },
-}
-
-
-async def _create_connection_dataset(
-    test_session,
-    tenant_id,
-    user_id,
-    schema=SALES_SCHEMA,
-    connection_type: str = "oracle",
-    name: str = "Oracle SALES",
-    connection_obj: dict | None = None,
-):
+async def _create_connection_dataset(test_session, tenant_id, user_id, schema=SALES_SCHEMA):
     connection = Connection(
         tenant_id=tenant_id,
         created_by=user_id,
-        type=connection_type,
-        name=name,
-        connection_obj_encrypted=json.dumps(connection_obj or {"host": "oracle.local", "user": "sales"}),
+        type="oracle",
+        name="Oracle SALES",
+        connection_obj_encrypted=json.dumps({"host": "oracle.local", "user": "sales"}),
         schema_cache=json.dumps(schema),
         is_public=True,
     )
@@ -153,7 +90,7 @@ async def _create_connection_dataset(
         tenant_id=tenant_id,
         created_by=user_id,
         type="connection",
-        name=name,
+        name="Oracle SALES",
         connection_id=connection.id,
         is_public=True,
     )
@@ -289,71 +226,11 @@ async def test_verified_source_candidates_create_semantic_model_draft_with_linea
     assert payload["lineage"]["candidates"][0]["source_snapshot_id"]
     assert any(entity["table"] == "ORDERS" for entity in model["entities"])
     assert any(metric["businessName"] for metric in model["metrics"])
-    paid_revenue = next(metric for metric in model["metrics"] if metric["id"] == "orders_net_amount")
-    assert set(paid_revenue["dimensions"]) >= {"orders_order_status", "orders_paid_at", "customers_customer_tier"}
 
     row = await test_session.scalar(select(SemanticModel).where(SemanticModel.slug == "sales-source-draft"))
     assert row is not None
     review = json.loads(row.review_json)
     assert review["sourceUnderstandingLineage"]
-
-
-async def test_sqlite_source_understanding_creates_semantic_model_draft(test_client, test_session):
-    tenant = (await test_session.execute(select(Tenant))).scalars().first()
-    assert tenant is not None
-    _, dataset = await _create_connection_dataset(
-        test_session,
-        tenant.id,
-        tenant.owner_id,
-        schema=SQLITE_SALES_SCHEMA,
-        connection_type="sqlite",
-        name="Sales Demo SQLite",
-        connection_obj={"database_path": "/tmp/sales_demo.sqlite"},
-    )
-
-    analyze_response = await test_client.post(f"/api/datasources/{dataset.id}/understanding/analyze", json={})
-
-    assert analyze_response.status_code == 200
-    understanding = analyze_response.json()["data"]
-    assert understanding["datasource_type"] == "sqlite"
-    assert understanding["latest_run"]["status"] == "completed"
-    assert understanding["profile"]["table_count"] == 2
-    assert understanding["profile"]["relationship_count"] == 1
-
-    candidates = understanding["candidates"]
-    selected = [
-        item
-        for item in candidates
-        if item["candidate_type"] in {"schema_map", "relationship", "data_truth"}
-    ]
-    assert {item["candidate_type"] for item in selected} >= {"schema_map", "relationship", "data_truth"}
-
-    for candidate in selected:
-        review_response = await test_client.post(
-            f"/api/datasources/{dataset.id}/understanding/candidates/{candidate['id']}/review",
-            json={"action": "accept"},
-        )
-        assert review_response.status_code == 200
-
-    apply_response = await test_client.post(
-        f"/api/datasources/{dataset.id}/understanding/semantic-model-draft",
-        json={
-            "model_id": "sqlite-sales-source-draft",
-            "name": "SQLite Sales Source Draft",
-            "domain": "Sales / Orders",
-            "owner": "Revenue Analytics",
-            "candidate_ids": [item["id"] for item in selected],
-        },
-    )
-
-    assert apply_response.status_code == 200
-    payload = apply_response.json()["data"]
-    model = payload["model"]
-    assert model["datasourceKind"] == "sqlite"
-    assert model["datasourceId"] == str(dataset.id)
-    assert any(entity["table"] == "orders" for entity in model["entities"])
-    assert any(metric["id"] == "orders_net_amount" for metric in model["metrics"])
-    assert any(relationship["fromEntity"] == "orders" for relationship in model["relationships"])
 
 
 async def test_source_understanding_detects_drift_and_marks_previous_verified_candidates_stale(

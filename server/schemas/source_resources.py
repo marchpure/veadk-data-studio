@@ -128,7 +128,6 @@ class SourceResourceProcessingRead(BaseModel):
     status: str
     stage: str
     message: str
-    last_error: dict[str, Any] | None = None
     latest_snapshot_id: UUID | None = None
     knowledge_resource_id: UUID | None = None
     evidence_count: int = 0
@@ -145,13 +144,6 @@ class KnowledgeSearchRequest(BaseModel):
 class KnowledgeSearchResponse(BaseModel):
     items: list[EvidenceFragmentRead]
     total: int
-
-
-class EvidenceReadResponse(BaseModel):
-    evidence: EvidenceFragmentRead
-    knowledge_resource: KnowledgeResourceRead
-    source_snapshot: SourceSnapshotRead
-    source_resource: SourceResourceRead
 
 
 class NotebookAssetCreate(BaseModel):

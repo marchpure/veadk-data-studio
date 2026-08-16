@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import io
 import json
-import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import pytest
@@ -18,7 +14,7 @@ from server.models.datasets import Dataset
 from server.models.files import File
 from server.models.knowledge_resources import EvidenceFragment, KnowledgeResource
 from server.models.settings import Setting
-from server.models.source_connections import FeishuOAuthFlow, SourceConnection
+from server.models.source_connections import SourceConnection
 from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
 from server.models.tenant import Tenant
@@ -94,7 +90,6 @@ class FakeConnectorAdapter:
                 "provider": "volcengine_tos",
                 "bucket": "sales-bucket",
                 "key": "reports/revenue.csv",
-                "version_id": "version-1",
                 "etag": "etag-1",
                 "region": "cn-beijing",
             },
@@ -169,17 +164,12 @@ class FakeFeishuConnectorAdapter:
             raw_payload = {
                 "tables": [
                     {
-                        "table": {"table_id": "tbl1", "name": "线索", "view_id": "view1"},
-                        "fields": {
-                            "items": [
-                                {"field_id": "fld_region", "field_name": "region"},
-                                {"field_id": "fld_lead_count", "field_name": "lead_count"},
-                            ]
-                        },
+                        "table": {"table_id": "tbl1", "name": "线索"},
+                        "fields": {"items": [{"field_name": "region"}, {"field_name": "lead_count"}]},
                         "records": {
                             "items": [
-                                {"record_id": "rec_east", "fields": {"region": "East", "lead_count": 3}},
-                                {"record_id": "rec_west", "fields": {"region": "West", "lead_count": 2}},
+                                {"fields": {"region": "East", "lead_count": 3}},
+                                {"fields": {"region": "West", "lead_count": 2}},
                             ]
                         },
                     }
@@ -200,8 +190,6 @@ class FakeFeishuConnectorAdapter:
                     "wiki_token": resource.external_id if resource.resource_type == "feishu_wiki" else None,
                     "spreadsheet_token": resource.external_id if resource.resource_type == "feishu_sheet" else None,
                     "app_token": resource.external_id if resource.resource_type == "feishu_base" else None,
-                    "record_id": "rec_east" if resource.resource_type == "feishu_base" else None,
-                    "field_id": "fld_lead_count" if resource.resource_type == "feishu_base" else None,
                 },
             },
             provider="byaan-native",
@@ -211,18 +199,10 @@ class FakeFeishuConnectorAdapter:
 
 
 class _FakeTosHead:
-    def __init__(
-        self,
-        *,
-        size: int = 12,
-        etag: str = '"etag-1"',
-        last_modified: str = "2026-08-14T00:00:00Z",
-        version_id: str = "version-1",
-    ):
+    def __init__(self, *, size: int = 12, etag: str = '"etag-1"', last_modified: str = "2026-08-14T00:00:00Z"):
         self.content_length = size
         self.etag = etag
         self.last_modified = last_modified
-        self.version_id = version_id
 
 
 class _FakeTosObject:
@@ -419,7 +399,7 @@ async def test_feishu_admin_config_and_oauth_callback_encrypt_tokens_and_isolate
         app_id="cli_a",
         app_secret="feishu-secret",
         redirect_uri="http://127.0.0.1:8080/api/source-connections/feishu/oauth/callback",
-        scopes=["space:document:retrieve", "docx:document:readonly", "wiki:wiki:readonly"],
+        scopes=["drive:drive:readonly", "docs:doc:readonly"],
     )
     await test_session.commit()
 
@@ -432,18 +412,8 @@ async def test_feishu_admin_config_and_oauth_callback_encrypt_tokens_and_isolate
         tenant_id=tenant.id,
         user_id=tenant.owner_id,
     )
-    parsed_authorization_url = urlparse(authorization_url)
-    authorization_params = parse_qs(parsed_authorization_url.query)
-    assert parsed_authorization_url.netloc == "accounts.feishu.cn"
-    assert parsed_authorization_url.path == "/open-apis/authen/v1/authorize"
-    assert authorization_params["client_id"] == ["cli_a"]
-    assert authorization_params["response_type"] == ["code"]
-    assert authorization_params["prompt"] == ["consent"]
-    assert set(authorization_params["scope"][0].split()) == {
-        "space:document:retrieve",
-        "docx:document:readonly",
-        "wiki:wiki:readonly",
-    }
+    assert "open-apis/authen/v1/authorize" in authorization_url
+    assert "app_id=cli_a" in authorization_url
     assert "feishu-secret" not in authorization_url
 
     async def fake_exchange_code(*, config, code):
@@ -453,7 +423,7 @@ async def test_feishu_admin_config_and_oauth_callback_encrypt_tokens_and_isolate
             "access_token": "access-token",
             "refresh_token": "refresh-token",
             "expires_in": 3600,
-            "scope": ["space:document:retrieve", "docx:document:readonly", "wiki:wiki:readonly"],
+            "scope": ["drive:drive:readonly", "docs:doc:readonly"],
         }
 
     async def fake_get_user_info(access_token):
@@ -488,290 +458,27 @@ async def test_feishu_admin_config_and_oauth_callback_encrypt_tokens_and_isolate
     assert [item.id for item in same_tenant_connections] == [connection.id]
     assert other_tenant_connections == []
 
-    flow = await test_session.scalar(select(FeishuOAuthFlow).where(FeishuOAuthFlow.state_hash == FeishuOAuthStateStore.state_hash(state)))
-    assert flow is not None
-    assert flow.status == "connected"
-    assert flow.connection_id == connection.id
-    assert flow.consumed_at is not None
-    assert flow.result_json["connection_id"] == str(connection.id)
-
-
-async def test_feishu_admin_config_status_is_admin_only_and_never_returns_secret(test_client, test_session, monkeypatch):
-    tenant = await _tenant(test_session)
-    set_tenant_id(tenant.id)
-    monkeypatch.setenv("BYAAN_FEISHU_APP_ID", "cli_hosted")
-    monkeypatch.setenv("BYAAN_FEISHU_APP_SECRET", "hosted-secret")
-    monkeypatch.setenv("BYAAN_FEISHU_REDIRECT_URI", "http://127.0.0.1:8080/api/source-connections/feishu/oauth/callback")
-
-    status_response = await test_client.get("/api/source-connections/feishu/status")
-    assert status_response.status_code == 200
-    status_data = status_response.json()["data"]
-    assert status_data["admin_config"]["mode"] == "hosted"
-    assert "cli_hosted" not in str(status_data)
-    assert "hosted-secret" not in str(status_data)
-
-    admin_response = await test_client.get("/api/source-connections/feishu/admin-config")
-    assert admin_response.status_code == 200
-    admin_data = admin_response.json()["data"]
-    assert admin_data["app_id"] == "cli_hosted"
-    assert admin_data["secret_configured"] is True
-    assert "hosted-secret" not in str(admin_data)
-
-    validation = await test_client.post("/api/source-connections/feishu/admin-config/validate")
-    assert validation.status_code == 200
-    checks = validation.json()["data"]["checks"]
-    assert checks["credentials_valid"]["ok"] is True
-    assert checks["scopes_complete"]["ok"] is True
-
-    member = User(
-        id=uuid4(),
-        email="feishu-member@test.com",
-        hashed_password="fakehash",
-        is_active=True,
-        is_verified=True,
-        is_superuser=False,
-    )
-    test_session.add(member)
-    await test_session.flush()
-    test_session.add(TenantMember(user_id=member.id, tenant_id=tenant.id, role=TenantRole.MEMBER.value))
-    await test_session.commit()
-    monkeypatch.setenv("BYAAN_LOCAL_AUTH_IMPERSONATION_ENABLED", "true")
-
-    member_response = await test_client.get(
-        "/api/source-connections/feishu/admin-config",
-        headers={"X-Local-User-ID": str(member.id)},
-    )
-    assert member_response.status_code == 403
-
-
-async def test_feishu_self_built_config_takes_precedence_over_hosted_env(test_session, monkeypatch):
-    tenant = await _tenant(test_session)
-    set_tenant_id(tenant.id)
-    monkeypatch.setenv("BYAAN_FEISHU_APP_ID", "cli_hosted")
-    monkeypatch.setenv("BYAAN_FEISHU_APP_SECRET", "hosted-secret")
-    monkeypatch.setenv("BYAAN_FEISHU_REDIRECT_URI", "http://127.0.0.1:8080/hosted-callback")
-
-    await FeishuAdminConfigService.save_config(
-        session=test_session,
-        app_id="cli_self",
-        app_secret="self-secret",
-        redirect_uri="http://127.0.0.1:8080/self-callback",
-        scopes=["space:document:retrieve", "docx:document:readonly", "wiki:wiki:readonly"],
-    )
-    await test_session.commit()
-
-    config = await FeishuAdminConfigService.load_config(session=test_session)
-    assert config is not None
-    assert config["mode"] == "self_built"
-    assert config["app_id"] == "cli_self"
-    assert config["app_secret"] == "self-secret"
-
-
-async def test_feishu_legacy_doc_scope_is_migrated_before_oauth(test_session):
-    tenant = await _tenant(test_session)
-    await FeishuAdminConfigService.save_config(
-        session=test_session,
-        app_id="cli_legacy",
-        app_secret="legacy-secret",
-        redirect_uri="http://127.0.0.1:8080/api/source-connections/feishu/oauth/callback",
-        scopes=["space:document:retrieve", "docs:doc:readonly", "wiki:wiki:readonly"],
-    )
-    await test_session.commit()
-
-    config = await FeishuAdminConfigService.load_config(session=test_session)
-    assert config is not None
-    assert "docs:doc:readonly" not in config["scopes"]
-    assert "docx:document:readonly" in config["scopes"]
-
-    authorization_url, _ = await FeishuConnectorAdapter().create_authorization_url(
-        session=test_session,
-        tenant_id=tenant.id,
-        user_id=tenant.owner_id,
-    )
-    requested_scopes = set(parse_qs(urlparse(authorization_url).query)["scope"][0].split())
-    assert "docs:doc:readonly" not in requested_scopes
-    assert "docx:document:readonly" in requested_scopes
-
-
-async def test_feishu_oauth_token_exchange_uses_v3_contract(monkeypatch):
-    captured: dict[str, Any] = {}
-
-    class FakeResponse:
-        status_code = 200
-
-        @staticmethod
-        def json():
-            return {
-                "code": 0,
-                "access_token": "user-access-token",
-                "refresh_token": "refresh-token",
-                "expires_in": 7200,
-                "scope": "space:document:retrieve docx:document:readonly wiki:wiki:readonly",
-                "token_type": "Bearer",
-            }
-
-    class FakeClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
-
-        async def post(self, url, *, json):
-            captured["url"] = url
-            captured["json"] = json
-            return FakeResponse()
-
-    monkeypatch.setattr("server.services.source_connectors.httpx.AsyncClient", lambda **kwargs: FakeClient())
-    adapter = FeishuConnectorAdapter()
-    token = await adapter._exchange_code(
-        config={
-            "app_id": "cli_v3",
-            "app_secret": "secret-v3",
-            "redirect_uri": "http://127.0.0.1:8080/api/source-connections/feishu/oauth/callback",
-        },
-        code="authorization-code",
-    )
-
-    assert captured["url"] == "https://accounts.feishu.cn/oauth/v3/token"
-    assert captured["json"] == {
-        "client_id": "cli_v3",
-        "client_secret": "secret-v3",
-        "grant_type": "authorization_code",
-        "code": "authorization-code",
-        "redirect_uri": "http://127.0.0.1:8080/api/source-connections/feishu/oauth/callback",
-    }
-    assert token["scope"] == "space:document:retrieve docx:document:readonly wiki:wiki:readonly"
-
-
-async def test_feishu_oauth_refresh_uses_v3_contract(monkeypatch):
-    captured: dict[str, Any] = {}
-
-    class FakeResponse:
-        status_code = 200
-
-        @staticmethod
-        def json():
-            return {
-                "code": 0,
-                "access_token": "refreshed-user-access-token",
-                "refresh_token": "rotated-refresh-token",
-                "expires_in": 7200,
-                "scope": "space:document:retrieve docx:document:readonly wiki:wiki:readonly",
-                "token_type": "Bearer",
-            }
-
-    class FakeClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
-
-        async def post(self, url, *, json):
-            captured["url"] = url
-            captured["json"] = json
-            return FakeResponse()
-
-    monkeypatch.setattr("server.services.source_connectors.httpx.AsyncClient", lambda **kwargs: FakeClient())
-    adapter = FeishuConnectorAdapter()
-    token = await adapter._refresh_token(
-        config={
-            "app_id": "cli_v3",
-            "app_secret": "secret-v3",
-            "redirect_uri": "http://127.0.0.1:8080/api/source-connections/feishu/oauth/callback",
-        },
-        refresh_token="old-refresh-token",
-    )
-
-    assert captured["url"] == "https://accounts.feishu.cn/oauth/v3/token"
-    assert captured["json"] == {
-        "client_id": "cli_v3",
-        "client_secret": "secret-v3",
-        "grant_type": "refresh_token",
-        "refresh_token": "old-refresh-token",
-    }
-    assert token["refresh_token"] == "rotated-refresh-token"
-
 
 async def test_feishu_oauth_state_is_single_use_and_expired_state_is_rejected(test_session):
     tenant = await _tenant(test_session)
-    state = await FeishuOAuthStateStore.create(
-        session=test_session,
+    state = FeishuOAuthStateStore.create(
         tenant_id=tenant.id,
         user_id=tenant.owner_id,
         redirect_uri="http://127.0.0.1/callback",
     )
-    await test_session.commit()
-    first = await FeishuOAuthStateStore.consume(session=test_session, state=state)
-    second = await FeishuOAuthStateStore.consume(session=test_session, state=state)
+    first = FeishuOAuthStateStore.pop(state)
+    second = FeishuOAuthStateStore.pop(state)
     assert first is not None
-    assert first.tenant_id == tenant.id
+    assert first["tenant_id"] == str(tenant.id)
     assert second is None
 
-    expired_state = await FeishuOAuthStateStore.create(
-        session=test_session,
+    expired_state = FeishuOAuthStateStore.create(
         tenant_id=tenant.id,
         user_id=tenant.owner_id,
         redirect_uri="http://127.0.0.1/callback",
     )
-    expired_flow = await test_session.scalar(
-        select(FeishuOAuthFlow).where(FeishuOAuthFlow.state_hash == FeishuOAuthStateStore.state_hash(expired_state))
-    )
-    assert expired_flow is not None
-    expired_flow.expires_at = datetime.utcnow() - timedelta(seconds=1)
-    await test_session.commit()
-    assert await FeishuOAuthStateStore.consume(session=test_session, state=expired_state) is None
-    await test_session.refresh(expired_flow)
-    assert expired_flow.status == "state_expired"
-
-
-async def test_feishu_oauth_callback_route_returns_html_and_result_is_pollable(test_client, test_session, monkeypatch):
-    tenant = await _tenant(test_session)
-    set_tenant_id(tenant.id)
-    await FeishuAdminConfigService.save_config(
-        session=test_session,
-        app_id="cli_a",
-        app_secret="feishu-secret",
-        redirect_uri="http://test/api/source-connections/feishu/oauth/callback",
-        scopes=["space:document:retrieve", "docx:document:readonly", "wiki:wiki:readonly"],
-    )
-    await test_session.commit()
-
-    async def fake_exchange_code(self, *, config, code):
-        return {
-            "access_token": "access-token",
-            "refresh_token": "refresh-token",
-            "expires_in": 3600,
-            "scope": ["space:document:retrieve", "docx:document:readonly", "wiki:wiki:readonly"],
-        }
-
-    async def fake_get_user_info(self, access_token):
-        return {"open_id": "ou_1", "name": "郝行军"}
-
-    monkeypatch.setattr(FeishuConnectorAdapter, "_exchange_code", fake_exchange_code)
-    monkeypatch.setattr(FeishuConnectorAdapter, "_get_user_info", fake_get_user_info)
-
-    start = await test_client.post("/api/source-connections/feishu/oauth/start")
-    assert start.status_code == 200
-    state = start.json()["data"]["state"]
-    assert start.json()["data"]["result_url"].endswith(f"state={state}")
-
-    callback = await test_client.get(f"/api/source-connections/feishu/oauth/callback?code=oauth-code&state={state}")
-    assert callback.status_code == 200
-    assert "text/html" in callback.headers["content-type"]
-    assert "byaan:feishu-oauth" in callback.text
-    assert "access-token" not in callback.text
-
-    result = await test_client.get(f"/api/source-connections/feishu/oauth/result?state={state}")
-    assert result.status_code == 200
-    body = result.json()["data"]
-    assert body["status"] == "connected"
-    assert body["connection_id"]
-
-    repeat = await test_client.get(f"/api/source-connections/feishu/oauth/callback?code=oauth-code&state={state}")
-    assert repeat.status_code == 400
-    assert "Invalid or expired" in repeat.text
+    FeishuOAuthStateStore._states[expired_state]["created_at"] = datetime.utcnow() - timedelta(hours=1)
+    assert FeishuOAuthStateStore.pop(expired_state) is None
 
 
 async def test_picker_import_sync_and_idempotency_use_source_connection_not_placeholder(test_session):
@@ -835,7 +542,6 @@ async def test_picker_import_sync_and_idempotency_use_source_connection_not_plac
     assert resource["status"] == "ready"
     assert str(resource["source_connection_id"]) == str(connection.id)
     assert resource["latest_snapshot"]["external_revision"] == "etag-1"
-    assert resource["latest_snapshot"]["metadata_json"]["version_id"] == "version-1"
     assert resource["knowledge_resource"]["evidence_count"] == 1
     assert resource["projected_dataset_id"]
     query_result = await DataFrameFileService.execute_duckdb_query_on_dataset(
@@ -878,11 +584,6 @@ async def test_picker_import_sync_and_idempotency_use_source_connection_not_plac
     assert len(evidence) == 1
     assert len(datasets) == 1
     assert len(files) == 1
-    projection = (snapshots[0].metadata_json or {})["projected_dataset"]
-    projected_file = projection["files"][0]
-    assert projected_file["source_locator"]["bucket"] == "sales-bucket"
-    assert projected_file["source_locator"]["key"] == "reports/revenue.csv"
-    assert projected_file["source_locator"]["version_id"] == "version-1"
     await test_session.refresh(resources[0])
     assert resources[0].status == "ready"
 
@@ -977,37 +678,6 @@ async def test_feishu_picker_import_syncs_real_resource_types_without_placeholde
     assert len(datasets) == 2
     assert len(files) == 2
 
-    wiki_item = next(item for item in listed["items"] if item["resource_type"] == "feishu_wiki")
-    reimported_wiki = await resource_service.import_resources(
-        session=test_session,
-        tenant_id=tenant.id,
-        user_id=tenant.owner_id,
-        payload=SourceResourceImportRequest(
-            connection_id=connection.id,
-            selections=[
-                {
-                    "external_id": wiki_item["external_id"],
-                    "resource_type": wiki_item["resource_type"],
-                    "name": wiki_item["name"],
-                    "source_url": wiki_item["source_url"],
-                    "selection_config": {"imported_from": "datasources_connector_picker"},
-                    "metadata": wiki_item["metadata"],
-                }
-            ],
-        ),
-        adapter=adapter,
-    )
-
-    assert reimported_wiki["succeeded"] == 1
-    assert reimported_wiki["failed"] == 0
-    wiki_resource = reimported_wiki["results"][0]["resource"]
-    assert wiki_resource["selection_config_json"]["imported_from"] == "datasources_connector_picker"
-    assert wiki_resource["selection_config_json"]["metadata"]["node_token"] == "wiki_node_1"
-    resources_after_reimport = (await test_session.execute(select(SourceResource))).scalars().all()
-    snapshots_after_reimport = (await test_session.execute(select(SourceSnapshot))).scalars().all()
-    assert len(resources_after_reimport) == 4
-    assert len(snapshots_after_reimport) == 4
-
     sheet = next(result["resource"] for result in imported["results"] if result["resource"]["resource_type"] == "feishu_sheet")
     sheet_dataset = await test_session.get(Dataset, sheet["projected_dataset_id"])
     assert sheet_dataset is not None
@@ -1021,365 +691,6 @@ async def test_feishu_picker_import_syncs_real_resource_types_without_placeholde
     )
     assert sheet_query["success"] is True
     assert sheet_query["result"][0]["total_target"] == 200
-
-    sheet_resource_row = await test_session.get(SourceResource, sheet["id"])
-    assert sheet_resource_row is not None
-    sheet_snapshot = await test_session.get(SourceSnapshot, sheet["latest_snapshot_id"])
-    assert sheet_snapshot is not None
-    sheet_evidence = await test_session.scalar(
-        select(EvidenceFragment).where(EvidenceFragment.snapshot_id == sheet_snapshot.id)
-    )
-    assert sheet_evidence is not None
-    assert sheet_evidence.fragment_type == "sheet_range"
-    assert sheet_evidence.locator_json["source_connection_id"] == str(connection.id)
-    assert sheet_evidence.locator_json["source_resource_id"] == str(sheet_resource_row.id)
-    assert sheet_evidence.locator_json["source_snapshot_id"] == str(sheet_snapshot.id)
-    assert sheet_evidence.locator_json["content_hash"] == sheet_snapshot.content_hash
-    assert sheet_evidence.locator_json["parser_version"] == sheet_snapshot.parser_version
-    assert sheet_evidence.locator_json["spreadsheet_token"] == "sheet_token_1"
-    assert sheet_evidence.locator_json["sheet_id"] == "sh1"
-    assert sheet_evidence.locator_json["range"] == "sh1!A1:B3"
-    assert sheet_evidence.locator_json["cell_range"] == "sh1!A1:B3"
-
-    projection = (sheet_snapshot.metadata_json or {})["projected_dataset"]
-    projected_file = projection["files"][0]
-    assert projected_file["source_locator"]["spreadsheet_token"] == "sheet_token_1"
-    assert projected_file["source_locator"]["sheet_id"] == "sh1"
-    assert projected_file["source_locator"]["range"] == "sh1!A1:B3"
-    assert projected_file["row_mappings"][0] == {"dataset_row": 1, "source_row": 2}
-    assert projected_file["coordinate_system"] == {
-        "kind": "sheet_grid",
-        "range": "sh1!A1:B3",
-        "header_row": 1,
-        "first_data_row": 2,
-        "first_column": "A",
-    }
-    assert projected_file["column_mappings"] == [
-        {"dataset_column": "region", "source_column": "A", "header_cell": "A1"},
-        {"dataset_column": "target", "source_column": "B", "header_cell": "B1"},
-    ]
-    assert projected_file["cell_mappings"] == [
-        {"dataset_row": 1, "dataset_column": "region", "source_cell": "A2"},
-        {"dataset_row": 1, "dataset_column": "target", "source_cell": "B2"},
-        {"dataset_row": 2, "dataset_column": "region", "source_cell": "A3"},
-        {"dataset_row": 2, "dataset_column": "target", "source_cell": "B3"},
-    ]
-
-    base = next(result["resource"] for result in imported["results"] if result["resource"]["resource_type"] == "feishu_base")
-    base_snapshot = await test_session.get(SourceSnapshot, base["latest_snapshot_id"])
-    assert base_snapshot is not None
-    base_evidence = await test_session.scalar(
-        select(EvidenceFragment).where(EvidenceFragment.snapshot_id == base_snapshot.id)
-    )
-    assert base_evidence is not None
-    assert base_evidence.locator_json["app_token"] == "base_token_1"
-    assert base_evidence.locator_json["table_id"] == "tbl1"
-    assert base_evidence.locator_json["view_id"] == "view1"
-    assert base_evidence.locator_json["record_id"] == "rec_east"
-    assert base_evidence.locator_json["field_id"] == "fld_lead_count"
-
-    base_projection = (base_snapshot.metadata_json or {})["projected_dataset"]
-    base_projected_file = base_projection["files"][0]
-    assert base_projected_file["source_locator"]["app_token"] == "base_token_1"
-    assert base_projected_file["source_locator"]["table_id"] == "tbl1"
-    assert base_projected_file["source_locator"]["view_id"] == "view1"
-    assert base_projected_file["source_locator"]["field_mappings"] == [
-        {"dataset_column": "region", "field_id": "fld_region", "field_name": "region"},
-        {"dataset_column": "lead_count", "field_id": "fld_lead_count", "field_name": "lead_count"},
-    ]
-    assert base_projected_file["row_mappings"] == [
-        {"dataset_row": 1, "record_id": "rec_east"},
-        {"dataset_row": 2, "record_id": "rec_west"},
-    ]
-
-
-async def test_failed_source_resource_does_not_mark_picker_item_already_added(test_session):
-    tenant = await _tenant(test_session)
-    connection_service = SourceConnectionService()
-    adapter = FakeFeishuConnectorAdapter()
-    encrypted = await CryptoService.encrypt_config(
-        {
-            "access_token": "access-token",
-            "refresh_token": "refresh-token",
-            "open_id": "ou_feishu_1",
-        },
-        test_session,
-    )
-    connection = SourceConnection(
-        tenant_id=tenant.id,
-        provider="feishu",
-        auth_mode="oauth",
-        encrypted_credentials=encrypted,
-        external_account_id="ou_feishu_1",
-        display_name="郝行军的飞书",
-        status="connected",
-        capabilities_json={"scopes": ["drive:drive:readonly", "wiki:wiki:readonly"]},
-        token_expires_at=datetime.utcnow() + timedelta(hours=1),
-        created_by=tenant.owner_id,
-    )
-    test_session.add(connection)
-    await test_session.flush()
-    test_session.add(
-        SourceResource(
-            tenant_id=tenant.id,
-            source_connection_id=connection.id,
-            resource_type="feishu_doc",
-            name="Failed doc",
-            external_id="docx_token_1",
-            owner_id=tenant.owner_id,
-            visibility="workspace",
-            sync_mode="manual",
-            status="failed",
-        )
-    )
-    await test_session.commit()
-
-    listed = await connection_service.list_resources(
-        session=test_session,
-        tenant_id=tenant.id,
-        connection_id=connection.id,
-        scope="recent",
-        parent_token=None,
-        resource_type=None,
-        query=None,
-        page_token=None,
-        page_size=50,
-        adapter=adapter,
-    )
-
-    doc = next(item for item in listed["items"] if item["external_id"] == "docx_token_1")
-    assert doc["already_added"] is False
-
-
-async def test_dataset_projection_failure_marks_failed_without_orphan_dataset(test_session, monkeypatch):
-    tenant = await _tenant(test_session)
-    connection_service = SourceConnectionService()
-    resource_service = SourceResourceService()
-    adapter = FakeConnectorAdapter()
-    connection = await connection_service.create_connection(
-        session=test_session,
-        tenant_id=tenant.id,
-        user_id=tenant.owner_id,
-        payload=SourceConnectionCreate(
-            provider="volcengine_tos",
-            auth_mode="access_key",
-            display_name="经营分析 TOS",
-            credentials={
-                "endpoint": "https://tos-cn-beijing.volces.com",
-                "region": "cn-beijing",
-                "access_key_id": "tos-ak",
-                "secret_access_key": "tos-secret",
-            },
-        ),
-        adapter=adapter,
-    )
-
-    async def fail_schema(*args, **kwargs):
-        raise RuntimeError("schema inference failed")
-
-    monkeypatch.setattr(DataFrameFileService, "get_file_schema_multi", fail_schema)
-
-    imported = await resource_service.import_resources(
-        session=test_session,
-        tenant_id=tenant.id,
-        user_id=tenant.owner_id,
-        payload=SourceResourceImportRequest(
-            connection_id=connection.id,
-            selections=[
-                {
-                    "external_id": "sales-bucket/reports/revenue.csv",
-                    "resource_type": "tos_object",
-                    "name": "revenue.csv",
-                    "selection_config": {"format": "csv"},
-                }
-            ],
-        ),
-        adapter=adapter,
-    )
-
-    assert imported["succeeded"] == 0
-    assert imported["failed"] == 1
-    result = imported["results"][0]
-    assert result["status"] == "failed"
-    assert result["error"]["code"] == "dataset_projection_failed"
-    assert result["resource"]["latest_snapshot_id"] is None
-    assert result["resource"]["sync_config_json"]["last_error"]["code"] == "dataset_projection_failed"
-
-    resources = (await test_session.execute(select(SourceResource))).scalars().all()
-    snapshots = (await test_session.execute(select(SourceSnapshot))).scalars().all()
-    knowledge = (await test_session.execute(select(KnowledgeResource))).scalars().all()
-    evidence = (await test_session.execute(select(EvidenceFragment))).scalars().all()
-    datasets = (await test_session.execute(select(Dataset))).scalars().all()
-    files = (await test_session.execute(select(File))).scalars().all()
-    assert len(resources) == 1
-    assert resources[0].status == "failed"
-    assert len(snapshots) == 1
-    assert len(knowledge) == 1
-    assert len(evidence) == 1
-    assert datasets == []
-    assert files == []
-
-
-async def test_sync_failure_keeps_previous_successful_snapshot(test_session):
-    tenant = await _tenant(test_session)
-    connection_service = SourceConnectionService()
-    resource_service = SourceResourceService()
-    adapter = FakeConnectorAdapter()
-    connection = await connection_service.create_connection(
-        session=test_session,
-        tenant_id=tenant.id,
-        user_id=tenant.owner_id,
-        payload=SourceConnectionCreate(
-            provider="volcengine_tos",
-            auth_mode="access_key",
-            display_name="经营分析 TOS",
-            credentials={
-                "endpoint": "https://tos-cn-beijing.volces.com",
-                "region": "cn-beijing",
-                "access_key_id": "tos-ak",
-                "secret_access_key": "tos-secret",
-            },
-        ),
-        adapter=adapter,
-    )
-    imported = await resource_service.import_resources(
-        session=test_session,
-        tenant_id=tenant.id,
-        user_id=tenant.owner_id,
-        payload=SourceResourceImportRequest(
-            connection_id=connection.id,
-            selections=[
-                {
-                    "external_id": "sales-bucket/reports/revenue.csv",
-                    "resource_type": "tos_object",
-                    "name": "revenue.csv",
-                    "selection_config": {"format": "csv"},
-                }
-            ],
-        ),
-        adapter=adapter,
-    )
-    ready_resource = imported["results"][0]["resource"]
-    previous_snapshot_id = ready_resource["latest_snapshot_id"]
-
-    class FailingAdapter(FakeConnectorAdapter):
-        async def sync_resource(self, *, session, connection: SourceConnection, resource: SourceResource) -> CapturedSnapshot:
-            raise ConnectorError("TOS permission denied", code="permission_lost", permanent=True)
-
-    failed = await resource_service.import_resources(
-        session=test_session,
-        tenant_id=tenant.id,
-        user_id=tenant.owner_id,
-        payload=SourceResourceImportRequest(
-            connection_id=connection.id,
-            selections=[
-                {
-                    "external_id": "sales-bucket/reports/revenue.csv",
-                    "resource_type": "tos_object",
-                    "name": "revenue.csv",
-                    "selection_config": {"format": "csv"},
-                }
-            ],
-        ),
-        adapter=FailingAdapter(),
-    )
-    result = failed["results"][0]
-    assert failed["succeeded"] == 0
-    assert failed["failed"] == 1
-    assert result["status"] == "permission_lost"
-    assert result["resource"]["latest_snapshot_id"] == previous_snapshot_id
-    assert result["resource"]["sync_config_json"]["last_error"]["code"] == "permission_lost"
-    assert result["resource"]["sync_config_json"]["latest_sync_run"]["status"] == "failed"
-    assert result["resource"]["sync_config_json"]["latest_sync_run"]["error"]["code"] == "permission_lost"
-
-    connection.status = "reauthorization_required"
-    await test_session.flush()
-    resource_row = await test_session.get(SourceResource, ready_resource["id"])
-    assert resource_row is not None
-    stale_payload = await resource_service.resource_payload(session=test_session, resource=resource_row)
-    assert stale_payload["status"] == "reauthorization_required"
-    assert stale_payload["latest_snapshot_id"] == previous_snapshot_id
-    assert stale_payload["sync_config_json"]["connection_status"] == "reauthorization_required"
-    assert stale_payload["sync_config_json"]["last_error"]["code"] == "reauthorization_required"
-
-    snapshots = (await test_session.execute(select(SourceSnapshot))).scalars().all()
-    datasets = (await test_session.execute(select(Dataset))).scalars().all()
-    files = (await test_session.execute(select(File))).scalars().all()
-    assert len(snapshots) == 1
-    assert len(datasets) == 1
-    assert len(files) == 1
-
-
-async def test_successful_source_sync_run_records_checkpoint(test_session):
-    tenant = await _tenant(test_session)
-    connection_service = SourceConnectionService()
-    resource_service = SourceResourceService()
-    adapter = FakeConnectorAdapter()
-    connection = await connection_service.create_connection(
-        session=test_session,
-        tenant_id=tenant.id,
-        user_id=tenant.owner_id,
-        payload=SourceConnectionCreate(
-            provider="volcengine_tos",
-            auth_mode="access_key",
-            display_name="经营分析 TOS",
-            credentials={
-                "endpoint": "https://tos-cn-beijing.volces.com",
-                "region": "cn-beijing",
-                "access_key_id": "tos-ak",
-                "secret_access_key": "tos-secret",
-            },
-        ),
-        adapter=adapter,
-    )
-
-    imported = await resource_service.import_resources(
-        session=test_session,
-        tenant_id=tenant.id,
-        user_id=tenant.owner_id,
-        payload=SourceResourceImportRequest(
-            connection_id=connection.id,
-            selections=[
-                {
-                    "external_id": "sales-bucket/reports/revenue.csv",
-                    "resource_type": "tos_object",
-                    "name": "revenue.csv",
-                    "selection_config": {"format": "csv"},
-                }
-            ],
-        ),
-        adapter=adapter,
-    )
-
-    resource = imported["results"][0]["resource"]
-    sync_run = resource["sync_config_json"]["latest_sync_run"]
-    assert sync_run["status"] == "succeeded"
-    assert sync_run["attempt"] == 1
-    assert sync_run["checkpoint"]["snapshot_id"] == str(resource["latest_snapshot_id"])
-    assert sync_run["checkpoint"]["external_revision"] == "etag-1"
-    assert sync_run["checkpoint"]["content_hash"].startswith("sha256:")
-
-
-async def test_source_sync_run_status_contract_rejects_unknown_status(test_session):
-    tenant = await _tenant(test_session)
-    resource = SourceResource(
-        tenant_id=tenant.id,
-        resource_type="tos_object",
-        name="revenue.csv",
-        sync_mode="manual",
-        sync_config_json={},
-        status="pending",
-    )
-    test_session.add(resource)
-    await test_session.flush()
-
-    service = SourceResourceService()
-    sync_run = service._start_sync_run(resource=resource, trigger="manual")
-
-    assert sync_run["status"] == "running"
-    assert sync_run["allowed_statuses"] == ["queued", "running", "succeeded", "failed", "partial", "cancelled"]
-    with pytest.raises(ValueError, match="Unsupported source sync run status"):
-        service._finish_sync_run(resource=resource, sync_run=sync_run, status="mystery")
 
 
 async def test_feishu_picker_mapping_and_wiki_resolution_contract():
@@ -1414,13 +725,6 @@ async def test_feishu_picker_mapping_and_wiki_resolution_contract():
         },
         frozenset(),
     )
-    wiki_space = adapter._wiki_item_to_picker(
-        {
-            "space_id": "7043731224849907715",
-            "name": "企业纪律与职业道德委员会",
-        },
-        frozenset(),
-    )
 
     assert doc.resource_type == "feishu_doc"
     assert doc.external_id == "docx_token"
@@ -1433,14 +737,6 @@ async def test_feishu_picker_mapping_and_wiki_resolution_contract():
     assert wiki.resource_type == "feishu_wiki"
     assert wiki.has_children is True
     assert wiki.metadata["obj_token"] == "docx_token_2"
-    assert wiki.metadata["type"] == "wiki_node"
-    assert wiki_space.resource_type == "feishu_folder"
-    assert wiki_space.external_id == "7043731224849907715"
-    assert wiki_space.has_children is True
-    assert wiki_space.is_folder is True
-    assert wiki_space.metadata["type"] == "wiki_space"
-    assert adapter._split_wiki_parent_token("7043731224849907715") == ("7043731224849907715", None)
-    assert adapter._split_wiki_parent_token("7043731224849907715:wiki_node") == ("7043731224849907715", "wiki_node")
 
 
 async def test_feishu_quick_locate_parses_links_and_returns_picker_item_without_creating_resource(test_session, monkeypatch):
@@ -1570,24 +866,6 @@ async def test_tos_parser_contracts_cover_supported_formats_and_actionable_error
         key="report.html",
         raw_bytes=b"<html><body><script>bad()</script><h1>Report</h1><p>Revenue</p></body></html>",
     )
-    openpyxl = pytest.importorskip("openpyxl")
-    workbook = openpyxl.Workbook()
-    worksheet = workbook.active
-    worksheet.title = "Revenue"
-    worksheet.append(["region", "revenue"])
-    worksheet.append(["East", 120])
-    xlsx_buffer = io.BytesIO()
-    workbook.save(xlsx_buffer)
-    xlsx_text, xlsx_parser, xlsx_hint = parse_object_bytes(key="revenue.xlsx", raw_bytes=xlsx_buffer.getvalue())
-
-    duckdb = pytest.importorskip("duckdb")
-    with tempfile.TemporaryDirectory() as parquet_dir:
-        parquet_path = Path(parquet_dir) / "revenue.parquet"
-        duckdb.sql(f"COPY (SELECT 'East' AS region, 120 AS revenue) TO '{parquet_path}' (FORMAT PARQUET)")
-        parquet_text, parquet_parser, parquet_hint = parse_object_bytes(
-            key="revenue.parquet",
-            raw_bytes=parquet_path.read_bytes(),
-        )
 
     assert "| region | revenue |" in csv_text
     assert csv_parser == "tos-csv-parser-v1"
@@ -1604,12 +882,6 @@ async def test_tos_parser_contracts_cover_supported_formats_and_actionable_error
     assert "Report" in html_text and "bad()" not in html_text
     assert html_parser == "tos-html-parser-v1"
     assert html_hint == "html_section"
-    assert "| region | revenue |" in xlsx_text
-    assert xlsx_parser == "tos-excel-parser-v1"
-    assert xlsx_hint == "excel_range"
-    assert "| East | 120 |" in parquet_text
-    assert parquet_parser == "tos-parquet-parser-v1"
-    assert parquet_hint == "parquet_rows"
 
     with pytest.raises(ConnectorError) as unsupported:
         parse_object_bytes(key="archive.bin", raw_bytes=b"\x00\x01")
@@ -1647,7 +919,6 @@ async def test_tos_object_sync_maps_large_missing_and_permission_errors(monkeypa
     assert captured.external_revision == "etag-1"
     assert captured.metadata["bucket"] == "sales-bucket"
     assert captured.metadata["key"] == "reports/revenue.csv"
-    assert captured.metadata["version_id"] == "version-1"
 
     monkeypatch.setattr(adapter, "_client", lambda credentials: _FakeTosClient(mode="missing"))
     with pytest.raises(ConnectorError) as missing:
@@ -1724,87 +995,3 @@ async def test_feishu_refresh_failure_marks_connection_reauthorization_required(
     refreshed = await test_session.get(SourceConnection, connection.id)
     assert refreshed is not None
     assert refreshed.status == "reauthorization_required"
-
-
-async def test_feishu_drive_permission_error_requires_user_reauthorization(monkeypatch):
-    class FakeResponse:
-        status_code = 400
-        text = ""
-
-        @staticmethod
-        def json():
-            return {
-                "code": 99991679,
-                "msg": (
-                    "Unauthorized. required one of these privileges under the user identity: "
-                    "[drive:drive, drive:drive:readonly, space:document:retrieve]"
-                ),
-            }
-
-    class FakeClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
-
-        async def request(self, *args, **kwargs):
-            return FakeResponse()
-
-    monkeypatch.setattr("server.services.source_connectors.httpx.AsyncClient", lambda **kwargs: FakeClient())
-
-    adapter = FeishuConnectorAdapter()
-    with pytest.raises(ConnectorError) as error:
-        await adapter._request_json(
-            "GET",
-            "/open-apis/drive/v1/files",
-            access_token="old-user-token",
-        )
-
-    assert error.value.code == "reauthorization_required"
-    assert error.value.permanent is True
-
-
-async def test_feishu_resource_listing_persists_reauthorization_required(test_session):
-    tenant = await _tenant(test_session)
-    encrypted = await CryptoService.encrypt_config({"access_token": "old-user-token"}, test_session)
-    connection = SourceConnection(
-        tenant_id=tenant.id,
-        provider="feishu",
-        auth_mode="oauth",
-        encrypted_credentials=encrypted,
-        external_account_id="ou_1",
-        display_name="Old Feishu authorization",
-        status="connected",
-        capabilities_json={"scopes": ["docx:document:readonly"]},
-        token_expires_at=datetime.utcnow() + timedelta(hours=1),
-        created_by=tenant.owner_id,
-    )
-    test_session.add(connection)
-    await test_session.commit()
-
-    class PermissionDeniedAdapter(FakeFeishuConnectorAdapter):
-        async def list_resources(self, *, session, input):
-            raise ConnectorError(
-                "Feishu user authorization does not include Drive read permission",
-                code="reauthorization_required",
-                permanent=True,
-            )
-
-    with pytest.raises(ConnectorError) as error:
-        await SourceConnectionService().list_resources(
-            session=test_session,
-            tenant_id=tenant.id,
-            connection_id=connection.id,
-            scope="drive",
-            parent_token=None,
-            resource_type=None,
-            query=None,
-            page_token=None,
-            page_size=50,
-            adapter=PermissionDeniedAdapter(),
-        )
-
-    assert error.value.code == "reauthorization_required"
-    await test_session.refresh(connection)
-    assert connection.status == "reauthorization_required"

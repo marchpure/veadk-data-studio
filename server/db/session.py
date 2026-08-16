@@ -34,7 +34,7 @@ def get_database_url() -> str:
         url = os.getenv("DATABASE_URL")
         if url:
             return url
-        if os.getenv("DATA_DIR") or getattr(sys, "frozen", False):
+        if getattr(sys, "frozen", False):
             from server.config.storage import DEFAULT_DATA_DIR
 
             return f"sqlite+aiosqlite:///{DEFAULT_DATA_DIR / 'app.db'}"

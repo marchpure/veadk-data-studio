@@ -8,14 +8,15 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.collaboration.contracts import ChannelEvent, ChannelResult, ChannelResultStatus
 from server.collaboration.models import CollaborationConversation, CollaborationInstallation
 from server.collaboration.repositories import CollaborationConversationRepository
 from server.constants.models import MODELS_BY_PROVIDER
+from server.models.llm_connections import LLMConnection
 from server.repositories.custom_skill import CustomSkillRepository
-from server.repositories.llm_connections import LLMConnectionRepository
 from server.schemas.agent import AgentRequest
 from server.services.crypto_service import CryptoService
 from server.services.unified_agent import stream_handoff_agent_response
@@ -42,6 +43,66 @@ class AgentRunResult:
             summary=self.raw_response,
             artifact_id=str(self.notebook_id) if self.notebook_id else None,
         )
+
+
+@dataclass(slots=True)
+class ChannelAgentContext:
+    tenant_id: UUID
+    installation_id: UUID
+    conversation_id: UUID
+    platform: str
+    chat_type: str
+    external_chat_id: str
+    external_root_id: str | None
+    inbound_message_id: str
+    sender_external_id: str
+    notebook_id: UUID | None
+    default_llm_connection_id: UUID | None
+    is_followup: bool
+
+    @classmethod
+    def from_event(
+        cls,
+        *,
+        installation: CollaborationInstallation,
+        conversation: CollaborationConversation,
+        event: ChannelEvent,
+        is_followup: bool,
+    ) -> ChannelAgentContext:
+        return cls(
+            tenant_id=installation.tenant_id,
+            installation_id=installation.id,
+            conversation_id=conversation.id,
+            platform=installation.platform,
+            chat_type=event.chat_type.value,
+            external_chat_id=event.chat_id,
+            external_root_id=event.conversation_root_id,
+            inbound_message_id=event.message_id,
+            sender_external_id=event.sender_external_id,
+            notebook_id=conversation.notebook_id,
+            default_llm_connection_id=installation.default_llm_connection_id,
+            is_followup=is_followup,
+        )
+
+    def to_prompt_section(self) -> str:
+        notebook_id = str(self.notebook_id) if self.notebook_id else "new_notebook_requested"
+        llm_connection_id = str(self.default_llm_connection_id) if self.default_llm_connection_id else "not_configured"
+        root_id = self.external_root_id or "__root__"
+        return f"""Delivery and identity context:
+- tenant_id: {self.tenant_id}
+- installation_id: {self.installation_id}
+- conversation_id: {self.conversation_id}
+- platform: {self.platform}
+- chat_type: {self.chat_type}
+- external_chat_id: {self.external_chat_id}
+- external_root_id: {root_id}
+- inbound_message_id: {self.inbound_message_id}
+- sender_external_id: {self.sender_external_id}
+- notebook_id: {notebook_id}
+- default_llm_connection_id: {llm_connection_id}
+- is_followup: {str(self.is_followup).lower()}
+
+Use these IDs only for routing, audit, and follow-up continuity. Do not expose raw external IDs in the final user-facing answer unless explicitly required for troubleshooting."""
 
 
 def conversation_lock_key(conversation: CollaborationConversation) -> str:
@@ -75,8 +136,32 @@ class ChannelAgentService:
     CONFIRMATION_MESSAGE = "正在分析，我会在当前会话里回复结果。"
 
     @staticmethod
-    async def resolve_model_for_connection(llm_connection_id: UUID, session: AsyncSession) -> str | None:
-        connection = await LLMConnectionRepository(session).get(llm_connection_id)
+    async def get_tenant_llm_connection(
+        *,
+        llm_connection_id: UUID,
+        tenant_id: UUID,
+        session: AsyncSession,
+    ) -> LLMConnection | None:
+        result = await session.execute(
+            select(LLMConnection).where(
+                LLMConnection.id == llm_connection_id,
+                LLMConnection.tenant_id == tenant_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def resolve_model_for_connection(
+        llm_connection_id: UUID,
+        session: AsyncSession,
+        *,
+        tenant_id: UUID,
+    ) -> str | None:
+        connection = await ChannelAgentService.get_tenant_llm_connection(
+            llm_connection_id=llm_connection_id,
+            tenant_id=tenant_id,
+            session=session,
+        )
         if not connection:
             return None
         try:
@@ -96,6 +181,7 @@ class ChannelAgentService:
         question: str,
         tenant_id: UUID,
         session: AsyncSession,
+        channel_context: ChannelAgentContext | None = None,
         is_followup: bool = False,
         locale: str = "zh-CN",
         supports_streaming_card: bool = False,
@@ -111,6 +197,7 @@ class ChannelAgentService:
             skill_instructions = f"\nCHANNEL INBOUND SKILLS:\n{combined}\n"
 
         surface = "follow-up" if is_followup else "new request"
+        delivery_context = f"\n{channel_context.to_prompt_section()}\n" if channel_context else ""
         return f"""This message came from a collaboration channel.
 Channel context:
 - platform: {platform}
@@ -118,9 +205,14 @@ Channel context:
 - locale: {locale}
 - supports_streaming_card: {str(supports_streaming_card).lower()}
 - supports_files: {str(supports_files).lower()}
+{delivery_context}
 {skill_instructions}
 When processing this request:
+- Route data questions through Published Org Data Skill → Source Skill → Governed raw fallback.
 - Use the bound Notebook memory for prior context when present.
+- Preserve tenant boundaries and do not use assets outside the current tenant.
+- If data access is unavailable or permission is missing, say so explicitly instead of inventing results.
+- Keep references to the Notebook, Agent Run, Semantic Skill, data freshness, and evidence when available.
 - Return the final business answer in concise Markdown.
 - Keep transport-specific formatting out of the core answer.
 - If query results are tabular, use plain Markdown tables.
@@ -203,14 +295,30 @@ User's message:
             raise ValueError("No LLM connection configured for collaboration installation")
 
         async with ordered_conversation_execution(conversation):
+            await session.refresh(conversation)
+            llm_connection = await ChannelAgentService.get_tenant_llm_connection(
+                llm_connection_id=installation.default_llm_connection_id,
+                tenant_id=installation.tenant_id,
+                session=session,
+            )
+            if not llm_connection:
+                raise ValueError("Default LLM connection must belong to the current tenant")
             resolved_model = await ChannelAgentService.resolve_model_for_connection(
-                installation.default_llm_connection_id, session
+                installation.default_llm_connection_id,
+                session,
+                tenant_id=installation.tenant_id,
             )
             prompt = await ChannelAgentService.build_prompt(
                 platform=installation.platform,
                 question=event.text,
                 tenant_id=installation.tenant_id,
                 session=session,
+                channel_context=ChannelAgentContext.from_event(
+                    installation=installation,
+                    conversation=conversation,
+                    event=event,
+                    is_followup=is_followup,
+                ),
                 is_followup=is_followup,
                 supports_streaming_card=False,
             )

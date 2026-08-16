@@ -52,14 +52,14 @@ export default function GoogleSignInButton({ onSuccess, onError, disabled }: Goo
   )
 
   useEffect(() => {
-    const clientId = getGoogleClientId()
-    if (!clientId) {
-      onError?.('Google Client ID is not configured')
-      return
-    }
-
     const initializeGoogle = () => {
       if (!window.google || initialized.current) return
+
+      const clientId = getGoogleClientId()
+      if (!clientId) {
+        console.error('Google Client ID is not configured')
+        return
+      }
 
       window.google.accounts.id.initialize({
         client_id: clientId,
@@ -85,17 +85,6 @@ export default function GoogleSignInButton({ onSuccess, onError, disabled }: Goo
     if (window.google) {
       initializeGoogle()
     } else {
-      const existingScript = document.querySelector<HTMLScriptElement>('script[data-google-identity-services="true"]')
-      if (!existingScript) {
-        const script = document.createElement('script')
-        script.src = 'https://accounts.google.com/gsi/client'
-        script.async = true
-        script.defer = true
-        script.dataset.googleIdentityServices = 'true'
-        script.onerror = () => onError?.('Failed to load Google Sign-In')
-        document.head.appendChild(script)
-      }
-
       const checkGoogle = setInterval(() => {
         if (window.google) {
           clearInterval(checkGoogle)
@@ -113,7 +102,7 @@ export default function GoogleSignInButton({ onSuccess, onError, disabled }: Goo
         clearTimeout(timeout)
       }
     }
-  }, [handleCredentialResponse, onError])
+  }, [handleCredentialResponse])
 
   return (
     <div

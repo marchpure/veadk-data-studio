@@ -1,33 +1,30 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { dataModelingAdapter } from '../adapters/dataModelingAdapter'
+import { mockDataModelingAdapter } from '../adapters/dataModelingAdapter'
+import { cloneDemoData } from '../mock/fixtures'
 import type {
   CertificationStatus,
   CreateModelDraft,
-  DataModelingDatasource,
-  DataModelingWorkspaceData,
+  DataModelingDemoData,
   ExploreState,
-  ExploreResult,
-  HomeViewMode,
+  HomeDemoMode,
+  McpState,
   Metric,
   Relationship,
   SemanticModel,
+  TimeGrain,
   WorkspaceMode,
 } from '../types'
 
-interface DataModelingStore extends DataModelingWorkspaceData {
-  homeMode: HomeViewMode
+interface DataModelingStore extends DataModelingDemoData {
+  homeMode: HomeDemoMode
   homeLoading: boolean
   homeError: string | null
-  datasourceOptions: DataModelingDatasource[]
-  datasourceLoading: boolean
-  datasourceError: string | null
   visibleModels: SemanticModel[]
-  loadModels: (mode?: HomeViewMode) => Promise<void>
+  loadModels: (mode?: HomeDemoMode) => Promise<void>
   loadModel: (modelId: string) => Promise<void>
-  setHomeMode: (mode: HomeViewMode) => void
-  reloadWorkspace: () => void
-  loadDatasources: () => Promise<void>
+  setHomeMode: (mode: HomeDemoMode) => void
+  resetDemo: () => void
   setActiveModel: (modelId: string) => void
   selectObject: (objectId: string) => void
   setWorkspaceMode: (mode: WorkspaceMode) => void
@@ -57,45 +54,12 @@ interface DataModelingStore extends DataModelingWorkspaceData {
   runMcpQuery: () => Promise<void>
 }
 
-const emptyData: DataModelingWorkspaceData = {
-  models: [],
-  profiles: [],
-  createDraft: {
-    datasourceId: '',
-    domain: 'Sales / Orders',
-    selectedTables: [],
-    businessQuestions: '',
-    generated: false,
-  },
-  activeModelId: '',
-  selectedObjectId: '',
-  workspaceMode: 'explore',
-  selectedProfileTable: '',
-  selectedProfileField: '',
-  generation: {
-    phase: 'idle',
-    progress: 0,
-    steps: [
-      { id: 'profile', title: 'Read schema and profile', detail: 'Load live datasource schema and table profile evidence.', status: 'pending' },
-      { id: 'candidates', title: 'Generate candidates', detail: 'Create entity, relationship, metric, and dimension suggestions from Source Understanding.', status: 'pending' },
-      { id: 'review', title: 'Review accepted suggestions', detail: 'Only verified suggestions feed the semantic draft.', status: 'pending' },
-      { id: 'draft', title: 'Create semantic draft', detail: 'Persist the draft Semantic Model through the backend API.', status: 'pending' },
-    ],
-    summary: [],
-    error: null,
-  },
-}
+const demo = cloneDemoData()
 
-const idleGeneration = emptyData.generation
-
-function resetRunningGeneration(generation: typeof emptyData.generation | undefined) {
-  if (!generation || generation.phase === 'idle') return idleGeneration
-  if (generation.phase !== 'completed') return idleGeneration
-  return {
-    ...generation,
-    steps: generation.steps.map(step => ({ ...step, status: 'done' as const })),
-    error: null,
-  }
+function levelForScore(score: number) {
+  if (score >= 85) return 'ready' as const
+  if (score >= 65) return 'warning' as const
+  return 'blocked' as const
 }
 
 function currentModel(state: DataModelingStore) {
@@ -111,51 +75,92 @@ function updateModel(state: DataModelingStore, updater: (model: SemanticModel) =
   }
 }
 
-function replaceModel(state: DataModelingStore, incoming: SemanticModel): Partial<DataModelingStore> {
+function recalculateReadiness(model: SemanticModel): SemanticModel {
+  const fanoutBlocked = model.relationships.some(rel => rel.validationStatus === 'blocked' && rel.status !== 'rejected')
+  const piiAccepted = model.suggestions.some(suggestion => suggestion.id === 'sug-policy-pii' && suggestion.status !== 'pending')
+  const certifiedCore = model.metrics.some(metric => metric.id === 'paid_revenue' && metric.certification === 'certified')
+  const acceptedSuggestions = model.suggestions.filter(suggestion => suggestion.status === 'accepted' || suggestion.status === 'edited').length
+
+  const structural = Math.min(96, 84 + acceptedSuggestions * 2)
+  const semantic = Math.min(94, 74 + acceptedSuggestions * 3)
+  const query = fanoutBlocked ? 66 : 88
+  const governance = Math.min(92, 62 + (piiAccepted ? 16 : 0) + (certifiedCore ? 10 : 0))
+  const evidence = Math.min(95, 79 + acceptedSuggestions * 2)
+  const score = Math.round(structural * 0.2 + semantic * 0.25 + query * 0.25 + governance * 0.15 + evidence * 0.15)
+  const blockers = fanoutBlocked ? ['Orders -> Refunds fanout candidate is unresolved.'] : []
+  const warnings = [
+    ...(!piiAccepted ? ['Customer contact fields need a confirmed PII policy.'] : []),
+    ...(!certifiedCore ? ['Paid Revenue should be certified before broad MCP exposure.'] : []),
+    ...model.metrics.some(metric => metric.id === 'refund_rate' && metric.certification === 'draft') ? ['Refund Rate is still draft certified.'] : [],
+  ]
+  const level = blockers.length > 0 ? 'blocked' : levelForScore(score)
+  const reliableQuestions = fanoutBlocked
+    ? model.readinessDetail.reliableQuestions
+    : [...model.readinessDetail.reliableQuestions, 'What is refund rate by region and product category?']
+
   return {
-    models: mergeModels(state.models, [incoming]),
-    visibleModels: mergeModels(state.visibleModels, [incoming]),
-    activeModelId: incoming.id,
+    ...model,
+    readiness: score,
+    readinessLevel: level,
+    readinessDetail: {
+      ...model.readinessDetail,
+      score,
+      level,
+      components: [
+        { id: 'structural', name: 'Structural completeness', score: structural, status: levelForScore(structural) },
+        { id: 'semantic', name: 'Semantic completeness', score: semantic, status: levelForScore(semantic) },
+        { id: 'query', name: 'Query correctness', score: query, status: fanoutBlocked ? 'blocked' : levelForScore(query) },
+        { id: 'governance', name: 'Governance', score: governance, status: levelForScore(governance) },
+        { id: 'evidence', name: 'Evidence coverage', score: evidence, status: levelForScore(evidence) },
+      ],
+      reliableQuestions: Array.from(new Set(reliableQuestions)),
+      unreliableQuestions: fanoutBlocked
+        ? model.readinessDetail.unreliableQuestions
+        : ['Which individual customers should be contacted?'],
+      blockers,
+      warnings,
+    },
   }
 }
 
-function rollbackModel(state: DataModelingStore, previous: SemanticModel): Partial<DataModelingStore> {
+function updateMetricPreview(metric: Metric, patch: Partial<Metric>): Metric {
+  const changedFormula = typeof patch.formula === 'string' && patch.formula !== metric.formula
+  const changedFilter = typeof patch.filter === 'string' && patch.filter !== metric.filter
+  const changedTimeField = typeof patch.timeField === 'string' && patch.timeField !== metric.timeField
+  const changedGrain = typeof patch.defaultGrain === 'string' && patch.defaultGrain !== metric.defaultGrain
+  const previewChanged = changedFormula || changedFilter || changedTimeField || changedGrain
+  const signature = `${patch.formula ?? metric.formula}|${patch.filter ?? metric.filter}|${patch.timeField ?? metric.timeField}|${patch.defaultGrain ?? metric.defaultGrain}`
+  const deterministicDelta = signature.length % 7
+  const currentValue = previewChanged && metric.id === 'paid_revenue'
+    ? `$${(8.48 + deterministicDelta * 0.03).toFixed(2)}M`
+    : previewChanged && metric.id === 'avg_order_value'
+      ? `$${(73.24 + deterministicDelta * 0.41).toFixed(2)}`
+      : previewChanged && metric.unit === '%'
+        ? `${(4.8 + deterministicDelta * 0.2).toFixed(1)}%`
+        : metric.preview.currentValue
+  const validation = patch.certification === 'certified'
+    ? 'Certified by owner and ready for semantic MCP exposure.'
+    : previewChanged
+      ? 'Recompiled successfully; preview refreshed from deterministic demo data.'
+      : metric.preview.validation
+
   return {
-    models: state.models.map(model => model.id === previous.id ? previous : model),
-    visibleModels: state.visibleModels.map(model => model.id === previous.id ? previous : model),
+    ...metric,
+    ...patch,
+    preview: {
+      ...metric.preview,
+      currentValue,
+      trend: previewChanged ? `+${(10.8 + deterministicDelta * 0.7).toFixed(1)}% vs prior period` : metric.preview.trend,
+      validation,
+      sql: previewChanged ? `-- Demo SQL preview\nSELECT ${patch.formula ?? metric.formula} AS ${metric.name}\nFROM semantic_model.sales_growth\nWHERE ${patch.filter ?? metric.filter}\n-- time: ${patch.timeField ?? metric.timeField}; grain: ${patch.defaultGrain ?? metric.defaultGrain}` : metric.preview.sql,
+      breakdown: previewChanged
+        ? metric.preview.breakdown.map((row, index) => ({
+            ...row,
+            delta: `${index === 2 ? '-' : '+'}${(deterministicDelta + index + 1).toFixed(1)}%`,
+          }))
+        : metric.preview.breakdown,
+    },
   }
-}
-
-let modelPatchQueue: Promise<void> = Promise.resolve()
-
-function saveModelPatch(
-  set: (partial: Partial<DataModelingStore> | ((state: DataModelingStore) => Partial<DataModelingStore>)) => void,
-  get: () => DataModelingStore,
-  before: SemanticModel,
-  patch: Partial<SemanticModel>,
-  errorMessage: string,
-) {
-  const modelId = before.id
-  const task = modelPatchQueue.then(async () => {
-    const latest = await dataModelingAdapter.getModel(modelId)
-    const saved = await dataModelingAdapter.patchModel(latest, patch)
-    set(state => ({
-      ...replaceModel(state, saved),
-      homeError: null,
-    }))
-  }).catch(error => {
-    const activeModel = currentModel(get())
-    set(state => ({
-      ...(activeModel?.id === modelId ? rollbackModel(state, before) : {}),
-      homeError: error instanceof Error ? error.message : errorMessage,
-    }))
-  })
-  modelPatchQueue = task.then(() => undefined, () => undefined)
-  return task
-}
-
-async function flushModelPatches() {
-  await modelPatchQueue
 }
 
 function generationProgressFor(index: number, total: number) {
@@ -165,26 +170,20 @@ function generationProgressFor(index: number, total: number) {
 export const useDataModelingStore = create<DataModelingStore>()(
   persist(
     (set, get) => ({
-      ...emptyData,
+      ...demo,
       homeMode: 'ready',
       homeLoading: false,
       homeError: null,
-      datasourceOptions: [],
-      datasourceLoading: false,
-      datasourceError: null,
-      visibleModels: [],
+      visibleModels: demo.models,
 
       async loadModels(mode = get().homeMode) {
         set({ homeMode: mode, homeLoading: true, homeError: null })
         try {
-          if (mode === 'loading') await new Promise(resolve => setTimeout(resolve, 500))
-          if (mode === 'error') throw new Error('Unable to load Data Models')
-          if (mode === 'permission') throw new Error('Permission required to view Data Models')
-          const visibleModels = mode === 'empty' ? [] : await dataModelingAdapter.listModels()
-          const mergedModels = visibleModels
+          const visibleModels = await mockDataModelingAdapter.listModels(get().models, mode)
+          const mergedModels = mergeModels(get().models, visibleModels)
           const activeModelId = mergedModels.some(model => model.id === get().activeModelId)
             ? get().activeModelId
-            : mergedModels[0]?.id || ''
+            : mergedModels[0]?.id || get().activeModelId
           set({ models: mergedModels, visibleModels, activeModelId, homeLoading: false, homeError: null })
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Unable to load Data Models'
@@ -194,7 +193,7 @@ export const useDataModelingStore = create<DataModelingStore>()(
 
       async loadModel(modelId) {
         try {
-          const model = await dataModelingAdapter.getModel(modelId)
+          const model = await mockDataModelingAdapter.getModel(get().models, modelId)
           if (!model) return
           set(state => {
             const models = mergeModels(state.models, [model])
@@ -204,9 +203,8 @@ export const useDataModelingStore = create<DataModelingStore>()(
               activeModelId: model.id,
             }
           })
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Unable to load Data Model'
-          set({ homeError: message })
+        } catch {
+          // Keep existing mock model if the backend is unavailable or the model was deleted.
         }
       },
 
@@ -214,36 +212,9 @@ export const useDataModelingStore = create<DataModelingStore>()(
         void get().loadModels(mode)
       },
 
-      reloadWorkspace() {
-        set({ ...emptyData, homeMode: 'ready', homeLoading: false, homeError: null, visibleModels: [] })
-        void get().loadModels('ready')
-        void get().loadDatasources()
-      },
-
-      async loadDatasources() {
-        set({ datasourceLoading: true, datasourceError: null })
-        try {
-          const datasourceOptions = await dataModelingAdapter.listDatasources()
-          const selected = get().createDraft.datasourceId
-          const nextDatasourceId = selected && datasourceOptions.some(item => item.id === selected)
-            ? selected
-            : datasourceOptions[0]?.id ?? ''
-          set(state => ({
-            datasourceOptions,
-            datasourceLoading: false,
-            datasourceError: null,
-            createDraft: { ...state.createDraft, datasourceId: nextDatasourceId },
-          }))
-          if (nextDatasourceId) {
-            get().updateCreateDraft({ datasourceId: nextDatasourceId })
-          }
-        } catch (error) {
-          set({
-            datasourceOptions: [],
-            datasourceLoading: false,
-            datasourceError: error instanceof Error ? error.message : 'Unable to load datasources',
-          })
-        }
+      resetDemo() {
+        const next = cloneDemoData()
+        set({ ...next, homeMode: 'ready', homeLoading: false, homeError: null, visibleModels: next.models })
       },
 
       setActiveModel(modelId) {
@@ -278,21 +249,6 @@ export const useDataModelingStore = create<DataModelingStore>()(
 
       updateCreateDraft(patch) {
         set(state => ({ createDraft: { ...state.createDraft, ...patch } }))
-        if (patch.datasourceId) {
-          void dataModelingAdapter.loadProfile(patch.datasourceId).then(profile => {
-            set(state => ({
-              profiles: mergeProfiles(state.profiles, [profile]),
-              selectedProfileTable: profile.tables[0]?.name ?? '',
-              selectedProfileField: profile.tables[0]?.fields[0]?.name ?? '',
-              createDraft: {
-                ...state.createDraft,
-                selectedTables: state.createDraft.selectedTables.length ? state.createDraft.selectedTables : profile.tables.slice(0, 5).map(table => table.name),
-              },
-            }))
-          }).catch(error => {
-            set({ homeError: error instanceof Error ? error.message : 'Unable to load datasource profile' })
-          })
-        }
       },
 
       toggleCreateTable(tableName) {
@@ -315,99 +271,8 @@ export const useDataModelingStore = create<DataModelingStore>()(
               status: index === 0 ? 'running' : 'pending',
             })),
             summary: [],
-            error: null,
           },
-          homeError: null,
         }))
-        const draft = get().createDraft
-        if (!draft.datasourceId) {
-          const message = 'Choose a datasource before generating a Semantic Model.'
-          set(state => ({
-            homeError: message,
-            generation: { ...state.generation, phase: 'idle', progress: 0, error: message },
-          }))
-          return
-        }
-        void (async () => {
-          try {
-            const understanding = await dataModelingAdapter.analyzeDatasource(draft.datasourceId, draft.selectedTables)
-            const candidates = understanding.candidates.filter(candidate => ['schema_map', 'relationship', 'data_truth'].includes(candidate.candidate_type))
-            set(state => ({
-              generation: {
-                ...state.generation,
-                phase: 'semantic',
-                progress: generationProgressFor(1, state.generation.steps.length),
-                steps: state.generation.steps.map((step, index) => ({
-                  ...step,
-                  status: index < 1 ? 'done' : index === 1 ? 'running' : 'pending',
-                })),
-              },
-            }))
-            const reviewedIds: string[] = []
-            set(state => ({
-              generation: {
-                ...state.generation,
-                progress: generationProgressFor(2, state.generation.steps.length),
-                steps: state.generation.steps.map((step, index) => ({
-                  ...step,
-                  status: index < 2 ? 'done' : index === 2 ? 'running' : 'pending',
-                })),
-              },
-            }))
-            for (const candidate of candidates) {
-              const reviewed = await dataModelingAdapter.reviewCandidate(draft.datasourceId, candidate.id, 'accept')
-              reviewedIds.splice(0, reviewedIds.length, ...reviewed.candidates.filter(item => item.review_status === 'verified').map(item => item.id))
-            }
-            set(state => ({
-              generation: {
-                ...state.generation,
-                phase: 'validation',
-                progress: generationProgressFor(3, state.generation.steps.length),
-                steps: state.generation.steps.map((step, index) => ({
-                  ...step,
-                  status: index < 3 ? 'done' : index === 3 ? 'running' : 'pending',
-                })),
-              },
-            }))
-            const model = await dataModelingAdapter.createDraft(draft.datasourceId, {
-              domain: draft.domain,
-              owner: 'Data Team',
-              name: draft.businessQuestions.trim() ? draft.businessQuestions.trim().slice(0, 80) : undefined,
-              candidateIds: reviewedIds,
-            })
-            set(state => ({
-              models: mergeModels(state.models, [model]),
-              visibleModels: mergeModels(state.visibleModels, [model]),
-              activeModelId: model.id,
-              createDraft: { ...state.createDraft, generated: true },
-              generation: {
-                ...state.generation,
-                phase: 'completed',
-                progress: 100,
-                steps: state.generation.steps.map(step => ({ ...step, status: 'done' })),
-                summary: [
-                  `Analyzed ${understanding.candidates.length} source candidates.`,
-                  `Accepted ${reviewedIds.length} verified suggestions.`,
-                  `Created Semantic Model draft ${model.name}.`,
-                ],
-                error: null,
-              },
-              homeError: null,
-            }))
-          } catch (error) {
-            const message = error instanceof Error ? error.message : 'Semantic generation failed'
-            set(state => ({
-              homeError: message,
-              generation: {
-                ...state.generation,
-                phase: 'idle',
-                progress: 0,
-                steps: state.generation.steps.map(step => step.status === 'running' ? { ...step, status: 'pending' } : step),
-                error: message,
-              },
-            }))
-          }
-        })()
       },
 
       advanceSemanticGeneration() {
@@ -423,7 +288,6 @@ export const useDataModelingStore = create<DataModelingStore>()(
                 progress: generationProgressFor(0, state.generation.steps.length),
                 steps: state.generation.steps.map((step, index) => ({ ...step, status: index === 0 ? 'running' : 'pending' })),
                 summary: [],
-                error: null,
               },
             }
           }
@@ -443,78 +307,118 @@ export const useDataModelingStore = create<DataModelingStore>()(
             }
           }
 
-          if (current !== 'completed') return {}
+          if (current !== 'completed') {
+            const nextModels = state.models.map(model => model.id === 'sales-growth' ? recalculateReadiness({ ...model, draftRevision: 'draft-8' }) : model)
+            return {
+              createDraft: { ...state.createDraft, generated: true },
+              models: nextModels,
+              visibleModels: state.visibleModels.map(model => nextModels.find(item => item.id === model.id) ?? model),
+              generation: {
+                ...state.generation,
+                phase: 'completed',
+                progress: 100,
+                steps: state.generation.steps.map(step => ({ ...step, status: 'done' })),
+                summary: [
+                  'Generated 5 metrics.',
+                  'Generated 7 dimensions.',
+                  'Validated 3 relationships.',
+                  '2 suggestions remain for review.',
+                ],
+              },
+            }
+          }
 
           return {}
         })
       },
 
       generateDraft() {
-        get().startSemanticGeneration()
+        set(state => ({
+          createDraft: { ...state.createDraft, generated: true },
+          models: state.models.map(model => model.id === 'sales-growth' ? recalculateReadiness({ ...model, draftRevision: 'draft-8' }) : model),
+          generation: {
+            ...state.generation,
+            phase: 'completed',
+            progress: 100,
+            steps: state.generation.steps.map(step => ({ ...step, status: 'done' })),
+            summary: state.generation.summary.length ? state.generation.summary : [
+              'Generated 5 metrics.',
+              'Generated 7 dimensions.',
+              'Validated 3 relationships.',
+              '2 suggestions remain for review.',
+            ],
+          },
+        }))
       },
 
       acceptSuggestion(suggestionId) {
-        set({ homeError: `Suggestion review for ${suggestionId} requires the Source Understanding review API. Reload the datasource profile and generate a new model draft after reviewing source candidates.` })
+        set(state => updateModel(state, model => recalculateReadiness({
+          ...model,
+          suggestions: model.suggestions.map(suggestion => suggestion.id === suggestionId ? { ...suggestion, status: 'accepted' } : suggestion),
+          validationLog: [`Accepted suggestion ${suggestionId}.`, ...model.validationLog],
+        })))
       },
 
       editAcceptSuggestion(suggestionId) {
-        set({ homeError: `Edited suggestion acceptance for ${suggestionId} is not persisted on Semantic Models yet. Use source candidate review before creating the draft.` })
+        set(state => updateModel(state, model => recalculateReadiness({
+          ...model,
+          suggestions: model.suggestions.map(suggestion => suggestion.id === suggestionId ? { ...suggestion, status: 'edited', editedNote: 'Business wording adjusted before accepting.' } : suggestion),
+          validationLog: [`Edited and accepted suggestion ${suggestionId}.`, ...model.validationLog],
+        })))
       },
 
       rejectSuggestion(suggestionId) {
-        set({ homeError: `Suggestion rejection for ${suggestionId} requires the Source Understanding review API. The current Semantic Model was not changed.` })
+        set(state => updateModel(state, model => recalculateReadiness({
+          ...model,
+          suggestions: model.suggestions.map(suggestion => suggestion.id === suggestionId ? { ...suggestion, status: 'rejected' } : suggestion),
+          validationLog: [`Rejected suggestion ${suggestionId}.`, ...model.validationLog],
+        })))
       },
 
       updateRelationship(relationshipId, patch) {
-        const before = currentModel(get())
-        set(state => updateModel(state, model => ({
+        set(state => updateModel(state, model => recalculateReadiness({
           ...model,
           relationships: model.relationships.map(rel => rel.id === relationshipId ? { ...rel, ...patch } : rel),
+          validationLog: [`Relationship ${relationshipId} updated.`, ...model.validationLog],
         })))
-        const after = currentModel(get())
-        saveModelPatch(set, get, before, { relationships: after.relationships }, 'Unable to save relationship')
       },
 
       fixFanoutRelationship(relationshipId) {
-        const before = currentModel(get())
-        set(state => updateModel(state, model => ({
+        set(state => updateModel(state, model => recalculateReadiness({
           ...model,
           relationships: model.relationships.map(rel => rel.id === relationshipId ? {
             ...rel,
             cardinality: 'one-to-many',
+            uniqueRate: 99.1,
+            orphanRate: 0.9,
             fanoutRisk: 'medium',
             validationStatus: 'valid',
             status: 'confirmed',
-            validationMessage: 'Relationship marked confirmed after modeler review. Run Validate to refresh readiness.',
+            validationMessage: 'Fixed by modeling refunds as a pre-aggregated order-level subquery.',
           } : rel),
+          validationLog: ['Fixed refund fanout by introducing order-level refund aggregation.', ...model.validationLog],
         })))
-        const after = currentModel(get())
-        saveModelPatch(set, get, before, { relationships: after.relationships }, 'Unable to save relationship fix')
       },
 
       rejectRelationship(relationshipId) {
-        const before = currentModel(get())
-        set(state => updateModel(state, model => ({
+        set(state => updateModel(state, model => recalculateReadiness({
           ...model,
           relationships: model.relationships.map(rel => rel.id === relationshipId ? {
             ...rel,
             status: 'rejected',
             validationStatus: 'warning',
-            validationMessage: 'Rejected for this model version. Run Validate to refresh readiness.',
+            validationMessage: 'Rejected for this model version; refund metrics must use explicit aggregate SQL.',
           } : rel),
+          validationLog: ['Rejected fanout-prone relationship candidate.', ...model.validationLog],
         })))
-        const after = currentModel(get())
-        saveModelPatch(set, get, before, { relationships: after.relationships }, 'Unable to reject relationship')
       },
 
       updateMetric(metricId, patch) {
-        const before = currentModel(get())
-        set(state => updateModel(state, model => ({
+        set(state => updateModel(state, model => recalculateReadiness({
           ...model,
-          metrics: model.metrics.map(metric => metric.id === metricId ? { ...metric, ...patch } : metric),
+          metrics: model.metrics.map(metric => metric.id === metricId ? updateMetricPreview(metric, patch) : metric),
+          validationLog: [`Metric ${metricId} preview refreshed.`, ...model.validationLog],
         })))
-        const after = currentModel(get())
-        saveModelPatch(set, get, before, { metrics: after.metrics }, 'Unable to save metric')
       },
 
       setMetricCertification(metricId, certification) {
@@ -522,17 +426,13 @@ export const useDataModelingStore = create<DataModelingStore>()(
       },
 
       updateExplore(patch) {
-        const before = currentModel(get())
         set(state => updateModel(state, model => ({
           ...model,
           explore: { ...model.explore, ...patch },
         })))
-        const after = currentModel(get())
-        saveModelPatch(set, get, before, { explore: after.explore }, 'Unable to save explore state')
       },
 
       saveExploreArtifact(kind) {
-        const before = currentModel(get())
         set(state => updateModel(state, model => {
           const explore = { ...model.explore }
           const consumers = { ...model.consumers }
@@ -558,29 +458,29 @@ export const useDataModelingStore = create<DataModelingStore>()(
             validationLog: [`Saved Explore result as ${kind}.`, ...model.validationLog],
           }
         }))
-        const after = currentModel(get())
-        saveModelPatch(set, get, before, { explore: after.explore, consumers: after.consumers }, 'Unable to save Explore artifact')
       },
 
       async validateModel() {
-        await flushModelPatches()
         const model = currentModel(get())
         try {
-          const validated = await dataModelingAdapter.validateModel(model)
+          const validated = await mockDataModelingAdapter.validateModel(model)
           set(state => ({
             models: mergeModels(state.models, [validated]),
             visibleModels: mergeModels(state.visibleModels, [validated]),
           }))
-        } catch (error) {
-          set({ homeError: error instanceof Error ? error.message : 'Validation failed' })
+        } catch {
+          set(state => updateModel(state, current => recalculateReadiness({
+            ...current,
+            validationLog: [
+              'Validation run completed locally because the Semantic Model API was unavailable.',
+              ...current.validationLog,
+            ],
+          })))
         }
       },
 
       openReview() {
-        const before = currentModel(get())
         set(state => updateModel(state, model => ({ ...model, review: { ...model.review, opened: true } })))
-        const after = currentModel(get())
-        saveModelPatch(set, get, before, { review: after.review }, 'Unable to open review')
       },
 
       updatePublishNotes(notes) {
@@ -588,61 +488,75 @@ export const useDataModelingStore = create<DataModelingStore>()(
       },
 
       markReviewed() {
-        const before = currentModel(get())
         set(state => updateModel(state, model => ({ ...model, review: { ...model.review, reviewed: true, opened: true } })))
-        const after = currentModel(get())
-        saveModelPatch(set, get, before, { review: after.review }, 'Unable to mark review complete')
       },
 
       async publishModel() {
-        await flushModelPatches()
         const model = currentModel(get())
         try {
-          const latest = await dataModelingAdapter.getModel(model.id)
-          const reviewSaved = await dataModelingAdapter.patchModel(latest, { review: model.review })
-          const published = await dataModelingAdapter.publishModel(reviewSaved)
+          const published = await mockDataModelingAdapter.publishModel(model)
           set(state => ({
             models: mergeModels(state.models, [published]),
             visibleModels: mergeModels(state.visibleModels, [published]),
           }))
-        } catch (error) {
-          set({ homeError: error instanceof Error ? error.message : 'Publish failed' })
+        } catch {
+          set(state => updateModel(state, current => {
+            const nextMcp: McpState = { ...current.mcp, exposedVersion: 'v3' }
+            return recalculateReadiness({
+              ...current,
+              status: 'Published',
+              publishedVersion: 'v3',
+              draftRevision: 'clean',
+              driftAlerts: 0,
+              mcp: nextMcp,
+              review: { ...current.review, reviewed: true, opened: false, publishedAt: '2026-08-14 12:45' },
+              validationLog: [
+                'Published Semantic Model v3 locally because the Semantic Model API was unavailable.',
+                ...current.validationLog,
+              ],
+            })
+          }))
         }
       },
 
       setRawSqlFallback(enabled) {
-        const before = currentModel(get())
         set(state => updateModel(state, model => ({ ...model, mcp: { ...model.mcp, rawSqlFallback: enabled } })))
-        const after = currentModel(get())
-        saveModelPatch(set, get, before, { mcp: after.mcp }, 'Unable to update MCP policy')
       },
 
       async runMcpQuery() {
-        await flushModelPatches()
         const model = currentModel(get())
+        const metric = model.metrics.find(item => item.id === model.explore.metricId) ?? model.metrics[0]
         try {
-          const lastResult = await dataModelingAdapter.queryMetric(model)
-          if (lastResult) {
-            set(state => updateModel(state, current => ({
-              ...current,
-              mcp: { ...current.mcp, lastResult },
-            })))
-          }
-          await get().loadModel(model.id)
-          if (lastResult) {
-            set(state => updateModel(state, current => ({
-              ...current,
-              mcp: { ...current.mcp, lastResult },
-            })))
-          }
-          set({ homeError: null })
-        } catch (error) {
-          set({ homeError: error instanceof Error ? error.message : 'MCP query failed' })
+          const lastResult = await mockDataModelingAdapter.queryMetric(model)
+          set(state => updateModel(state, current => ({
+            ...current,
+            mcp: { ...current.mcp, lastResult },
+            validationLog: [`MCP query_metric resolved ${lastResult?.resolvedMetric ?? metric.businessName}.`, ...current.validationLog],
+          })))
+        } catch {
+          set(state => updateModel(state, current => ({
+            ...current,
+            mcp: {
+              ...current.mcp,
+              lastResult: {
+                resolvedMetric: metric.businessName,
+                modelVersion: current.mcp.exposedVersion,
+                result: metric.preview.currentValue,
+                freshness: 'Profile refreshed 2h ago; semantic version immutable.',
+                lineage: metric.lineage,
+                policyDecision: current.mcp.rawSqlFallback ? 'Allowed semantic tool; raw SQL fallback remains separately audited.' : 'Allowed semantic tool; raw SQL fallback denied by default.',
+              },
+            },
+            validationLog: [
+              `MCP query_metric resolved ${metric.businessName} locally because the Semantic Model API was unavailable.`,
+              ...current.validationLog,
+            ],
+          })))
         }
       },
     }),
     {
-      name: 'byaan-data-modeling-production-v1',
+      name: 'byaan-data-modeling-demo-v1',
       partialize: state => ({
         models: state.models,
         profiles: state.profiles,
@@ -652,16 +566,8 @@ export const useDataModelingStore = create<DataModelingStore>()(
         workspaceMode: state.workspaceMode,
         selectedProfileTable: state.selectedProfileTable,
         selectedProfileField: state.selectedProfileField,
-        generation: resetRunningGeneration(state.generation),
+        generation: state.generation,
       }),
-      merge: (persisted, current) => {
-        const persistedState = persisted as Partial<DataModelingStore> | undefined
-        return {
-          ...current,
-          ...persistedState,
-          generation: resetRunningGeneration(persistedState?.generation),
-        }
-      },
     },
   ),
 )
@@ -678,47 +584,22 @@ function mergeModels(current: SemanticModel[], incoming: SemanticModel[]) {
   return Array.from(byId.values())
 }
 
-function mergeProfiles(current: DataModelingWorkspaceData['profiles'], incoming: DataModelingWorkspaceData['profiles']) {
-  const byId = new Map(current.map(profile => [profile.id, profile]))
-  for (const profile of incoming) {
-    byId.set(profile.id, profile)
-  }
-  return Array.from(byId.values())
-}
-
 export function selectExploreResult(model: SemanticModel) {
   const metric = model.metrics.find(item => item.id === model.explore.metricId) ?? model.metrics[0]
   const dimension = model.dimensions.find(item => item.id === model.explore.dimensionId) ?? model.dimensions[0]
-  const lastResult = model.mcp.lastResult
-  if (lastResult) {
-    const parsed = parseResultRows(lastResult.result)
-    if (parsed.length) {
-      return {
-        kpi: String(parsed[0]?.[metric?.id] ?? parsed[0]?.[metric?.businessName] ?? lastResult.result),
-        delta: lastResult.freshness,
-        trend: parsed.slice(0, 8).map((row, index) => ({ period: String(row[dimension?.id] ?? row[dimension?.name] ?? index + 1), value: Number(row[metric?.id] ?? Object.values(row).find(value => typeof value === 'number') ?? 0) })),
-        rows: parsed,
-      }
-    }
-  }
-  if (!metric || !dimension) {
-    return { kpi: 'No result', delta: '', trend: [], rows: [] }
-  }
+  const grainMultiplier: Record<TimeGrain, number> = { day: 0.12, week: 0.42, month: 1, quarter: 2.7 }
+  const metricSeed = metric.id.length + dimension.id.length + model.explore.filter.length
+  const multiplier = grainMultiplier[model.explore.grain]
+  const base = Math.round((metricSeed * 137) * multiplier)
   return {
-    kpi: 'Run query_metric',
-    delta: model.publishedVersion === 'v0' ? 'Publish the model before MCP queries.' : 'No semantic query result yet.',
-    trend: [],
-    rows: [],
-  }
-}
-
-function parseResultRows(value: string): ExploreResult['rows'] {
-  try {
-    const parsed = JSON.parse(value)
-    if (Array.isArray(parsed)) return parsed as ExploreResult['rows']
-    if (parsed && typeof parsed === 'object') return [parsed as Record<string, string | number>]
-    return []
-  } catch {
-    return []
+    kpi: metric.preview.currentValue,
+    delta: metric.preview.trend,
+    trend: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'].map((period, index) => ({ period, value: base + index * Math.round(base * 0.12) })),
+    rows: metric.preview.breakdown.map((row, index) => ({
+      [dimension.name]: row.label,
+      [metric.businessName]: row.value,
+      Delta: row.delta,
+      Rank: index + 1,
+    })),
   }
 }

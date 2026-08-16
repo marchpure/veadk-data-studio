@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Input } from '../components/ui/input'
 import { Label } from '../components/ui/label'
 import { Trash2, Loader2, Database, Pencil, Upload, FileText, X, Search, Link as LinkIcon, Leaf, Cylinder, Server, HardDrive, Users, Lock, Cloud, ChevronDown, ChevronRight, CheckCircle2, AlertCircle, Network } from 'lucide-react'
-import { useDatasources, useCreateDBConnection, useDeleteDBConnection, useUploadMultipleFiles, useUploadFromURL, useConnectorDefinitions, useCreateSourceResource, useCreatePdfSourceResource } from '../hooks/useDBConnections'
+import { useDatasources, useCreateDBConnection, useDeleteDBConnection, useUploadMultipleFiles, useUploadFromURL, useConnectorDefinitions } from '../hooks/useDBConnections'
 import { ApiService, type ConnectionCreateRequest, type ConnectionType, type Datasource, type DatabricksCatalog, type DatabricksOAuthTokens, type DatabricksWarehouse, type FileType, type ConnectorDefinition } from '../services/api'
 import { SourceConnectorImportPanel } from '../components/SourceConnectorImportPanel'
 import { showToast } from '../utils/toast'
@@ -21,11 +21,10 @@ import { isTauriApp, openExternalUrl } from '../lib/tauri-api'
 type DatabricksPair = { catalog: string; schema: string | null }
 const pairKey = (p: DatabricksPair) => `${p.catalog}::${p.schema ?? '*'}`
 type SourceConnectorCreateType = `connector:${string}`
-type DatasourceCreateType = ConnectionType | 'upload' | 'url' | 'pdf' | 'web' | SourceConnectorCreateType
+type DatasourceCreateType = ConnectionType | 'upload' | 'url' | SourceConnectorCreateType
 const isSourceConnectorType = (value: string): value is SourceConnectorCreateType => value.startsWith('connector:')
 const sourceConnectorId = (value: DatasourceCreateType): string | null =>
   isSourceConnectorType(value) ? value.slice('connector:'.length) : null
-const isDirectSourceResourceType = (value: DatasourceCreateType) => value === 'pdf' || value === 'web'
 
 export default function DatabasesPage() {
   const queryClient = useQueryClient()
@@ -60,8 +59,6 @@ export default function DatabasesPage() {
   const [uploadMode, setUploadMode] = useState<'file' | 'url'>('file')
   const [uploadURLs, setUploadURLs] = useState<string[]>([''])
   const [urlAbortController, setUrlAbortController] = useState<AbortController | null>(null)
-  const [pdfSourceFile, setPdfSourceFile] = useState<File | null>(null)
-  const [webSourceUrl, setWebSourceUrl] = useState('')
 
   // Form state for create dialog
   const [selectedType, setSelectedType] = useState<DatasourceCreateType>('upload')
@@ -142,11 +139,9 @@ export default function DatabasesPage() {
   const deleteMutation = useDeleteDBConnection()
   const uploadMultipleFilesMutation = useUploadMultipleFiles()
   const uploadFromURLMutation = useUploadFromURL()
-  const createSourceResourceMutation = useCreateSourceResource()
-  const createPdfSourceResourceMutation = useCreatePdfSourceResource()
   const connectorDefinitionsQuery = useConnectorDefinitions()
   const connectorDefinitions = useMemo(() => connectorDefinitionsQuery.data?.items || [], [connectorDefinitionsQuery.data?.items])
-  const isCreatingAnyDatasource = createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending || createSourceResourceMutation.isPending || createPdfSourceResourceMutation.isPending
+  const isCreatingAnyDatasource = createMutation.isPending || uploadMultipleFilesMutation.isPending || uploadFromURLMutation.isPending
   const selectedConnectorDefinition = useMemo<ConnectorDefinition | undefined>(() => {
     const id = sourceConnectorId(selectedType)
     if (!id) return undefined
@@ -251,7 +246,7 @@ export default function DatabasesPage() {
       return signedIn && warehousePicked && selectedPairs.length > 0
     }
 
-    if (isSourceConnectorType(selectedType) || selectedType === 'pdf' || selectedType === 'web') {
+    if (isSourceConnectorType(selectedType)) {
       return true
     }
 
@@ -738,8 +733,6 @@ export default function DatabasesPage() {
       excel: '',
       parquet: '',
       json: '',
-      pdf: '',
-      web: '',
       upload: '',
       url: '',
     }
@@ -1062,70 +1055,8 @@ export default function DatabasesPage() {
     setUploadConnectionName('')
     setUploadMode('file')
     setUploadURLs([''])
-    setPdfSourceFile(null)
-    setWebSourceUrl('')
     if (uploadFileInputRef.current) {
       uploadFileInputRef.current.value = ''
-    }
-  }
-
-  const handlePdfSourceFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] || null
-    if (!file) {
-      setPdfSourceFile(null)
-      return
-    }
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      alert('Please select a PDF file')
-      event.target.value = ''
-      setPdfSourceFile(null)
-      return
-    }
-    setPdfSourceFile(file)
-    if (!uploadConnectionName.trim()) {
-      setUploadConnectionName(file.name.replace(/\.pdf$/i, ''))
-    }
-  }
-
-  const handleCreateSourceResourceSubmit = async () => {
-    if (!uploadConnectionName.trim()) {
-      alert('Please provide a datasource name')
-      return
-    }
-    if (selectedType === 'pdf') {
-      if (!pdfSourceFile) {
-        alert('Please select a PDF file')
-        return
-      }
-      createPdfSourceResourceMutation.mutate(
-        { file: pdfSourceFile, name: uploadConnectionName.trim() },
-        {
-          onSuccess: () => {
-            setShowCreateDialog(false)
-            resetUploadForm()
-          },
-        },
-      )
-      return
-    }
-    if (selectedType === 'web') {
-      if (!webSourceUrl.trim()) {
-        alert('Please provide a public web page URL')
-        return
-      }
-      createSourceResourceMutation.mutate(
-        {
-          resource_type: 'web',
-          name: uploadConnectionName.trim(),
-          source_url: webSourceUrl.trim(),
-        },
-        {
-          onSuccess: () => {
-            setShowCreateDialog(false)
-            resetUploadForm()
-          },
-        },
-      )
     }
   }
 
@@ -1381,8 +1312,8 @@ export default function DatabasesPage() {
                     <span className="text-sm font-medium">Upload Files</span>
                   </button>
 
-	                  {/* Import from URL */}
-	                  <button
+                  {/* Import from URL */}
+                  <button
                     onClick={() => handleTypeChange('url')}
                     disabled={isCreatingAnyDatasource}
                     className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
@@ -1392,36 +1323,8 @@ export default function DatabasesPage() {
                     } ${isCreatingAnyDatasource ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <LinkIcon className={`w-5 h-5 flex-shrink-0 ${selectedType === 'url' ? 'text-brand-orange' : ''}`} />
-	                    <span className="text-sm font-medium">Import from URL</span>
-	                  </button>
-
-	                  {/* PDF knowledge resource */}
-	                  <button
-	                    onClick={() => handleTypeChange('pdf')}
-	                    disabled={isCreatingAnyDatasource}
-	                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-	                      selectedType === 'pdf'
-	                        ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-	                        : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-	                    } ${isCreatingAnyDatasource ? 'opacity-50 cursor-not-allowed' : ''}`}
-	                  >
-	                    <FileText className={`w-5 h-5 flex-shrink-0 ${selectedType === 'pdf' ? 'text-brand-orange' : ''}`} />
-	                    <span className="text-sm font-medium">PDF document</span>
-	                  </button>
-
-	                  {/* Web knowledge resource */}
-	                  <button
-	                    onClick={() => handleTypeChange('web')}
-	                    disabled={isCreatingAnyDatasource}
-	                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all text-left ${
-	                      selectedType === 'web'
-	                        ? 'bg-brand-orange/10 text-white border-l-3 border-brand-orange'
-	                        : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-	                    } ${isCreatingAnyDatasource ? 'opacity-50 cursor-not-allowed' : ''}`}
-	                  >
-	                    <LinkIcon className={`w-5 h-5 flex-shrink-0 ${selectedType === 'web' ? 'text-brand-orange' : ''}`} />
-	                    <span className="text-sm font-medium">Web page</span>
-	                  </button>
+                    <span className="text-sm font-medium">Import from URL</span>
+                  </button>
 
                   {/* Divider */}
                   <div className="my-2 border-t border-[#444444]"></div>
@@ -1592,19 +1495,19 @@ export default function DatabasesPage() {
                     {selectedType !== 'databricks' && !isSourceConnectorType(selectedType) && (
                       <div>
                         <Label htmlFor="connection-name" className="text-white">
-                          {selectedType === 'upload' || selectedType === 'url' || isDirectSourceResourceType(selectedType) ? 'Datasource Name' : 'Connection Name'} <span className="text-red-400">*</span>
+                          {selectedType === 'upload' || selectedType === 'url' ? 'Datasource Name' : 'Connection Name'} <span className="text-red-400">*</span>
                         </Label>
                         <Input
                           id="connection-name"
-                          value={selectedType === 'upload' || selectedType === 'url' || isDirectSourceResourceType(selectedType) ? uploadConnectionName : connectionConfig.name}
+                          value={selectedType === 'upload' || selectedType === 'url' ? uploadConnectionName : connectionConfig.name}
                           onChange={(e) => {
-                            if (selectedType === 'upload' || selectedType === 'url' || isDirectSourceResourceType(selectedType)) {
+                            if (selectedType === 'upload' || selectedType === 'url') {
                               setUploadConnectionName(e.target.value)
                             } else {
                               setConnectionConfig(prev => ({ ...prev, name: e.target.value }))
                             }
                           }}
-                          placeholder={selectedType === 'upload' || selectedType === 'url' || isDirectSourceResourceType(selectedType) ? 'My Datasource' : 'My Database Connection'}
+                          placeholder={selectedType === 'upload' || selectedType === 'url' ? 'My File Datasource' : 'My Database Connection'}
                           disabled={isCreatingAnyDatasource}
                           className="mt-1 bg-[#1a1a1a] border-[#555555] text-white placeholder-[#888888]"
                         />
@@ -1782,7 +1685,7 @@ export default function DatabasesPage() {
                     )}
 
                     {/* Import from URL Form */}
-	                    {selectedType === 'url' && (
+                    {selectedType === 'url' && (
                       <>
                         {/* Progress Indicator */}
                         {uploadFromURLMutation.isPending && (
@@ -1866,92 +1769,10 @@ export default function DatabasesPage() {
                             Enter public URLs to data files (CSV, Excel, Parquet, JSON) or ZIP archives of these types.
                           </p>
                         </div>
-	                      </>
-	                    )}
+                      </>
+                    )}
 
-	                    {selectedType === 'pdf' && (
-	                      <div className="space-y-4">
-	                        {createPdfSourceResourceMutation.isPending && (
-	                          <div className="bg-orange-900/20 border border-brand-orange rounded-lg p-4">
-	                            <div className="flex items-center gap-3">
-	                              <Loader2 className="w-5 h-5 text-brand-orange animate-spin flex-shrink-0" />
-	                              <div>
-	                                <p className="text-sm font-medium text-brand-orange">Capturing PDF snapshot...</p>
-	                                <p className="text-xs text-gray-400 mt-1">Byaan stores the raw PDF snapshot before parsing it into evidence.</p>
-	                              </div>
-	                            </div>
-	                          </div>
-	                        )}
-	                        <div className="rounded-lg border border-[#444444] bg-[#1a1a1a] p-4">
-	                          <Label className="text-white">PDF file</Label>
-	                          <input
-	                            type="file"
-	                            accept=".pdf,application/pdf"
-	                            onChange={handlePdfSourceFileChange}
-	                            disabled={createPdfSourceResourceMutation.isPending}
-	                            className="mt-2 block w-full text-sm text-gray-300 file:mr-4 file:rounded file:border-0 file:bg-brand-orange file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-orange/90"
-	                          />
-	                          {pdfSourceFile && (
-	                            <div className="mt-3 flex items-center justify-between rounded border border-[#555555] bg-[#101010] px-3 py-2">
-	                              <div className="min-w-0">
-	                                <p className="truncate text-sm text-white">{pdfSourceFile.name}</p>
-	                                <p className="text-xs text-gray-400">{formatFileSize(pdfSourceFile.size)}</p>
-	                              </div>
-	                              <Button
-	                                size="sm"
-	                                variant="ghost"
-	                                onClick={() => setPdfSourceFile(null)}
-	                                disabled={createPdfSourceResourceMutation.isPending}
-	                                className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
-	                              >
-	                                <X className="w-4 h-4" />
-	                              </Button>
-	                            </div>
-	                          )}
-	                          <p className="mt-3 text-xs text-gray-400">
-	                            PDFs enter Byaan as Knowledge Resources with immutable Source Snapshots. Table materialization remains a reviewed follow-up path.
-	                          </p>
-	                        </div>
-	                      </div>
-	                    )}
-
-	                    {selectedType === 'web' && (
-	                      <div className="space-y-4">
-	                        {createSourceResourceMutation.isPending && (
-	                          <div className="bg-orange-900/20 border border-brand-orange rounded-lg p-4">
-	                            <div className="flex items-center gap-3">
-	                              <Loader2 className="w-5 h-5 text-brand-orange animate-spin flex-shrink-0" />
-	                              <div>
-	                                <p className="text-sm font-medium text-brand-orange">Capturing public web page...</p>
-	                                <p className="text-xs text-gray-400 mt-1">The backend applies SSRF checks, redirect limits and content-size limits before storing a snapshot.</p>
-	                              </div>
-	                            </div>
-	                          </div>
-	                        )}
-	                        <div>
-	                          <Label htmlFor="web-source-url" className="text-white">Public web page URL <span className="text-red-400">*</span></Label>
-	                          <Input
-	                            id="web-source-url"
-	                            value={webSourceUrl}
-	                            onChange={(event) => {
-	                              const value = event.target.value
-	                              setWebSourceUrl(value)
-	                              if (!uploadConnectionName.trim()) {
-	                                setUploadConnectionName(value.replace(/^https?:\/\//, '').split(/[/?#]/)[0] || 'Web page')
-	                              }
-	                            }}
-	                            placeholder="https://example.com/report"
-	                            disabled={createSourceResourceMutation.isPending}
-	                            className="mt-1 bg-[#1a1a1a] border-[#555555] text-white placeholder-[#888888]"
-	                          />
-	                          <p className="mt-2 text-xs text-gray-400">
-	                            Supports public HTTP/HTTPS pages. Localhost, private networks and cloud metadata addresses are blocked by the backend.
-	                          </p>
-	                        </div>
-	                      </div>
-	                    )}
-
-	                    {/* Database Connection Forms */}
+                    {/* Database Connection Forms */}
                     {selectedType === 'mongo' && (
                       <div>
                         <Label htmlFor="conn-string" className="text-white">
@@ -2585,28 +2406,22 @@ export default function DatabasesPage() {
                   </Button>
                   <Button
                     onClick={() => {
-	                      if (selectedType === 'upload' || selectedType === 'url') {
-	                        handleCreateDialogSubmit()
-	                      } else if (isDirectSourceResourceType(selectedType)) {
-	                        handleCreateSourceResourceSubmit()
-	                      } else {
-	                        handleCreateConnection()
-	                      }
+                      if (selectedType === 'upload' || selectedType === 'url') {
+                        handleCreateDialogSubmit()
+                      } else {
+                        handleCreateConnection()
+                      }
                     }}
                     disabled={
-	                      (selectedType === 'upload' && (!uploadConnectionName.trim() || !uploadFileType || uploadFiles.length === 0)) ||
-	                      (selectedType === 'url' && (!uploadConnectionName.trim() || uploadURLs.filter(u => u.trim()).length === 0)) ||
-	                      (selectedType === 'pdf' && (!uploadConnectionName.trim() || !pdfSourceFile)) ||
-	                      (selectedType === 'web' && (!uploadConnectionName.trim() || !webSourceUrl.trim())) ||
-	                      (selectedType !== 'upload' && selectedType !== 'url' && !isCreateFormValid) ||
-	                      isCreatingAnyDatasource
+                      (selectedType === 'upload' && (!uploadConnectionName.trim() || !uploadFileType || uploadFiles.length === 0)) ||
+                      (selectedType === 'url' && (!uploadConnectionName.trim() || uploadURLs.filter(u => u.trim()).length === 0)) ||
+                      (selectedType !== 'upload' && selectedType !== 'url' && !isCreateFormValid) ||
+                      isCreatingAnyDatasource
                     }
                     className={`${
-	                      ((selectedType === 'upload' && uploadConnectionName.trim() && uploadFileType && uploadFiles.length > 0) ||
-	                       (selectedType === 'url' && uploadConnectionName.trim() && uploadURLs.filter(u => u.trim()).length > 0) ||
-	                       (selectedType === 'pdf' && uploadConnectionName.trim() && pdfSourceFile) ||
-	                       (selectedType === 'web' && uploadConnectionName.trim() && webSourceUrl.trim()) ||
-	                       (selectedType !== 'upload' && selectedType !== 'url' && !isDirectSourceResourceType(selectedType) && isCreateFormValid)) &&
+                      ((selectedType === 'upload' && uploadConnectionName.trim() && uploadFileType && uploadFiles.length > 0) ||
+                       (selectedType === 'url' && uploadConnectionName.trim() && uploadURLs.filter(u => u.trim()).length > 0) ||
+                       (selectedType !== 'upload' && selectedType !== 'url' && isCreateFormValid)) &&
                       !isCreatingAnyDatasource
                         ? 'bg-brand-orange hover:bg-brand-orange/90'
                         : 'bg-gray-500 cursor-not-allowed'

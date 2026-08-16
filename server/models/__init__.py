@@ -1,4 +1,3 @@
-from server.models.analysis_artifacts import AnalysisArtifact
 from server.collaboration.models import (
     CollaborationConversation,
     CollaborationDeliveryTarget,
@@ -8,6 +7,7 @@ from server.collaboration.models import (
     CollaborationResponseRef,
     ExternalIdentity,
 )
+from server.models.analysis_artifacts import AnalysisArtifact
 from server.models.connections import Connection
 from server.models.conversation_evaluation import ConversationEvaluation
 from server.models.custom_skill import CustomSkill
@@ -37,11 +37,17 @@ from server.models.schedules import Schedule, ScheduleRun
 from server.models.semantic_models import (
     SemanticModel,
     SemanticModelAuditEvent,
+    SemanticModelCalculatedField,
+    SemanticModelConsumer,
     SemanticModelDimension,
     SemanticModelEntity,
     SemanticModelField,
+    SemanticModelGenerationJob,
     SemanticModelMetric,
+    SemanticModelPublication,
     SemanticModelRelationship,
+    SemanticModelSuggestion,
+    SemanticModelValidationResult,
     SemanticModelVersion,
 )
 from server.models.settings import Setting
@@ -54,7 +60,7 @@ from server.models.skill_version import SkillVersion
 from server.models.slack_conversation import SlackConversation
 from server.models.slack_event_log import SlackEventLog
 from server.models.slack_workspace import SlackWorkspace
-from server.models.source_connections import FeishuOAuthFlow, SourceConnection
+from server.models.source_connections import SourceConnection
 from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
 from server.models.source_understanding import SourceSkillCandidate, SourceUnderstandingRun
@@ -81,13 +87,13 @@ __all__ = [
     "Dashboard",
     "DatasourceAnnotation",
     "Dataset",
+    "EvidenceFragment",
     "File",
     "Folder",
     "GitHubRepository",
     "FolderDashboard",
     "FolderMember",
     "FolderNotebook",
-    "EvidenceFragment",
     "KnowledgeResource",
     "Learning",
     "InvitationRole",
@@ -108,11 +114,17 @@ __all__ = [
     "ScheduleRun",
     "SemanticModel",
     "SemanticModelAuditEvent",
+    "SemanticModelCalculatedField",
+    "SemanticModelConsumer",
     "SemanticModelDimension",
     "SemanticModelEntity",
     "SemanticModelField",
+    "SemanticModelGenerationJob",
     "SemanticModelMetric",
+    "SemanticModelPublication",
     "SemanticModelRelationship",
+    "SemanticModelSuggestion",
+    "SemanticModelValidationResult",
     "SemanticModelVersion",
     "Setting",
     "SkillCitation",
@@ -124,9 +136,8 @@ __all__ = [
     "SlackConversation",
     "SlackEventLog",
     "SlackWorkspace",
-    "SourceResource",
     "SourceConnection",
-    "FeishuOAuthFlow",
+    "SourceResource",
     "SourceSnapshot",
     "SourceSkillCandidate",
     "SourceUnderstandingRun",

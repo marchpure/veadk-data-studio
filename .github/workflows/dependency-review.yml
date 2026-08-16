@@ -1,0 +1,53 @@
+name: Dependency Review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  osv-scan:
+    name: Scan dependencies for known vulnerabilities
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.24"
+
+      - name: Install osv-scanner
+        run: go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.2.4
+
+      - name: Scan manifests for known vulnerabilities
+        run: |
+          set +e
+          "$(go env GOPATH)/bin/osv-scanner" scan source --recursive ./
+          status=$?
+          set -e
+
+          if [ "$status" -eq 0 ]; then
+            echo "No known dependency vulnerabilities found."
+          elif [ "$status" -eq 1 ]; then
+            echo "::warning::OSV found known vulnerabilities in the existing dependency tree. This is reported but not blocking until the baseline is cleaned up."
+            {
+              echo "## Dependency Vulnerability Scan"
+              echo ""
+              echo "OSV found known vulnerabilities in the current dependency tree."
+              echo "This check is intentionally non-blocking while the existing baseline is cleaned up."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "OSV scanner failed with unexpected exit code $status."
+            exit "$status"
+          fi

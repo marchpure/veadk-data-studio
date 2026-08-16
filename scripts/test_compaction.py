@@ -10,6 +10,8 @@ dry-run summary so you can debug context usage for a specific notebook.
 
 from __future__ import annotations
 
+# ruff: noqa: E402, I001
+
 import argparse
 import asyncio
 import sys

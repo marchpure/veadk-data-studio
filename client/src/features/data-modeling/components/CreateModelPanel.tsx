@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, ArrowRight, Bot, CheckCircle2, Database, Loader2, Play, Table2 } from 'lucide-react'
+import { ArrowRight, Bot, CheckCircle2, Database, Loader2, Play, Table2 } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../../components/ui/dialog'
 import { DataProfileWorkspace } from '../profile/DataProfileWorkspace'
-import { EmptyState, ErrorState, MetricTile, Panel, PanelHeader, ScoreBar, SectionTitle, StatusPill, Surface, modelingStyles } from './modelingUi'
+import { DemoBadge, Panel, PanelHeader, ScoreBar, SectionTitle, StatusPill } from './modelingUi'
 import { useDataModelingStore, selectActiveModel } from '../store/useDataModelingStore'
-import type { DataModelingDatasource, DataSourceProfile } from '../types'
+import type { DataSourceProfile } from '../types'
 
 const milestones = ['Data', 'Profile', 'Generate', 'Explore']
 
@@ -14,26 +14,17 @@ export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpen
   const navigate = useNavigate()
   const [step, setStep] = useState(0)
   const profiles = useDataModelingStore(state => state.profiles)
-  const datasourceOptions = useDataModelingStore(state => state.datasourceOptions)
-  const datasourceLoading = useDataModelingStore(state => state.datasourceLoading)
-  const datasourceError = useDataModelingStore(state => state.datasourceError)
   const draft = useDataModelingStore(state => state.createDraft)
   const generation = useDataModelingStore(state => state.generation)
   const model = useDataModelingStore(selectActiveModel)
-  const loadDatasources = useDataModelingStore(state => state.loadDatasources)
   const updateCreateDraft = useDataModelingStore(state => state.updateCreateDraft)
   const toggleCreateTable = useDataModelingStore(state => state.toggleCreateTable)
   const startSemanticGeneration = useDataModelingStore(state => state.startSemanticGeneration)
+  const advanceSemanticGeneration = useDataModelingStore(state => state.advanceSemanticGeneration)
   const setActiveModel = useDataModelingStore(state => state.setActiveModel)
   const setWorkspaceMode = useDataModelingStore(state => state.setWorkspaceMode)
 
   const profile = profiles.find(item => item.id === draft.datasourceId) ?? profiles[0]
-
-  useEffect(() => {
-    if (open) {
-      void loadDatasources()
-    }
-  }, [open, loadDatasources])
 
   useEffect(() => {
     if (open && generation.phase === 'completed') {
@@ -42,28 +33,30 @@ export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpen
   }, [open, generation.phase])
 
   const startExploring = () => {
-    if (!model?.id) return
-    setActiveModel(model.id)
+    setActiveModel('sales-growth')
     setWorkspaceMode('explore')
     onOpenChange(false)
-    navigate(`/data-models/${model.id}`)
+    navigate('/data-models/sales-growth')
   }
 
   const runGeneration = () => {
     if (generation.phase === 'idle' || generation.phase === 'completed') {
       startSemanticGeneration()
+    } else {
+      advanceSemanticGeneration()
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[94vh] max-w-[1280px] overflow-y-auto border-[#30363a] bg-[#15181b] p-0 text-[#f3f5f5] shadow-2xl custom-scrollbar">
-        <DialogHeader className="border-b border-[#30363a] px-5 py-4">
+      <DialogContent className="max-h-[94vh] max-w-[1280px] overflow-y-auto border-[#2a2a2a] bg-[#1a1a1a] p-0 text-white custom-scrollbar">
+        <DialogHeader className="border-b border-[#2a2a2a] px-5 py-4">
           <div className="flex flex-wrap items-center gap-2">
-            <DialogTitle className="text-base text-[#f3f5f5]">Generate Semantic Model From Data</DialogTitle>
+            <DialogTitle className="text-base">Generate Semantic Model From Data</DialogTitle>
+            <DemoBadge />
             <StatusPill tone="info">Rill-first flow</StatusPill>
           </div>
-          <DialogDescription className="text-[#9aa4ac]">
+          <DialogDescription>
             Select a datasource, inspect profile evidence, generate a semantic model, then start exploring the generated model.
           </DialogDescription>
         </DialogHeader>
@@ -72,11 +65,11 @@ export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpen
           <nav className="space-y-2">
             {milestones.map((item, index) => (
               <button
-                key={`${item}-${index}`}
+                key={item}
                 type="button"
                 onClick={() => setStep(index)}
                 className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
-                  step === index ? modelingStyles.active : 'border-[#2d3338] bg-[#181b1f] text-[#c4ccd2] hover:border-[#46505a] hover:bg-[#20252a]'
+                  step === index ? 'border-brand-orange/50 bg-brand-orange/10 text-white' : 'border-[#2a2a2a] bg-[#191919] text-[#bdbdbd] hover:border-[#444]'
                 }`}
               >
                 <span>{item}</span>
@@ -86,12 +79,9 @@ export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpen
           </nav>
 
           <div className="min-w-0">
-            {step === 0 && (
+            {step === 0 && profile && (
               <DatasourceStep
-                datasources={datasourceOptions}
                 profiles={profiles}
-                loading={datasourceLoading}
-                error={datasourceError}
                 selectedId={draft.datasourceId}
                 selectedTables={draft.selectedTables}
                 domain={draft.domain}
@@ -110,21 +100,13 @@ export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpen
                 <Panel>
                   <div className="flex flex-wrap items-center justify-between gap-3 p-4">
                     <div>
-                      <div className="text-sm font-semibold text-[#f3f5f5]">Profile is ready for generation</div>
-                      <p className="mt-1 text-xs text-[#9aa4ac]">The generator will use table categories, field roles, sample rows, and PII detection as evidence.</p>
+                      <div className="text-sm font-semibold text-white">Profile is ready for generation</div>
+                      <p className="mt-1 text-xs text-[#9a9a9a]">The generator will use table categories, field roles, sample rows, and PII detection as evidence.</p>
                     </div>
                     <Button variant="brand-primary" onClick={() => setStep(2)}>AI Generate Semantic Model <ArrowRight className="h-4 w-4" /></Button>
                   </div>
                 </Panel>
               </div>
-            )}
-
-            {step === 1 && !profile && (
-              <EmptyState
-                title="No profile loaded"
-                body="Choose a datasource first. The profile panel will use the backend schema or Source Understanding profile for the selected datasource."
-                action={<Button variant="secondary" onClick={() => setStep(0)}>Choose datasource</Button>}
-              />
             )}
 
             {step === 2 && (
@@ -133,8 +115,7 @@ export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpen
                 phase={generation.phase}
                 steps={generation.steps}
                 summary={generation.summary}
-                error={generation.error}
-                modelName={model?.name || 'Semantic Model'}
+                modelName={model.name}
                 onRun={runGeneration}
                 onComplete={() => setStep(3)}
               />
@@ -149,33 +130,33 @@ export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpen
                 />
                 <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_280px]">
                   <div className="space-y-4">
-                    <Surface className="p-4">
-                      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-[#f3f5f5]">
+                    <div className="rounded-md border border-[#2a2a2a] bg-[#181818] p-4">
+                      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
                         <Bot className="h-4 w-4 text-brand-orange" />
                         Completion summary
                       </div>
                       <div className="grid gap-2">
-                        {(generation.summary.length ? generation.summary : ['Profile evidence loaded.', 'Semantic draft generated.', 'Explore defaults prepared.']).map((item, index) => (
-                          <div key={`${item}-${index}`} className="flex items-start gap-2 text-sm text-[#d6dde2]">
+                        {(generation.summary.length ? generation.summary : ['Profile evidence loaded.', 'Semantic draft generated.', 'Explore defaults prepared.']).map(item => (
+                          <div key={item} className="flex items-start gap-2 text-sm text-[#d6d6d6]">
                             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
                             <span>{item}</span>
                           </div>
                         ))}
                       </div>
-                    </Surface>
+                    </div>
                     <div className="grid gap-3 sm:grid-cols-3">
                       <Summary label="Entities" value={String(model.entities.length)} />
                       <Summary label="Metrics" value={String(model.metrics.length)} />
                       <Summary label="Readiness" value={`${model.readiness}%`} />
                     </div>
                   </div>
-                  <Surface className="p-4">
+                  <div className="rounded-md border border-[#2a2a2a] bg-[#181818] p-4">
                     <SectionTitle>Next action</SectionTitle>
-                    <p className="mt-2 text-sm leading-6 text-[#cdd3d8]">Start with Paid Revenue by Region, then review the model when the Explore answer looks credible.</p>
-                    <Button className="mt-4 w-full" variant="brand-primary" onClick={startExploring} disabled={!model?.id}>
+                    <p className="mt-2 text-sm text-[#cfcfcf]">Start with Paid Revenue by Region, then review the model when the Explore answer looks credible.</p>
+                    <Button className="mt-4 w-full" variant="brand-primary" onClick={startExploring}>
                       Start exploring <ArrowRight className="h-4 w-4" />
                     </Button>
-                  </Surface>
+                  </div>
                 </div>
               </Panel>
             )}
@@ -187,10 +168,7 @@ export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpen
 }
 
 function DatasourceStep({
-  datasources,
   profiles,
-  loading,
-  error,
   selectedId,
   selectedTables,
   domain,
@@ -201,10 +179,7 @@ function DatasourceStep({
   onToggleTable,
   onNext,
 }: {
-  datasources: DataModelingDatasource[]
   profiles: DataSourceProfile[]
-  loading: boolean
-  error: string | null
   selectedId: string
   selectedTables: string[]
   domain: string
@@ -220,40 +195,31 @@ function DatasourceStep({
   return (
     <div className="space-y-4">
       <Panel>
-        <PanelHeader title="Choose Data" subtitle="Select a real datasource, then inspect the live schema/profile evidence before generating a draft." />
-        {loading && <div className="p-4 text-sm text-[#cdd3d8]">Loading datasources...</div>}
-        {!loading && error && <div className="p-4"><ErrorState title="Unable to load datasources" body={error} /></div>}
-        {!loading && !error && datasources.length === 0 && (
-          <div className="p-4">
-            <EmptyState title="No supported datasource found" body="Connect an Oracle, Postgres, MySQL, or SQLite datasource before generating a Semantic Model." />
-          </div>
-        )}
+        <PanelHeader title="Choose Data" subtitle="Oracle SALES is pre-profiled for this Demo." />
         <div className="grid gap-3 p-4 md:grid-cols-3">
-          {datasources.map(item => {
-            const profiled = profiles.find(profile => profile.id === item.id)
-            return (
+          {profiles.map(item => (
             <button
               key={item.id}
               type="button"
               onClick={() => onSelectDatasource(item.id)}
               className={`rounded-md border p-4 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
-                selectedId === item.id ? modelingStyles.active : 'border-[#2d3338] bg-[#181b1f] hover:border-[#46505a] hover:bg-[#20252a]'
+                selectedId === item.id ? 'border-brand-orange/50 bg-brand-orange/10' : 'border-[#2a2a2a] bg-[#191919] hover:border-[#444]'
               }`}
             >
               <Database className="mb-3 h-5 w-5 text-brand-orange" />
-              <div className="text-sm font-semibold text-[#f3f5f5]">{item.name}</div>
-              <div className="mt-1 text-xs uppercase text-[#7f8a93]">{item.kind} · {item.sourceType}</div>
+              <div className="text-sm font-semibold text-white">{item.name}</div>
+              <div className="mt-1 text-xs uppercase text-[#8e8e8e]">{item.kind} · {item.schema}</div>
               <div className="mt-3 flex flex-wrap gap-2">
-                <StatusPill tone={profiled?.status === 'ready' ? 'ready' : item.status === 'error' ? 'blocked' : 'warning'}>{profiled?.status ?? item.status ?? 'not profiled'}</StatusPill>
-                {profiled && <StatusPill>{profiled.profileCoverage}% profile</StatusPill>}
+                <StatusPill tone={item.status === 'ready' ? 'ready' : 'warning'}>{item.status}</StatusPill>
+                <StatusPill>{item.profileCoverage}% profile</StatusPill>
               </div>
             </button>
-          )})}
+          ))}
         </div>
       </Panel>
 
       <Panel>
-        <PanelHeader title="Recommended Modeling Scope" subtitle="Choose the business domain, core tables, and the questions this model should answer." />
+        <PanelHeader title="Recommended Modeling Scope" subtitle="The AI has already classified the sales schema. Business questions are optional." />
         <div className="grid gap-4 p-4 lg:grid-cols-[320px_minmax(0,1fr)]">
           <div className="space-y-3">
             <label className="block text-xs font-medium text-[#9a9a9a]">
@@ -261,7 +227,7 @@ function DatasourceStep({
               <select
                 value={domain}
                 onChange={event => onSelectDomain(event.target.value)}
-                className={`mt-1 h-9 w-full rounded-md px-3 text-sm focus-visible:outline-none focus-visible:ring-1 ${modelingStyles.input}`}
+                className="mt-1 h-9 w-full rounded-md border border-[#333] bg-[#151515] px-3 text-sm text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 <option>Sales / Orders</option>
                 <option>Customers</option>
@@ -273,31 +239,31 @@ function DatasourceStep({
               <textarea
                 value={businessQuestions}
                 onChange={event => onQuestionsChange(event.target.value)}
-                className={`mt-1 min-h-32 w-full rounded-md p-3 text-sm focus-visible:outline-none focus-visible:ring-1 ${modelingStyles.input}`}
+                className="mt-1 min-h-32 w-full rounded-md border border-[#333] bg-[#151515] p-3 text-sm text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </label>
           </div>
           <div>
-            <div className="mb-2 text-xs font-medium text-[#9aa4ac]">Default recommendations</div>
+            <div className="mb-2 text-xs font-medium text-[#9a9a9a]">Default recommendations</div>
             <div className="grid max-h-[280px] gap-2 overflow-y-auto custom-scrollbar md:grid-cols-2">
               {profile?.tables.map(table => (
-                <label key={table.name} className="flex items-center gap-3 rounded-md border border-[#2d3338] bg-[#15181b] px-3 py-2 text-sm">
+                <label key={table.name} className="flex items-center gap-3 rounded-md border border-[#2a2a2a] bg-[#181818] px-3 py-2 text-sm">
                   <input
                     type="checkbox"
                     checked={selectedTables.includes(table.name)}
                     onChange={() => onToggleTable(table.name)}
                     className="h-4 w-4 accent-brand-orange"
                   />
-                  <Table2 className="h-4 w-4 text-[#7f8a93]" />
-                  <span className="min-w-0 flex-1 truncate text-[#f3f5f5]">{table.name}</span>
+                  <Table2 className="h-4 w-4 text-[#8c8c8c]" />
+                  <span className="min-w-0 flex-1 truncate text-white">{table.name}</span>
                   <StatusPill>{table.category}</StatusPill>
                 </label>
               ))}
             </div>
           </div>
         </div>
-        <div className="flex justify-end border-t border-[#30363a] p-4">
-          <Button variant="brand-primary" onClick={onNext}>Continue to Profile <ArrowRight className="h-4 w-4" /></Button>
+        <div className="flex justify-end border-t border-[#2a2a2a] p-4">
+          <Button variant="brand-primary" onClick={onNext}>AI Generate Semantic Model <ArrowRight className="h-4 w-4" /></Button>
         </div>
       </Panel>
     </div>
@@ -309,7 +275,6 @@ function GenerationStep({
   phase,
   steps,
   summary,
-  error,
   modelName,
   onRun,
   onComplete,
@@ -318,14 +283,12 @@ function GenerationStep({
   phase: string
   steps: Array<{ id: string; title: string; detail: string; status: string }>
   summary: string[]
-  error: string | null
   modelName: string
   onRun: () => void
   onComplete: () => void
 }) {
   const completed = phase === 'completed'
   const idle = phase === 'idle'
-  const running = !idle && !completed
 
   return (
     <Panel>
@@ -336,67 +299,61 @@ function GenerationStep({
       />
       <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div>
-          <Surface className="p-4">
+          <div className="rounded-md border border-[#2a2a2a] bg-[#181818] p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-[#f3f5f5]">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
                 <Bot className="h-4 w-4 text-brand-orange" />
                 Generate {modelName}
               </div>
-              <span className="text-xs tabular-nums text-[#c4ccd2]">{generationProgress}%</span>
+              <span className="text-xs tabular-nums text-[#bdbdbd]">{generationProgress}%</span>
             </div>
             <ScoreBar value={generationProgress} level={completed ? 'ready' : generationProgress > 60 ? 'warning' : 'blocked'} />
-          </Surface>
+          </div>
 
           <div className="mt-4 grid gap-3">
             {steps.map(step => (
-              <Surface key={step.id} className="p-3">
+              <div key={step.id} className="rounded-md border border-[#2a2a2a] bg-[#181818] p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-sm font-medium text-[#f3f5f5]">
+                  <div className="flex items-center gap-2 text-sm font-medium text-white">
                     {step.status === 'running' ? <Loader2 className="h-4 w-4 animate-spin text-brand-orange" /> : <CheckCircle2 className={`h-4 w-4 ${step.status === 'done' ? 'text-emerald-300' : 'text-[#666]'}`} />}
                     {step.title}
                   </div>
                   <StatusPill tone={step.status === 'done' ? 'ready' : step.status === 'running' ? 'info' : 'neutral'}>{step.status}</StatusPill>
                 </div>
-                <p className="mt-2 text-sm leading-6 text-[#9aa4ac]">{step.detail}</p>
-              </Surface>
+                <p className="mt-2 text-sm text-[#a9a9a9]">{step.detail}</p>
+              </div>
             ))}
           </div>
         </div>
 
-        <Surface className="p-4">
+        <div className="rounded-md border border-[#2a2a2a] bg-[#181818] p-4">
           <SectionTitle>Controls</SectionTitle>
-          <p className="mt-2 text-sm leading-6 text-[#cdd3d8]">Generation calls Source Understanding review APIs and creates a persisted Semantic Model draft.</p>
-          {error && (
-            <div className="mt-4 rounded-md border border-red-500/25 bg-red-500/10 p-3 text-sm leading-5 text-red-100">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-300" />
-                <div>
-                  <div className="font-medium text-red-100">Generation failed</div>
-                  <div className="mt-1 text-red-100/75">{error}</div>
-                </div>
-              </div>
-            </div>
-          )}
-          <Button className="mt-4 w-full" variant="brand-primary" onClick={completed ? onComplete : onRun} disabled={running}>
-            {completed ? 'Continue to Explore' : running ? 'Generating...' : error ? 'Retry generation' : 'Start AI generation'}
-            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : completed ? <ArrowRight className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+          <p className="mt-2 text-sm text-[#cfcfcf]">Advance the deterministic Demo generation to expose visible progress and completion state.</p>
+          <Button className="mt-4 w-full" variant="brand-primary" onClick={completed ? onComplete : onRun}>
+            {completed ? 'Continue to Explore' : idle ? 'Start AI generation' : 'Advance generation'}
+            {completed ? <ArrowRight className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           </Button>
           {summary.length > 0 && (
             <div className="mt-4 space-y-2">
-              {summary.map((item, index) => (
-                <div key={`${item}-${index}`} className="flex items-start gap-2 text-xs text-[#d6dde2]">
+              {summary.map(item => (
+                <div key={item} className="flex items-start gap-2 text-xs text-[#d6d6d6]">
                   <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" />
                   <span>{item}</span>
                 </div>
               ))}
             </div>
           )}
-        </Surface>
+        </div>
       </div>
     </Panel>
   )
 }
 
 function Summary({ label, value }: { label: string; value: string }) {
-  return <MetricTile label={label} value={value} />
+  return (
+    <div className="rounded-md border border-[#2a2a2a] bg-[#181818] p-3">
+      <div className="text-xs uppercase text-[#858585]">{label}</div>
+      <div className="mt-1 text-lg font-semibold text-white">{value}</div>
+    </div>
+  )
 }

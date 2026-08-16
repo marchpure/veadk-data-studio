@@ -1,7 +1,7 @@
 """add source connections connector architecture
 
 Revision ID: add_source_connections_arch
-Revises: add_multi_source_assets
+Revises: add_collaboration_event_trace_refs
 Create Date: 2026-08-14
 """
 
@@ -14,7 +14,7 @@ from alembic import op
 from fastapi_users_db_sqlalchemy.generics import GUID
 
 revision = "add_source_connections_arch"
-down_revision = "add_multi_source_assets"
+down_revision = "add_collaboration_event_trace_refs"
 branch_labels = None
 depends_on = None
 
@@ -117,6 +117,19 @@ def _check_names(table_name: str) -> set[str]:
     return {item["name"] for item in sa.inspect(op.get_bind()).get_check_constraints(table_name) if item.get("name")}
 
 
+def _n(name: str) -> str:
+    """Return an already-formatted Alembic constraint name.
+
+    The project naming convention prefixes check constraints as
+    ``ck_<table>_<name>``. Legacy migrations already stored full constraint
+    names such as ``ck_source_resources_resource_type``. Passing those names
+    directly to batch operations can make Alembic format them again as
+    ``ck_source_resources_ck_source_resources_resource_type`` on PostgreSQL.
+    """
+
+    return op.f(name)
+
+
 def _unique_names(table_name: str) -> set[str]:
     if table_name not in _tables():
         return set()
@@ -186,8 +199,6 @@ def upgrade() -> None:
         created.append("source_skill_candidates")
     if "semantic_models" not in existing:
         _create_semantic_model_tables(created)
-    else:
-        _alter_existing_semantic_model_tables()
     if "notebook_assets" not in existing:
         _create_notebook_assets()
         created.append("notebook_assets")
@@ -212,7 +223,6 @@ def downgrade() -> None:
         "analysis_artifacts",
         "notebook_assets",
         "semantic_model_audit_events",
-        "semantic_model_versions",
         "semantic_model_dimensions",
         "semantic_model_metrics",
         "semantic_model_relationships",
@@ -360,11 +370,11 @@ def _alter_existing_source_resources() -> None:
         if "selection_config_json" not in columns:
             batch_op.add_column(sa.Column("selection_config_json", sa.JSON(), nullable=True))
         if "ck_source_resources_resource_type" in checks:
-            batch_op.drop_constraint("ck_source_resources_resource_type", type_="check")
-        batch_op.create_check_constraint("ck_source_resources_resource_type", f"resource_type IN {SOURCE_RESOURCE_TYPES_NEW}")
+            batch_op.drop_constraint(_n("ck_source_resources_resource_type"), type_="check")
+        batch_op.create_check_constraint(_n("ck_source_resources_resource_type"), f"resource_type IN {SOURCE_RESOURCE_TYPES_NEW}")
         if "ck_source_resources_status" in checks:
-            batch_op.drop_constraint("ck_source_resources_status", type_="check")
-        batch_op.create_check_constraint("ck_source_resources_status", f"status IN {SOURCE_RESOURCE_STATUSES_NEW}")
+            batch_op.drop_constraint(_n("ck_source_resources_status"), type_="check")
+        batch_op.create_check_constraint(_n("ck_source_resources_status"), f"status IN {SOURCE_RESOURCE_STATUSES_NEW}")
 
 
 def _revert_existing_source_resources() -> None:
@@ -405,11 +415,11 @@ def _revert_existing_source_resources() -> None:
 
     with op.batch_alter_table("source_resources") as batch_op:
         if "ck_source_resources_resource_type" in checks:
-            batch_op.drop_constraint("ck_source_resources_resource_type", type_="check")
-        batch_op.create_check_constraint("ck_source_resources_resource_type", f"resource_type IN {SOURCE_RESOURCE_TYPES_OLD}")
+            batch_op.drop_constraint(_n("ck_source_resources_resource_type"), type_="check")
+        batch_op.create_check_constraint(_n("ck_source_resources_resource_type"), f"resource_type IN {SOURCE_RESOURCE_TYPES_OLD}")
         if "ck_source_resources_status" in checks:
-            batch_op.drop_constraint("ck_source_resources_status", type_="check")
-        batch_op.create_check_constraint("ck_source_resources_status", f"status IN {SOURCE_RESOURCE_STATUSES_OLD}")
+            batch_op.drop_constraint(_n("ck_source_resources_status"), type_="check")
+        batch_op.create_check_constraint(_n("ck_source_resources_status"), f"status IN {SOURCE_RESOURCE_STATUSES_OLD}")
         if "source_connection_id" in columns:
             batch_op.drop_index("ix_source_resources_source_connection_id")
             batch_op.drop_constraint("fk_source_resources_source_connection_id_source_connections", type_="foreignkey")
@@ -514,8 +524,8 @@ def _alter_existing_evidence_fragments() -> None:
 
     with op.batch_alter_table("evidence_fragments") as batch_op:
         if "ck_evidence_fragments_fragment_type" in checks:
-            batch_op.drop_constraint("ck_evidence_fragments_fragment_type", type_="check")
-        batch_op.create_check_constraint("ck_evidence_fragments_fragment_type", f"fragment_type IN {EVIDENCE_FRAGMENT_TYPES_NEW}")
+            batch_op.drop_constraint(_n("ck_evidence_fragments_fragment_type"), type_="check")
+        batch_op.create_check_constraint(_n("ck_evidence_fragments_fragment_type"), f"fragment_type IN {EVIDENCE_FRAGMENT_TYPES_NEW}")
 
 
 def _revert_existing_evidence_fragments() -> None:
@@ -541,8 +551,8 @@ def _revert_existing_evidence_fragments() -> None:
 
     with op.batch_alter_table("evidence_fragments") as batch_op:
         if "ck_evidence_fragments_fragment_type" in checks:
-            batch_op.drop_constraint("ck_evidence_fragments_fragment_type", type_="check")
-        batch_op.create_check_constraint("ck_evidence_fragments_fragment_type", f"fragment_type IN {EVIDENCE_FRAGMENT_TYPES_OLD}")
+            batch_op.drop_constraint(_n("ck_evidence_fragments_fragment_type"), type_="check")
+        batch_op.create_check_constraint(_n("ck_evidence_fragments_fragment_type"), f"fragment_type IN {EVIDENCE_FRAGMENT_TYPES_OLD}")
 
 
 def _create_source_understanding_runs() -> None:
@@ -623,7 +633,6 @@ def _create_semantic_model_tables(created: list[str]) -> None:
         sa.Column("datasource_kind", sa.String(length=64), nullable=False),
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
-        sa.Column("revision", sa.Integer(), nullable=False, server_default=sa.text("1")),
         sa.Column("draft_revision", sa.String(length=64), nullable=False),
         sa.Column("published_version", sa.String(length=64), nullable=False),
         sa.Column("readiness", sa.Integer(), nullable=False),
@@ -759,43 +768,6 @@ def _create_semantic_model_tables(created: list[str]) -> None:
         op.create_index(op.f(f"ix_semantic_model_audit_events_{column}"), "semantic_model_audit_events", [column], unique=False)
     created.append("semantic_model_audit_events")
 
-    _create_semantic_model_versions()
-    created.append("semantic_model_versions")
-
-
-def _alter_existing_semantic_model_tables() -> None:
-    columns = _columns("semantic_models")
-    if "revision" not in columns:
-        op.add_column("semantic_models", sa.Column("revision", sa.Integer(), nullable=False, server_default=sa.text("1")))
-        if op.get_bind().dialect.name == "postgresql":
-            op.execute(sa.text("ALTER TABLE semantic_models ALTER COLUMN revision DROP DEFAULT"))
-    if "semantic_model_versions" not in _tables():
-        _create_semantic_model_versions()
-
-
-def _create_semantic_model_versions() -> None:
-    op.create_table(
-        "semantic_model_versions",
-        sa.Column("id", GUID(), nullable=False),
-        sa.Column("tenant_id", GUID(), nullable=False),
-        sa.Column("model_id", GUID(), nullable=False),
-        sa.Column("version_label", sa.String(length=64), nullable=False),
-        sa.Column("revision", sa.Integer(), nullable=False),
-        sa.Column("snapshot_json", sa.Text(), nullable=False),
-        sa.Column("source_snapshot_ids_json", sa.Text(), nullable=False),
-        sa.Column("physical_schema_json", sa.Text(), nullable=False),
-        sa.Column("review_json", sa.Text(), nullable=False),
-        sa.Column("published_by", GUID(), nullable=True),
-        sa.Column("created_at", sa.TIMESTAMP(), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
-        sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], name=op.f("fk_semantic_model_versions_tenant_id_tenants"), ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["model_id"], ["semantic_models.id"], name=op.f("fk_semantic_model_versions_model_id_semantic_models"), ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["published_by"], ["users.id"], name=op.f("fk_semantic_model_versions_published_by_users"), ondelete="SET NULL"),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_semantic_model_versions")),
-        sa.UniqueConstraint("model_id", "version_label", name="uq_semantic_model_versions_model_label"),
-    )
-    for column in ("tenant_id", "model_id", "published_by"):
-        op.create_index(op.f(f"ix_semantic_model_versions_{column}"), "semantic_model_versions", [column], unique=False)
-
 
 def _create_semantic_child_table(table_name: str, columns: list[sa.Column], *, include_model_id: bool = True) -> None:
     base_columns = [sa.Column("id", GUID(), nullable=False)]
@@ -890,10 +862,10 @@ def _alter_existing_notebook_assets() -> None:
         )
     else:
         if "ck_notebook_assets_asset_type" in checks:
-            op.drop_constraint("ck_notebook_assets_asset_type", "notebook_assets", type_="check")
+            op.drop_constraint(_n("ck_notebook_assets_asset_type"), "notebook_assets", type_="check")
         if "ck_notebook_assets_type" not in checks:
             op.create_check_constraint(
-                op.f("ck_notebook_assets_type"),
+                _n("ck_notebook_assets_type"),
                 "notebook_assets",
                 "asset_type IN ('dataset', 'semantic_model', 'knowledge_resource')",
             )
@@ -926,7 +898,7 @@ def _alter_existing_notebook_assets() -> None:
                 )
             else:
                 op.create_unique_constraint(
-                    "uq_notebook_assets_asset",
+                    _n("uq_notebook_assets_asset"),
                     "notebook_assets",
                     ["tenant_id", "notebook_id", "asset_type", "asset_id"],
                 )
@@ -1001,7 +973,7 @@ def _alter_existing_analysis_artifacts() -> None:
                 )
             else:
                 op.create_unique_constraint(
-                    "uq_analysis_artifacts_version",
+                    _n("uq_analysis_artifacts_version"),
                     "analysis_artifacts",
                     ["tenant_id", "notebook_id", "name", "version"],
                 )

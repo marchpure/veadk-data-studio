@@ -6,7 +6,7 @@ import ipaddress
 import re
 import socket
 from dataclasses import dataclass
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -39,7 +39,6 @@ class WebSourceAdapter:
     async def capture(self, url: str) -> WebCapturedPage:
         redirects: list[str] = []
         current_url = self._validate_url(url)
-        canonical_url = current_url
         verify_ssl = self._get_ssl_verify_setting()
 
         async with httpx.AsyncClient(
@@ -100,7 +99,6 @@ class WebSourceAdapter:
             metadata={
                 "provider": "web",
                 "initial_url": url,
-                "canonical_url": canonical_url,
                 "final_url": final_url,
                 "redirect_chain": redirects,
                 "status_code": status_code,
@@ -129,16 +127,7 @@ class WebSourceAdapter:
         if not parsed.hostname:
             raise ConnectorError("Web URL is missing a hostname", code="invalid_url", permanent=True)
         self._validate_hostname(parsed.hostname)
-        return self._canonicalize_url(parsed)
-
-    def _canonicalize_url(self, parsed) -> str:
-        scheme = parsed.scheme.lower()
-        hostname = (parsed.hostname or "").lower()
-        netloc = hostname
-        if parsed.port and not ((scheme == "http" and parsed.port == 80) or (scheme == "https" and parsed.port == 443)):
-            netloc = f"{hostname}:{parsed.port}"
-        path = parsed.path or "/"
-        return urlunparse((scheme, netloc, path, "", parsed.query, ""))
+        return url
 
     def _validate_hostname(self, hostname: str) -> None:
         if hostname.lower() == "localhost":

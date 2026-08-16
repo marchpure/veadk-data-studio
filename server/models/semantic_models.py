@@ -36,7 +36,6 @@ class SemanticModel(Base):
     datasource_kind: Mapped[str] = mapped_column(String(64), nullable=False, default="oracle")
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="Draft")
-    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     draft_revision: Mapped[str] = mapped_column(String(64), nullable=False, default="draft-1")
     published_version: Mapped[str] = mapped_column(String(64), nullable=False, default="v0")
     readiness: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -63,6 +62,15 @@ class SemanticModel(Base):
     )
     dimensions: Mapped[list[SemanticModelDimension]] = relationship(
         back_populates="model", cascade="all, delete-orphan", order_by="SemanticModelDimension.sort_order"
+    )
+    calculated_fields: Mapped[list[SemanticModelCalculatedField]] = relationship(
+        back_populates="model", cascade="all, delete-orphan", order_by="SemanticModelCalculatedField.sort_order"
+    )
+    suggestions: Mapped[list[SemanticModelSuggestion]] = relationship(
+        back_populates="model", cascade="all, delete-orphan", order_by="SemanticModelSuggestion.sort_order"
+    )
+    validation_results: Mapped[list[SemanticModelValidationResult]] = relationship(
+        back_populates="model", cascade="all, delete-orphan", order_by="SemanticModelValidationResult.created_at"
     )
     versions: Mapped[list[SemanticModelVersion]] = relationship(
         back_populates="model", cascade="all, delete-orphan", order_by="SemanticModelVersion.created_at"
@@ -195,6 +203,140 @@ class SemanticModelDimension(Base):
     __table_args__ = (UniqueConstraint("model_id", "slug", name="uq_semantic_model_dimensions_model_slug"),)
 
 
+class SemanticModelCalculatedField(Base):
+    __tablename__ = "semantic_model_calculated_fields"
+
+    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=generate_uuid)
+    model_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("semantic_models.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    slug: Mapped[str] = mapped_column(String(120), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    entity_slug: Mapped[str] = mapped_column(String(120), nullable=False)
+    expression: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    model: Mapped[SemanticModel] = relationship(back_populates="calculated_fields")
+
+    __table_args__ = (
+        UniqueConstraint("model_id", "slug", name="uq_semantic_model_calculated_fields_model_slug"),
+    )
+
+
+class SemanticModelSuggestion(Base):
+    __tablename__ = "semantic_model_suggestions"
+
+    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=generate_uuid)
+    model_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("semantic_models.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    slug: Mapped[str] = mapped_column(String(120), nullable=False)
+    suggestion_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    recommendation: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    evidence_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    validation: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    edited_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    model: Mapped[SemanticModel] = relationship(back_populates="suggestions")
+
+    __table_args__ = (UniqueConstraint("model_id", "slug", name="uq_semantic_model_suggestions_model_slug"),)
+
+
+class SemanticModelValidationResult(Base):
+    __tablename__ = "semantic_model_validation_results"
+
+    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=generate_uuid)
+    model_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("semantic_models.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    result_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), server_default=func.current_timestamp())
+
+    model: Mapped[SemanticModel] = relationship(back_populates="validation_results")
+
+
+class SemanticModelVersion(Base):
+    __tablename__ = "semantic_model_versions"
+
+    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=generate_uuid)
+    model_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("semantic_models.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version_label: Mapped[str] = mapped_column(String(64), nullable=False)
+    snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    publish_notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_by: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), server_default=func.current_timestamp())
+    immutable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+
+    model: Mapped[SemanticModel] = relationship(back_populates="versions")
+    creator: Mapped[User | None] = relationship("User")
+
+    __table_args__ = (UniqueConstraint("model_id", "version_label", name="uq_semantic_model_versions_model_label"),)
+
+
+class SemanticModelPublication(Base):
+    __tablename__ = "semantic_model_publications"
+
+    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=generate_uuid)
+    model_id: Mapped[UUID] = mapped_column(GUID(), ForeignKey("semantic_models.id", ondelete="CASCADE"), nullable=False)
+    version_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("semantic_model_versions.id", ondelete="CASCADE"), nullable=False
+    )
+    version_label: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    published_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), server_default=func.current_timestamp())
+
+
+class SemanticModelGenerationJob(Base):
+    __tablename__ = "semantic_model_generation_jobs"
+
+    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=generate_uuid)
+    tenant_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_by: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    datasource_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running")
+    phase: Mapped[str] = mapped_column(String(32), nullable=False, default="profile")
+    progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    steps_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    request_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    result_model_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("semantic_models.id", ondelete="SET NULL"), nullable=True
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), server_default=func.current_timestamp())
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=False), server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+
+class SemanticModelConsumer(Base):
+    __tablename__ = "semantic_model_consumers"
+
+    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=generate_uuid)
+    model_id: Mapped[UUID] = mapped_column(
+        GUID(), ForeignKey("semantic_models.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version_label: Mapped[str] = mapped_column(String(64), nullable=False)
+    consumer_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    reference_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_by: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), server_default=func.current_timestamp())
+
+
 class SemanticModelAuditEvent(Base):
     __tablename__ = "semantic_model_audit_events"
 
@@ -202,37 +344,10 @@ class SemanticModelAuditEvent(Base):
     tenant_id: Mapped[UUID] = mapped_column(
         GUID(), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    model_id: Mapped[UUID] = mapped_column(
-        GUID(), ForeignKey("semantic_models.id", ondelete="CASCADE"), nullable=False, index=True
+    model_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("semantic_models.id", ondelete="CASCADE"), nullable=True, index=True
     )
     user_id: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     action: Mapped[str] = mapped_column(String(120), nullable=False)
     details_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), server_default=func.current_timestamp())
-
-    user: Mapped[User | None] = relationship("User")
-
-
-class SemanticModelVersion(Base):
-    __tablename__ = "semantic_model_versions"
-
-    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=generate_uuid)
-    tenant_id: Mapped[UUID] = mapped_column(
-        GUID(), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    model_id: Mapped[UUID] = mapped_column(
-        GUID(), ForeignKey("semantic_models.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    version_label: Mapped[str] = mapped_column(String(64), nullable=False)
-    revision: Mapped[int] = mapped_column(Integer, nullable=False)
-    snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
-    source_snapshot_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    physical_schema_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    review_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    published_by: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), server_default=func.current_timestamp())
-
-    model: Mapped[SemanticModel] = relationship(back_populates="versions")
-    publisher: Mapped[User | None] = relationship("User")
-
-    __table_args__ = (UniqueConstraint("model_id", "version_label", name="uq_semantic_model_versions_model_label"),)

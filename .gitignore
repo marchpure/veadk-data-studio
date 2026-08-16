@@ -101,7 +101,6 @@ server/pip-delete-this-directory.txt
 
 # Server data and database files
 server/.data/
-server/.data
 server/*.db
 server/*.sqlite
 server/*.sqlite3
@@ -118,11 +117,6 @@ client/dist/
 client/dist-ssr/
 client/build/
 client/*.local
-
-# Local verification artifacts
-client/tmp-data-modeling-production-*/
-client/tmp-data-models-diagnostic.png
-client/tmp-login-diagnostic.png
 
 # Tauri build artifacts
 client/src-tauri/target/

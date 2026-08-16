@@ -1,10 +1,10 @@
 import { chromium } from 'playwright'
 import { mkdirSync } from 'node:fs'
 
-// Demo-only browser journey for the local mock fixture route. Production
-// acceptance must use data-modeling-production-e2e.mjs against a real backend.
-const baseURL = process.env.BASE_URL || 'http://127.0.0.1:5173'
+const baseURL = process.env.BASE_URL || 'http://127.0.0.1:8080'
 const screenDir = process.env.SCREEN_DIR || './tmp-data-modeling-screens'
+const loginEmail = process.env.E2E_EMAIL || process.env.MASTER_USER_EMAIL || 'admin@byaan.dev'
+const loginPassword = process.env.E2E_PASSWORD || process.env.MASTER_USER_PASSWORD || ''
 mkdirSync(screenDir, { recursive: true })
 
 const stats = {
@@ -60,6 +60,35 @@ async function isVisible(locator, timeout = 500) {
   }
 }
 
+async function requiresLogin(page) {
+  const configResponse = await page.request.get(`${baseURL}/api/app/config`)
+  if (!configResponse.ok()) {
+    return false
+  }
+  const config = await configResponse.json()
+  return Boolean(config?.data?.features?.enterprise_licensed)
+}
+
+async function ensureAuthenticated(page, targetPath = '/data-models') {
+  if (!(await requiresLogin(page))) {
+    return
+  }
+
+  if (!loginPassword) {
+    throw new Error('E2E_PASSWORD or MASTER_USER_PASSWORD is required for self-hosted Team Version login')
+  }
+
+  await page.goto(`${baseURL}/login`, { waitUntil: 'networkidle' })
+  if (await isVisible(page.getByRole('heading', { name: /Welcome back|Welcome/i }), 2000)) {
+    await page.getByLabel('Email').fill(loginEmail)
+    await page.getByLabel('Password').fill(loginPassword)
+    await page.getByRole('button', { name: /Sign in/i }).click()
+  }
+
+  await page.waitForURL(url => !url.pathname.startsWith('/login'), { timeout: 15000 })
+  await page.goto(`${baseURL}${targetPath}`, { waitUntil: 'networkidle' })
+}
+
 async function completeGeneration(page) {
   for (let index = 0; index < 12; index += 1) {
     const startExploringButton = page.getByRole('button', { name: /Start exploring/i })
@@ -92,9 +121,7 @@ async function completeGeneration(page) {
 
 async function runDesktopJourney() {
   const page = await makePage({ width: 1440, height: 900 })
-  await page.goto(`${baseURL}/data-models`, { waitUntil: 'networkidle' })
-  await page.evaluate(() => localStorage.removeItem('byaan-data-modeling-demo-v1'))
-  await page.reload({ waitUntil: 'networkidle' })
+  await ensureAuthenticated(page, '/data-models')
   await page.getByRole('heading', { name: 'Data Models' }).waitFor()
 
   await page.getByRole('button', { name: /Generate from Data/i }).click()
@@ -160,12 +187,17 @@ async function runDesktopJourney() {
     await page.waitForTimeout(500)
   }
 
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.goto(`${baseURL}/data-models/sales-growth`, { waitUntil: 'networkidle' })
+  await page.getByText('Sales Growth Model').waitFor()
+  await page.getByText('v3').first().waitFor()
+
   await page.close()
 }
 
 async function runMobileSmoke() {
   const page = await makePage({ width: 390, height: 844 })
-  await page.goto(`${baseURL}/data-models`, { waitUntil: 'networkidle' })
+  await ensureAuthenticated(page, '/data-models')
   await page.getByRole('heading', { name: 'Data Models' }).waitFor()
   const homeOk = await noHorizontalOverflow(page)
   await page.screenshot({ path: `${screenDir}/08-data-models-mobile-390.png`, fullPage: true })

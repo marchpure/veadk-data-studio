@@ -5,10 +5,8 @@ import hashlib
 import html
 import io
 import json
-import os
 import re
 import secrets
-import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -17,11 +15,10 @@ from urllib.parse import unquote, urlencode, urlparse
 from uuid import UUID
 
 import httpx
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.auth.tenant_context import get_tenant_id, set_tenant_id
-from server.models.source_connections import FeishuOAuthFlow, SourceConnection
+from server.models.source_connections import SourceConnection
 from server.models.source_resources import SourceResource
 from server.services.crypto_service import CryptoService
 from server.services.settings import SettingsService
@@ -32,19 +29,14 @@ logger = get_logger(__name__)
 FEISHU_CONFIG_KEY = "source_connector_feishu_config"
 FEISHU_OAUTH_STATE_TTL_SECONDS = 600
 FEISHU_REFRESH_SKEW_SECONDS = 300
-FEISHU_HOSTED_APP_ID_ENV = "BYAAN_FEISHU_APP_ID"
-FEISHU_HOSTED_APP_SECRET_ENV = "BYAAN_FEISHU_APP_SECRET"
-FEISHU_HOSTED_REDIRECT_URI_ENV = "BYAAN_FEISHU_REDIRECT_URI"
 
 REQUIRED_FEISHU_SCOPES = [
-    "space:document:retrieve",
-    "docx:document:readonly",
+    "drive:drive:readonly",
+    "docs:doc:readonly",
     "wiki:wiki:readonly",
+    "sheets:spreadsheet:readonly",
+    "bitable:app:readonly",
 ]
-
-LEGACY_FEISHU_SCOPE_ALIASES = {
-    "docs:doc:readonly": "docx:document:readonly",
-}
 
 
 class ConnectorError(Exception):
@@ -153,31 +145,6 @@ def redact_credentials(credentials: dict[str, Any]) -> dict[str, Any]:
     return redacted
 
 
-def _normalize_scopes(value: Any, fallback: list[str] | tuple[str, ...] | None = None) -> list[str]:
-    if isinstance(value, str):
-        scopes = [item for item in re.split(r"[\s,]+", value) if item]
-    elif isinstance(value, (list, tuple, set)):
-        scopes = [str(item) for item in value if item]
-    else:
-        scopes = []
-    return scopes or list(fallback or [])
-
-
-def _normalize_configured_scopes(value: Any) -> list[str]:
-    """Migrate obsolete configured scopes without rewriting granted token scopes."""
-    scopes = _normalize_scopes(value, REQUIRED_FEISHU_SCOPES)
-    migrated = [LEGACY_FEISHU_SCOPE_ALIASES.get(scope, scope) for scope in scopes]
-    return list(dict.fromkeys(migrated))
-
-
-def feishu_callback_url() -> str:
-    explicit = os.getenv(FEISHU_HOSTED_REDIRECT_URI_ENV) or ""
-    if explicit.strip():
-        return explicit.strip()
-    public_base = os.getenv("PUBLIC_BASE_URL") or os.getenv("FRONTEND_URL") or "http://127.0.0.1:8080"
-    return f"{public_base.rstrip('/')}/api/source-connections/feishu/oauth/callback"
-
-
 class FeishuAdminConfigService:
     @staticmethod
     async def save_config(
@@ -193,7 +160,7 @@ class FeishuAdminConfigService:
                 "app_id": app_id.strip(),
                 "app_secret": app_secret.strip(),
                 "redirect_uri": redirect_uri.strip(),
-                "scopes": _normalize_configured_scopes(scopes),
+                "scopes": scopes or REQUIRED_FEISHU_SCOPES,
             },
             session,
         )
@@ -208,244 +175,61 @@ class FeishuAdminConfigService:
     @staticmethod
     async def load_config(*, session: AsyncSession) -> dict[str, Any] | None:
         setting = await SettingsService.get_setting_by_key(session, FEISHU_CONFIG_KEY)
-        if setting and setting.setting_value:
-            config = await CryptoService.decrypt_config(setting.setting_value, session)
-            config["scopes"] = _normalize_configured_scopes(config.get("scopes"))
-            config["mode"] = "self_built"
-            return config
-        hosted_app_id = os.getenv(FEISHU_HOSTED_APP_ID_ENV) or ""
-        hosted_app_secret = os.getenv(FEISHU_HOSTED_APP_SECRET_ENV) or ""
-        hosted_redirect_uri = feishu_callback_url()
-        if hosted_app_id and hosted_app_secret and hosted_redirect_uri:
-            return {
-                "mode": "hosted",
-                "app_id": hosted_app_id.strip(),
-                "app_secret": hosted_app_secret.strip(),
-                "redirect_uri": hosted_redirect_uri.strip(),
-                "scopes": REQUIRED_FEISHU_SCOPES,
-            }
-        return None
+        if not setting or not setting.setting_value:
+            return None
+        return await CryptoService.decrypt_config(setting.setting_value, session)
 
     @staticmethod
-    async def status(*, session: AsyncSession, include_admin_details: bool = False) -> dict[str, Any]:
+    async def status(*, session: AsyncSession) -> dict[str, Any]:
         config = await FeishuAdminConfigService.load_config(session=session)
         if not config:
             return {
                 "configured": False,
-                "mode": "not_configured",
-                "status": "not_configured",
-                "secret_configured": False,
-                "can_configure_custom_app": True,
-                "redirect_uri": feishu_callback_url() if include_admin_details else None,
-                "scopes": [],
                 "required_scopes": REQUIRED_FEISHU_SCOPES,
                 "missing_scopes": REQUIRED_FEISHU_SCOPES,
             }
-        scopes = _normalize_configured_scopes(config.get("scopes"))
+        scopes = config.get("scopes") or []
         missing = [scope for scope in REQUIRED_FEISHU_SCOPES if scope not in scopes]
-        payload = {
+        return {
             "configured": bool(config.get("app_id") and config.get("app_secret") and config.get("redirect_uri")),
-            "mode": config.get("mode") or "self_built",
-            "status": "ready_to_authorize" if not missing else "scope_missing",
-            "secret_configured": bool(config.get("app_secret")),
-            "can_configure_custom_app": True,
+            "app_id": config.get("app_id"),
+            "redirect_uri": config.get("redirect_uri"),
             "scopes": scopes,
             "required_scopes": REQUIRED_FEISHU_SCOPES,
             "missing_scopes": missing,
         }
-        if include_admin_details:
-            payload.update(
-                {
-                    "app_id": config.get("app_id"),
-                    "redirect_uri": config.get("redirect_uri") or feishu_callback_url(),
-                }
-            )
-        return payload
-
-    @staticmethod
-    async def validate_config(*, session: AsyncSession) -> dict[str, Any]:
-        config = await FeishuAdminConfigService.load_config(session=session)
-        status_payload = await FeishuAdminConfigService.status(session=session, include_admin_details=True)
-        configured = bool(status_payload.get("configured"))
-        missing_scopes = status_payload.get("missing_scopes") or []
-        redirect_uri = str(status_payload.get("redirect_uri") or feishu_callback_url())
-        required_callback = feishu_callback_url()
-        checks = {
-            "callback_matches": {
-                "ok": bool(redirect_uri) and redirect_uri == required_callback,
-                "message": "回调地址已匹配系统生成地址。" if redirect_uri == required_callback else "请将系统生成的回调地址配置到飞书应用后台。",
-                "expected": required_callback,
-                "actual": redirect_uri,
-            },
-            "credentials_valid": {
-                "ok": configured,
-                "message": "凭证字段已配置，保存时会加密存储；真实有效性会在授权或机器人 probe 时校验。"
-                if configured
-                else "App ID、App Secret 或回调地址尚未配置完整。",
-            },
-            "scopes_complete": {
-                "ok": len(missing_scopes) == 0,
-                "message": "最小权限已配置。"
-                if not missing_scopes
-                else f"缺失权限：{', '.join(missing_scopes)}",
-                "missing_scopes": missing_scopes,
-            },
-            "admin_approval": {
-                "ok": configured and len(missing_scopes) == 0,
-                "message": "如企业开启权限审批，管理员仍需在飞书后台审批并发布应用。",
-            },
-            "event_subscription": {
-                "ok": False,
-                "message": "数据源 OAuth 不依赖事件订阅；协作 bot 的事件订阅需在机器人安装后单独验证。",
-            },
-        }
-        return {
-            "configured": configured,
-            "mode": status_payload.get("mode"),
-            "secret_configured": bool(status_payload.get("secret_configured")),
-            "redirect_uri": redirect_uri,
-            "required_scopes": REQUIRED_FEISHU_SCOPES,
-            "missing_scopes": missing_scopes,
-            "checks": checks,
-            "app_id": config.get("app_id") if config else None,
-        }
 
 
 class FeishuOAuthStateStore:
-    @staticmethod
-    def state_hash(state: str) -> str:
-        return hashlib.sha256(state.encode("utf-8")).hexdigest()
+    _states: dict[str, dict[str, Any]] = {}
 
     @classmethod
-    async def create(
-        cls,
-        *,
-        session: AsyncSession,
-        tenant_id: UUID,
-        user_id: UUID,
-        redirect_uri: str,
-        purpose: str = "source_authorization",
-    ) -> str:
-        await cls.cleanup_expired(session=session)
+    def create(cls, *, tenant_id: UUID, user_id: UUID, redirect_uri: str) -> str:
         state = secrets.token_urlsafe(32)
-        parsed = urlparse(redirect_uri)
-        redirect_origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else None
-        flow = FeishuOAuthFlow(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            state_hash=cls.state_hash(state),
-            purpose=purpose,
-            provider="feishu",
-            redirect_uri=redirect_uri,
-            redirect_origin=redirect_origin,
-            status="authorizing",
-            expires_at=datetime.utcnow() + timedelta(seconds=FEISHU_OAUTH_STATE_TTL_SECONDS),
-        )
-        session.add(flow)
-        await session.flush()
+        cls._states[state] = {
+            "tenant_id": str(tenant_id),
+            "user_id": str(user_id),
+            "redirect_uri": redirect_uri,
+            "created_at": datetime.utcnow(),
+        }
         return state
 
     @classmethod
-    async def consume(cls, *, session: AsyncSession, state: str) -> FeishuOAuthFlow | None:
-        flow = await cls.get(session=session, state=state)
-        if flow is None:
+    def pop(cls, state: str) -> dict[str, Any] | None:
+        value = cls._states.pop(state, None)
+        if value is None:
             return None
-        now = datetime.utcnow()
-        if flow.consumed_at is not None:
+        created_at = value.get("created_at")
+        if not isinstance(created_at, datetime):
             return None
-        if flow.expires_at <= now:
-            flow.status = "state_expired"
-            flow.error_json = {"code": "state_expired", "message": "Feishu OAuth state expired"}
-            flow.consumed_at = now
-            await session.flush()
+        if datetime.utcnow() - created_at > timedelta(seconds=FEISHU_OAUTH_STATE_TTL_SECONDS):
             return None
-        flow.consumed_at = now
-        await session.flush()
-        return flow
-
-    @classmethod
-    async def get(cls, *, session: AsyncSession, state: str) -> FeishuOAuthFlow | None:
-        if not state:
-            return None
-        return await session.scalar(select(FeishuOAuthFlow).where(FeishuOAuthFlow.state_hash == cls.state_hash(state)))
-
-    @classmethod
-    async def result(cls, *, session: AsyncSession, state: str, tenant_id: UUID, user_id: UUID) -> dict[str, Any] | None:
-        flow = await cls.get(session=session, state=state)
-        if not flow or flow.tenant_id != tenant_id or flow.user_id != user_id:
-            return None
-        now = datetime.utcnow()
-        if flow.status == "authorizing" and flow.expires_at <= now:
-            flow.status = "state_expired"
-            flow.error_json = {"code": "state_expired", "message": "Feishu OAuth state expired"}
-            flow.consumed_at = flow.consumed_at or now
-            await session.commit()
-        return cls.to_result(flow)
-
-    @classmethod
-    async def mark_success(
-        cls,
-        *,
-        session: AsyncSession,
-        flow: FeishuOAuthFlow,
-        connection: SourceConnection,
-    ) -> None:
-        flow.status = "connected"
-        flow.connection_id = connection.id
-        flow.result_json = {
-            "connection_id": str(connection.id),
-            "display_name": connection.display_name,
-            "status": connection.status,
-        }
-        flow.error_json = None
-        await session.flush()
-
-    @classmethod
-    async def mark_error(
-        cls,
-        *,
-        session: AsyncSession,
-        flow: FeishuOAuthFlow | None,
-        code: str,
-        message: str,
-    ) -> None:
-        if flow is None:
-            return
-        allowed = {
-            "state_expired",
-            "authorization_declined",
-            "scope_missing",
-            "admin_approval_required",
-            "oauth_error",
-            "callback_unreachable",
-        }
-        flow.status = code if code in allowed else "oauth_error"
-        flow.error_json = {"code": code, "message": message}
-        flow.consumed_at = flow.consumed_at or datetime.utcnow()
-        await session.flush()
-
-    @classmethod
-    async def cleanup_expired(cls, *, session: AsyncSession) -> None:
-        cutoff = datetime.utcnow() - timedelta(hours=24)
-        await session.execute(delete(FeishuOAuthFlow).where(FeishuOAuthFlow.expires_at < cutoff))
-
-    @staticmethod
-    def to_result(flow: FeishuOAuthFlow) -> dict[str, Any]:
-        return {
-            "state": "redacted",
-            "status": flow.status,
-            "purpose": flow.purpose,
-            "expires_at": flow.expires_at.isoformat(),
-            "connection_id": str(flow.connection_id) if flow.connection_id else None,
-            "result": flow.result_json or None,
-            "error": flow.error_json or None,
-        }
+        return value
 
 
 class FeishuConnectorAdapter:
     provider = "feishu"
     base_url = "https://open.feishu.cn"
-    oauth_token_url = "https://accounts.feishu.cn/oauth/v3/token"
     url_path_resource_types = {
         "doc": "feishu_doc",
         "docs": "feishu_doc",
@@ -469,23 +253,13 @@ class FeishuConnectorAdapter:
         redirect_uri = str(config.get("redirect_uri") or "").strip()
         if not redirect_uri:
             raise ConnectorError("Feishu OAuth redirect URI is not configured", code="admin_config_required", permanent=True)
-        state = await FeishuOAuthStateStore.create(
-            session=session,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            redirect_uri=redirect_uri,
-        )
-        await session.commit()
-        requested_scopes = _normalize_configured_scopes(config.get("scopes"))
+        state = FeishuOAuthStateStore.create(tenant_id=tenant_id, user_id=user_id, redirect_uri=redirect_uri)
         params = {
-            "client_id": config["app_id"],
-            "response_type": "code",
+            "app_id": config["app_id"],
             "redirect_uri": redirect_uri,
-            "scope": " ".join(requested_scopes),
-            "prompt": "consent",
             "state": state,
         }
-        return f"https://accounts.feishu.cn/open-apis/authen/v1/authorize?{urlencode(params)}", state
+        return f"{self.base_url}/open-apis/authen/v1/authorize?{urlencode(params)}", state
 
     async def complete_oauth_callback(
         self,
@@ -494,96 +268,70 @@ class FeishuConnectorAdapter:
         code: str,
         state: str,
     ) -> SourceConnection:
-        flow = await FeishuOAuthStateStore.consume(session=session, state=state)
-        if flow is None:
-            await session.commit()
+        state_payload = FeishuOAuthStateStore.pop(state)
+        if state_payload is None:
             raise ConnectorError("Invalid or expired Feishu OAuth state", code="invalid_state", permanent=True)
-        previous_tenant_id = get_tenant_id()
-        try:
-            set_tenant_id(flow.tenant_id)
-            config = await FeishuAdminConfigService.load_config(session=session)
-            if not config:
-                raise ConnectorError("Feishu application is not configured", code="admin_config_required", permanent=True)
+        config = await FeishuAdminConfigService.load_config(session=session)
+        if not config:
+            raise ConnectorError("Feishu application is not configured", code="admin_config_required", permanent=True)
 
-            token = await self._exchange_code(config=config, code=code)
-            granted_scopes = _normalize_scopes(token.get("scope"))
-            requested_scopes = _normalize_configured_scopes(config.get("scopes"))
-            missing_scopes = [scope for scope in requested_scopes if scope not in granted_scopes]
-            if missing_scopes:
-                raise ConnectorError(
-                    f"Feishu authorization is missing scopes: {', '.join(missing_scopes)}",
-                    code="scope_missing",
-                    permanent=True,
+        token = await self._exchange_code(config=config, code=code)
+        user_info = await self._get_user_info(token["access_token"])
+        tenant_id = UUID(state_payload["tenant_id"])
+        user_id = UUID(state_payload["user_id"])
+        expires_at = datetime.utcnow() + timedelta(seconds=max(0, int(token.get("expires_in") or 0)))
+        external_account_id = (
+            user_info.get("open_id")
+            or user_info.get("union_id")
+            or user_info.get("user_id")
+            or token.get("open_id")
+            or token.get("union_id")
+        )
+        display_name = user_info.get("name") or user_info.get("en_name") or "Feishu"
+        encrypted = await CryptoService.encrypt_config(
+            {
+                "access_token": token["access_token"],
+                "refresh_token": token.get("refresh_token"),
+                "scope": token.get("scope") or config.get("scopes") or [],
+                "token_type": token.get("token_type"),
+            },
+            session,
+        )
+
+        existing = None
+        if external_account_id:
+            existing = await session.scalar(
+                select(SourceConnection).where(
+                    SourceConnection.tenant_id == tenant_id,
+                    SourceConnection.provider == self.provider,
+                    SourceConnection.created_by == user_id,
+                    SourceConnection.external_account_id == external_account_id,
                 )
-
-            user_info = await self._get_user_info(token["access_token"])
-            tenant_id = flow.tenant_id
-            user_id = flow.user_id
-            expires_at = datetime.utcnow() + timedelta(seconds=max(0, int(token.get("expires_in") or 0)))
-            external_account_id = (
-                user_info.get("open_id")
-                or user_info.get("union_id")
-                or user_info.get("user_id")
-                or token.get("open_id")
-                or token.get("union_id")
             )
-            display_name = user_info.get("name") or user_info.get("en_name") or "Feishu"
-            encrypted = await CryptoService.encrypt_config(
-                {
-                    "access_token": token["access_token"],
-                    "refresh_token": token.get("refresh_token"),
-                    "scope": granted_scopes,
-                    "token_type": token.get("token_type"),
-                },
-                session,
+        if existing:
+            connection = existing
+            connection.encrypted_credentials = encrypted
+            connection.display_name = display_name
+            connection.status = "connected"
+            connection.token_expires_at = expires_at
+            connection.capabilities_json = {"scopes": token.get("scope") or config.get("scopes") or []}
+        else:
+            connection = SourceConnection(
+                tenant_id=tenant_id,
+                provider=self.provider,
+                auth_mode="oauth",
+                encrypted_credentials=encrypted,
+                external_account_id=external_account_id,
+                display_name=display_name,
+                status="connected",
+                capabilities_json={"scopes": token.get("scope") or config.get("scopes") or []},
+                token_expires_at=expires_at,
+                created_by=user_id,
             )
-
-            existing = None
-            if external_account_id:
-                existing = await session.scalar(
-                    select(SourceConnection).where(
-                        SourceConnection.tenant_id == tenant_id,
-                        SourceConnection.provider == self.provider,
-                        SourceConnection.created_by == user_id,
-                        SourceConnection.external_account_id == external_account_id,
-                    )
-                )
-            if existing:
-                connection = existing
-                connection.encrypted_credentials = encrypted
-                connection.display_name = display_name
-                connection.status = "connected"
-                connection.token_expires_at = expires_at
-                connection.capabilities_json = {"scopes": granted_scopes}
-            else:
-                connection = SourceConnection(
-                    tenant_id=tenant_id,
-                    provider=self.provider,
-                    auth_mode="oauth",
-                    encrypted_credentials=encrypted,
-                    external_account_id=external_account_id,
-                    display_name=display_name,
-                    status="connected",
-                    capabilities_json={"scopes": granted_scopes},
-                    token_expires_at=expires_at,
-                    created_by=user_id,
-                )
-                session.add(connection)
-            await session.flush()
-            await FeishuOAuthStateStore.mark_success(session=session, flow=flow, connection=connection)
-            await session.commit()
-            await session.refresh(connection)
-            return connection
-        except ConnectorError as error:
-            await FeishuOAuthStateStore.mark_error(session=session, flow=flow, code=error.code, message=str(error))
-            await session.commit()
-            raise
-        except Exception as error:
-            await FeishuOAuthStateStore.mark_error(session=session, flow=flow, code="oauth_error", message="Feishu OAuth failed")
-            await session.commit()
-            raise error
-        finally:
-            set_tenant_id(previous_tenant_id)
+            session.add(connection)
+        await session.commit()
+        await session.refresh(connection)
+        return connection
 
     async def test_connection(self, credentials: dict[str, Any]) -> dict[str, Any]:
         if not credentials.get("access_token"):
@@ -757,25 +505,24 @@ class FeishuConnectorAdapter:
         payload = {
             "grant_type": "authorization_code",
             "code": code,
-            "redirect_uri": config["redirect_uri"],
         }
-        return await self._post_oauth_token(config=config, payload=payload)
+        return await self._post_authen("/open-apis/authen/v1/access_token", config=config, payload=payload)
 
     async def _refresh_token(self, *, config: dict[str, Any], refresh_token: str) -> dict[str, Any]:
         payload = {
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
         }
-        return await self._post_oauth_token(config=config, payload=payload)
+        return await self._post_authen("/open-apis/authen/v1/refresh_access_token", config=config, payload=payload)
 
-    async def _post_oauth_token(self, *, config: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post_authen(self, path: str, *, config: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         data = {
-            "client_id": config["app_id"],
-            "client_secret": config["app_secret"],
+            "app_id": config["app_id"],
+            "app_secret": config["app_secret"],
             **payload,
         }
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(self.oauth_token_url, json=data)
+            response = await client.post(f"{self.base_url}{path}", json=data)
         if response.status_code >= 400:
             raise ConnectorError(f"Feishu OAuth request failed with HTTP {response.status_code}", code="oauth_http_error")
         body = response.json()
@@ -814,30 +561,7 @@ class FeishuConnectorAdapter:
                 json=json_body,
             )
         if response.status_code >= 400:
-            detail = ""
-            response_code = None
-            response_message = None
-            try:
-                body = response.json()
-                response_code = body.get("code")
-                response_message = body.get("msg") or body.get("message")
-                if response_code or response_message:
-                    detail = f": code={response_code}, msg={response_message}"
-            except Exception:
-                text = response.text.strip()
-                if text:
-                    detail = f": {text[:200]}"
-            permission_text = f"{response_code or ''} {response_message or ''}".lower()
-            if response_code == 99991679 or (
-                "under the user identity" in permission_text
-                and any(scope in permission_text for scope in ("drive:drive", "space:document:retrieve"))
-            ):
-                raise ConnectorError(
-                    "当前飞书用户授权不包含云盘读取权限，请重新授权后再访问 Drive。",
-                    code="reauthorization_required",
-                    permanent=True,
-                )
-            raise ConnectorError(f"Feishu API request failed with HTTP {response.status_code}{detail}", code="feishu_http_error")
+            raise ConnectorError(f"Feishu API request failed with HTTP {response.status_code}", code="feishu_http_error")
         body = response.json()
         if body.get("code", 0) not in (0, None):
             code = body.get("code")
@@ -886,21 +610,12 @@ class FeishuConnectorAdapter:
         path = "/open-apis/wiki/v2/spaces"
         params = {"page_token": input.page_token, "page_size": input.page_size}
         if input.parent_token:
-            space_id, parent_node_token = self._split_wiki_parent_token(input.parent_token)
-            path = f"/open-apis/wiki/v2/spaces/{space_id}/nodes"
-            if parent_node_token:
-                params["parent_node_token"] = parent_node_token
+            path = f"/open-apis/wiki/v2/spaces/{input.parent_token}/nodes"
         body = await self._request_json("GET", path, access_token=access_token, params=params)
         data = body.get("data") or {}
         raw_items = data.get("items") or data.get("nodes") or []
         items = [self._wiki_item_to_picker(item, input.already_added_external_ids) for item in raw_items]
         return ResourceListResult(items=items, next_page_token=data.get("next_page_token") or data.get("page_token"))
-
-    def _split_wiki_parent_token(self, parent_token: str) -> tuple[str, str | None]:
-        if ":" not in parent_token:
-            return parent_token, None
-        space_id, node_token = parent_token.split(":", 1)
-        return space_id, node_token or None
 
     def _drive_item_to_picker(self, item: dict[str, Any], already_added: frozenset[str]) -> ResourcePickerItem:
         file_type = str(item.get("type") or item.get("file_type") or "").lower()
@@ -927,21 +642,17 @@ class FeishuConnectorAdapter:
         )
 
     def _wiki_item_to_picker(self, item: dict[str, Any], already_added: frozenset[str]) -> ResourcePickerItem:
-        node_token = str(item.get("node_token") or item.get("token") or "")
-        space_id = str(item.get("space_id") or "")
-        token = node_token or space_id
-        is_space = bool(space_id and not node_token)
-        resource_type = "feishu_folder" if is_space else "feishu_wiki"
+        token = str(item.get("node_token") or item.get("token") or item.get("space_id") or "")
         return ResourcePickerItem(
             external_id=token,
-            resource_type=resource_type,
+            resource_type="feishu_wiki",
             name=item.get("title") or item.get("name") or token,
             parent_external_id=item.get("parent_node_token"),
             source_url=item.get("url"),
-            has_children=bool(is_space or item.get("has_child") or item.get("node_type") == "origin"),
-            is_folder=bool(is_space or item.get("node_type") in {"origin", "space"}),
+            has_children=bool(item.get("has_child") or item.get("node_type") == "origin"),
+            is_folder=bool(item.get("node_type") in {"origin", "space"}),
             already_added=token in already_added,
-            metadata={**item, "type": "wiki_space" if is_space else "wiki_node"},
+            metadata=item,
         )
 
     def _matches_type(self, item: ResourcePickerItem, resource_type: str | None) -> bool:
@@ -1215,7 +926,6 @@ class TosConnectorAdapter:
             raise self._classify_tos_exception(exc) from exc
         etag = getattr(head, "etag", None) or getattr(output, "etag", None)
         last_modified = getattr(head, "last_modified", None)
-        version_id = getattr(head, "version_id", None) or getattr(output, "version_id", None)
         text, parser_version, fragment_hint = parse_object_bytes(key=key, raw_bytes=raw_bytes)
         metadata = {
             "provider": self.provider,
@@ -1225,7 +935,6 @@ class TosConnectorAdapter:
             "endpoint": credentials.get("endpoint"),
             "etag": etag.strip('"') if isinstance(etag, str) else etag,
             "last_modified": str(last_modified) if last_modified else None,
-            "version_id": str(version_id) if version_id else None,
             "size": size,
             "fragment_hint": fragment_hint,
         }
@@ -1354,12 +1063,9 @@ def parse_object_bytes(*, key: str, raw_bytes: bytes) -> tuple[str, str, str]:
             import duckdb
         except ImportError as exc:
             raise ConnectorError("duckdb is required to parse Parquet objects", code="parser_missing", permanent=True) from exc
-        with tempfile.NamedTemporaryFile(suffix=".parquet") as parquet_file:
-            parquet_file.write(raw_bytes)
-            parquet_file.flush()
-            relation = duckdb.from_parquet(parquet_file.name)
-            rows = relation.limit(500).fetchall()
-            columns = [column[0] for column in relation.description]
+        relation = duckdb.from_parquet(io.BytesIO(raw_bytes))
+        rows = relation.limit(500).fetchall()
+        columns = [column[0] for column in relation.description]
         return _table_markdown([columns, *rows]), "tos-parquet-parser-v1", "parquet_rows"
     if suffix in {"html", "htm"}:
         text = raw_bytes.decode("utf-8", errors="replace")

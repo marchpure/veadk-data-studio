@@ -16,6 +16,7 @@ from server.collaboration.models import (
     CollaborationInstallation,
     CollaborationLease,
     CollaborationResponseRef,
+    ExternalIdentity,
 )
 
 
@@ -63,6 +64,15 @@ class CollaborationInstallationRepository:
         result = await self._session.execute(
             select(CollaborationInstallation)
             .where(CollaborationInstallation.platform == platform)
+            .where(CollaborationInstallation.is_active.is_(True))
+        )
+        return list(result.scalars().all())
+
+    async def list_active_by_platform_mode(self, platform: str, connection_mode: str) -> list[CollaborationInstallation]:
+        result = await self._session.execute(
+            select(CollaborationInstallation)
+            .where(CollaborationInstallation.platform == platform)
+            .where(CollaborationInstallation.connection_mode == connection_mode)
             .where(CollaborationInstallation.is_active.is_(True))
         )
         return list(result.scalars().all())
@@ -150,6 +160,12 @@ class CollaborationEventRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
 
+    async def get(self, event_log_id: UUID) -> CollaborationEventLog | None:
+        result = await self._session.execute(
+            select(CollaborationEventLog).where(CollaborationEventLog.id == event_log_id)
+        )
+        return result.scalar_one_or_none()
+
     async def record_received(
         self,
         *,
@@ -184,12 +200,42 @@ class CollaborationEventRepository:
             existing = result.scalar_one()
             return existing, True
 
-    async def mark(self, event: CollaborationEventLog, status: str, error_message: str | None = None) -> None:
+    async def mark(
+        self,
+        event: CollaborationEventLog,
+        status: str,
+        error_message: str | None = None,
+        *,
+        conversation_id: UUID | None = None,
+        notebook_id: UUID | None = None,
+        run_id: str | None = None,
+    ) -> None:
         event.processing_status = status
         event.error_message = error_message
+        if conversation_id is not None:
+            event.conversation_id = conversation_id
+        if notebook_id is not None:
+            event.notebook_id = notebook_id
+        if run_id is not None:
+            event.run_id = run_id
         if status == "processing":
             event.attempt_count += 1
         await self._session.commit()
+
+    async def list_recent_for_installation(
+        self,
+        installation_id: UUID,
+        *,
+        limit: int = 10,
+    ) -> list[CollaborationEventLog]:
+        safe_limit = max(1, min(limit, 50))
+        result = await self._session.execute(
+            select(CollaborationEventLog)
+            .where(CollaborationEventLog.installation_id == installation_id)
+            .order_by(CollaborationEventLog.created_at.desc(), CollaborationEventLog.id.desc())
+            .limit(safe_limit)
+        )
+        return list(result.scalars().all())
 
 
 class CollaborationDeliveryTargetRepository:
@@ -231,19 +277,38 @@ class CollaborationDeliveryTargetRepository:
         await self._session.refresh(target)
         return target
 
-    async def list_by_installation(self, installation_id: UUID) -> list[CollaborationDeliveryTarget]:
-        result = await self._session.execute(
-            select(CollaborationDeliveryTarget)
-            .where(CollaborationDeliveryTarget.installation_id == installation_id)
-            .order_by(CollaborationDeliveryTarget.created_at.desc())
-        )
-        return list(result.scalars().all())
-
     async def get(self, target_id: UUID) -> CollaborationDeliveryTarget | None:
         result = await self._session.execute(
             select(CollaborationDeliveryTarget).where(CollaborationDeliveryTarget.id == target_id)
         )
         return result.scalar_one_or_none()
+
+    async def find(
+        self,
+        *,
+        installation_id: UUID,
+        target_type: str,
+        external_target_id: str,
+        external_root_id: str | None = None,
+    ) -> CollaborationDeliveryTarget | None:
+        result = await self._session.execute(
+            select(CollaborationDeliveryTarget)
+            .where(CollaborationDeliveryTarget.installation_id == installation_id)
+            .where(CollaborationDeliveryTarget.target_type == target_type)
+            .where(CollaborationDeliveryTarget.external_target_id == external_target_id)
+            .where(CollaborationDeliveryTarget.normalized_root_id == normalize_root_id(external_root_id))
+        )
+        return result.scalar_one_or_none()
+
+    async def list_for_installation(self, installation_id: UUID, *, limit: int = 100) -> list[CollaborationDeliveryTarget]:
+        safe_limit = max(1, min(limit, 200))
+        result = await self._session.execute(
+            select(CollaborationDeliveryTarget)
+            .where(CollaborationDeliveryTarget.installation_id == installation_id)
+            .order_by(CollaborationDeliveryTarget.updated_at.desc(), CollaborationDeliveryTarget.id.desc())
+            .limit(safe_limit)
+        )
+        return list(result.scalars().all())
 
     async def update(self, target: CollaborationDeliveryTarget, **updates) -> CollaborationDeliveryTarget:
         for key, value in updates.items():
@@ -252,6 +317,94 @@ class CollaborationDeliveryTargetRepository:
         await self._session.commit()
         await self._session.refresh(target)
         return target
+
+    async def pause(self, target: CollaborationDeliveryTarget) -> CollaborationDeliveryTarget:
+        config = dict(target.config_json or {})
+        config["is_enabled"] = False
+        target.config_json = config
+        await self._session.commit()
+        await self._session.refresh(target)
+        return target
+
+    async def resume(self, target: CollaborationDeliveryTarget) -> CollaborationDeliveryTarget:
+        config = dict(target.config_json or {})
+        config["is_enabled"] = True
+        target.config_json = config
+        target.is_verified = True
+        await self._session.commit()
+        await self._session.refresh(target)
+        return target
+
+    async def unbind(self, target: CollaborationDeliveryTarget) -> CollaborationDeliveryTarget:
+        config = dict(target.config_json or {})
+        config["is_enabled"] = False
+        config["unbound_at"] = datetime.now().isoformat()
+        target.config_json = config
+        target.is_verified = False
+        await self._session.commit()
+        await self._session.refresh(target)
+        return target
+
+    @staticmethod
+    def is_enabled(target: CollaborationDeliveryTarget | None) -> bool:
+        if target is None or not target.is_verified:
+            return False
+        config = target.config_json or {}
+        return config.get("is_enabled", True) is True
+
+
+class ExternalIdentityRepository:
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def get_or_create_seen(
+        self,
+        *,
+        tenant_id: UUID,
+        platform: str,
+        installation_id: UUID,
+        external_user_id: str,
+        union_id: str | None = None,
+    ) -> ExternalIdentity:
+        result = await self._session.execute(
+            select(ExternalIdentity)
+            .where(ExternalIdentity.installation_id == installation_id)
+            .where(ExternalIdentity.external_user_id == external_user_id)
+        )
+        identity = result.scalar_one_or_none()
+        if identity:
+            identity.last_seen_at = datetime.now()
+            if union_id and not identity.union_id:
+                identity.union_id = union_id
+            await self._session.commit()
+            await self._session.refresh(identity)
+            return identity
+
+        identity = ExternalIdentity(
+            tenant_id=tenant_id,
+            platform=platform,
+            installation_id=installation_id,
+            external_user_id=external_user_id,
+            union_id=union_id,
+            status="seen",
+        )
+        self._session.add(identity)
+        try:
+            await self._session.commit()
+        except IntegrityError:
+            await self._session.rollback()
+            result = await self._session.execute(
+                select(ExternalIdentity)
+                .where(ExternalIdentity.installation_id == installation_id)
+                .where(ExternalIdentity.external_user_id == external_user_id)
+            )
+            existing = result.scalar_one()
+            existing.last_seen_at = datetime.now()
+            await self._session.commit()
+            await self._session.refresh(existing)
+            return existing
+        await self._session.refresh(identity)
+        return identity
 
 
 class CollaborationResponseRefRepository:
@@ -280,6 +433,14 @@ class CollaborationResponseRefRepository:
         await self._session.commit()
         await self._session.refresh(ref)
         return ref
+
+    async def get_by_run_id(self, run_id: str) -> CollaborationResponseRef | None:
+        result = await self._session.execute(
+            select(CollaborationResponseRef)
+            .where(CollaborationResponseRef.run_id == run_id)
+            .order_by(CollaborationResponseRef.created_at.desc())
+        )
+        return result.scalars().first()
 
     async def update_by_message(
         self,
@@ -318,6 +479,12 @@ class CollaborationResponseRefRepository:
 class CollaborationLeaseRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
+
+    async def get(self, installation_id: UUID) -> CollaborationLease | None:
+        result = await self._session.execute(
+            select(CollaborationLease).where(CollaborationLease.installation_id == installation_id)
+        )
+        return result.scalar_one_or_none()
 
     async def acquire(self, installation_id: UUID, owner_id: str, ttl_seconds: int = 60) -> bool:
         now = datetime.now()

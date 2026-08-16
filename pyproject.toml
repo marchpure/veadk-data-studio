@@ -103,7 +103,6 @@ ignore = [
   "W293",  # blank line contains whitespace
   "B904",  # raise without from inside except
   "E722",  # bare except
-  "UP038", # use X | Y in isinstance
   "B007",  # unused loop variable
   "UP042", # str-Enum migration to StrEnum (behavioral risk)
   "B012",  # return/break/continue in finally (intentional cleanup paths)

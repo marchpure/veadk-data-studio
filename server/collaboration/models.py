@@ -46,6 +46,7 @@ class CollaborationInstallation(Base):
     health_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_connected_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=False), nullable=True)
     last_event_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=False), nullable=True)
+    reconnect_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     config_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     installed_by: Mapped[UUID | None] = mapped_column(
         GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -121,6 +122,13 @@ class CollaborationEventLog(Base):
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
     external_chat_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     external_user_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    conversation_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("collaboration_conversations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    notebook_id: Mapped[UUID | None] = mapped_column(
+        GUID(), ForeignKey("notebooks.id", ondelete="SET NULL"), nullable=True
+    )
+    run_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     processing_status: Mapped[str] = mapped_column(String(30), nullable=False, default="received")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     next_attempt_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=False), nullable=True)
@@ -137,6 +145,10 @@ class CollaborationEventLog(Base):
     installation: Mapped[CollaborationInstallation] = relationship(
         "CollaborationInstallation", foreign_keys=[installation_id]
     )
+    conversation: Mapped[CollaborationConversation | None] = relationship(
+        "CollaborationConversation", foreign_keys=[conversation_id]
+    )
+    notebook: Mapped[Notebook | None] = relationship("Notebook", foreign_keys=[notebook_id])
 
     __table_args__ = (
         UniqueConstraint("installation_id", "external_event_id", name="uq_collab_event_install_external_event"),

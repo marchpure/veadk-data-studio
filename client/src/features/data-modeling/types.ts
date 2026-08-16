@@ -1,5 +1,5 @@
-export type DataSourceKind = 'oracle' | 'postgres' | 'pg' | 'mysql' | 'sqlite'
-export type ModelStatus = 'Draft' | 'Validating' | 'Validation Failed' | 'Ready for Review' | 'Published' | 'Rejected'
+export type DataSourceKind = 'oracle' | 'postgres' | 'mysql'
+export type ModelStatus = 'Draft' | 'Published'
 export type ReadinessLevel = 'ready' | 'warning' | 'blocked'
 export type TableCategory = 'fact' | 'dimension' | 'bridge' | 'log'
 export type FieldRole = 'id' | 'amount' | 'time' | 'status' | 'pii' | 'attribute' | 'measure'
@@ -12,17 +12,9 @@ export type CertificationStatus = 'draft' | 'reviewed' | 'certified'
 export type WorkspaceMode = 'explore' | 'model' | 'publish'
 export type ExploreViewMode = 'trend' | 'table' | 'pivot'
 export type TimeGrain = 'day' | 'week' | 'month' | 'quarter'
-export type HomeViewMode = 'ready' | 'loading' | 'error' | 'empty' | 'permission'
+export type HomeDemoMode = 'ready' | 'loading' | 'error' | 'empty' | 'permission'
 export type GenerationPhase = 'idle' | 'profile' | 'semantic' | 'validation' | 'completed'
 export type GenerationStepStatus = 'pending' | 'running' | 'done'
-
-export interface DataModelingDatasource {
-  id: string
-  name: string
-  kind: DataSourceKind
-  sourceType: 'connection' | 'dataset' | 'source_resource'
-  status?: string
-}
 
 export interface ModelConsumers {
   agents: number
@@ -39,7 +31,6 @@ export interface SemanticModelSummary {
   owner: string
   datasource: string
   status: ModelStatus
-  revision: number
   draftRevision: string
   publishedVersion: string
   readiness: number
@@ -271,10 +262,9 @@ export interface SemanticGenerationState {
   progress: number
   steps: GenerationStep[]
   summary: string[]
-  error: string | null
 }
 
-export interface DataModelingWorkspaceData {
+export interface DataModelingDemoData {
   models: SemanticModel[]
   profiles: DataSourceProfile[]
   createDraft: CreateModelDraft

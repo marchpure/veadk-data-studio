@@ -235,19 +235,10 @@ class NativeKnowledgeProvider:
                     "text": chunk[:8000],
                     "locator_json": {
                         "kind": resource.resource_type,
-                        "source_connection_id": str(resource.source_connection_id) if resource.source_connection_id else None,
-                        "source_resource_id": str(resource.id),
-                        "source_snapshot_id": str(snapshot.id),
                         "resource_id": str(resource.id),
                         "snapshot_id": str(snapshot.id),
-                        "external_id": resource.external_id,
-                        "source_url": resource.source_url,
-                        "external_revision": snapshot.external_revision,
-                        "content_hash": snapshot.content_hash,
-                        "parser_version": snapshot.parser_version,
-                        "captured_at": snapshot.captured_at.isoformat() if snapshot.captured_at else None,
                         "chunk": index,
-                        **self._source_locator(resource=resource, snapshot=snapshot, chunk=index),
+                        "source_url": resource.source_url,
                     },
                     "confidence": "source",
                 }
@@ -266,86 +257,6 @@ class NativeKnowledgeProvider:
         if resource_type == "extracted_table":
             return "table_region"
         return "raw_text"
-
-    def _source_locator(
-        self,
-        *,
-        resource: SourceResource,
-        snapshot: SourceSnapshot,
-        chunk: int,
-    ) -> dict[str, Any]:
-        metadata = snapshot.metadata_json or {}
-        selection = resource.selection_config_json or {}
-        selection_metadata = selection.get("metadata") or {}
-        locator = metadata.get("locator") if isinstance(metadata.get("locator"), dict) else {}
-
-        if resource.resource_type in {"feishu_doc", "feishu_wiki"}:
-            return {
-                "document_token": locator.get("document_token") or selection_metadata.get("token") or resource.external_id,
-                "wiki_token": locator.get("wiki_token") or selection_metadata.get("node_token"),
-                "block_id": locator.get("block_id"),
-                "revision": snapshot.external_revision,
-                "heading_path": locator.get("heading_path") or metadata.get("title_path") or [resource.name],
-                "original_url": resource.source_url,
-            }
-
-        if resource.resource_type == "feishu_sheet":
-            sheet = self._first((metadata.get("sheets") or []), (selection_metadata.get("sheets") or []))
-            spreadsheet = metadata.get("spreadsheet_token") or locator.get("spreadsheet_token") or resource.external_id
-            return {
-                "spreadsheet_token": spreadsheet,
-                "sheet_id": sheet.get("sheet_id") or sheet.get("id"),
-                "range": sheet.get("range") or metadata.get("range") or selection.get("range"),
-                "cell_range": sheet.get("range") or metadata.get("range") or selection.get("range"),
-            }
-
-        if resource.resource_type == "feishu_base":
-            table = self._first((metadata.get("tables") or []), (selection_metadata.get("tables") or []))
-            return {
-                "app_token": metadata.get("app_token") or locator.get("app_token") or resource.external_id,
-                "table_id": table.get("table_id"),
-                "view_id": table.get("view_id") or selection.get("view_id"),
-                "record_id": locator.get("record_id"),
-                "field_id": locator.get("field_id"),
-            }
-
-        if resource.resource_type.startswith("tos_"):
-            return {
-                "bucket": metadata.get("bucket"),
-                "key": metadata.get("key") or metadata.get("prefix"),
-                "version_id": metadata.get("version_id"),
-                "etag": metadata.get("etag"),
-                "last_modified": metadata.get("last_modified"),
-            }
-
-        if resource.resource_type == "pdf":
-            return {
-                "page": metadata.get("page") or chunk,
-                "bbox": metadata.get("bbox"),
-                "pdf_parser_deferred": metadata.get("parse_error", {}).get("code") == "parser_no_text",
-            }
-
-        if resource.resource_type == "web":
-            return {
-                "final_url": metadata.get("final_url") or resource.source_url,
-                "selector": metadata.get("selector"),
-                "text_range": {"chunk": chunk},
-            }
-
-        return {}
-
-    def _first(self, *collections: Any) -> dict[str, Any]:
-        for collection in collections:
-            if not isinstance(collection, list) or not collection:
-                continue
-            item = collection[0]
-            if isinstance(item, dict):
-                if "sheet" in item and isinstance(item["sheet"], dict):
-                    return {**item["sheet"], "range": item.get("range")}
-                if "table" in item and isinstance(item["table"], dict):
-                    return item["table"]
-                return item
-        return {}
 
 
 def get_knowledge_provider(name: str | None = None) -> KnowledgeProvider:

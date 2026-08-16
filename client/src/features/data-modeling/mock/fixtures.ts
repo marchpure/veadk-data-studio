@@ -1,13 +1,13 @@
 import type {
   AgentSuggestion,
-  DataModelingWorkspaceData,
+  DataModelingDemoData,
   DataSourceProfile,
   Metric,
   ProfileTable,
   Readiness,
   Relationship,
   SemanticModel,
-} from '../../src/features/data-modeling/types'
+} from '../types'
 
 const salesTables: ProfileTable[] = [
   {
@@ -470,7 +470,7 @@ export const oracleSalesProfile: DataSourceProfile = {
   tables: salesTables,
 }
 
-export function createDemoData(): DataModelingWorkspaceData {
+export function createDemoData(): DataModelingDemoData {
   const model: SemanticModel = {
     id: 'sales-growth',
     name: 'Sales Growth Model',
@@ -479,7 +479,6 @@ export function createDemoData(): DataModelingWorkspaceData {
     datasource: 'Oracle SALES',
     datasourceId: oracleSalesProfile.id,
     status: 'Draft',
-    revision: 1,
     draftRevision: 'draft-7',
     publishedVersion: 'v2',
     readiness: readiness.score,
@@ -636,11 +635,10 @@ export function createDemoData(): DataModelingWorkspaceData {
         { id: 'explore', title: 'Preparing Explore', detail: 'Set Paid Revenue by Region as the default exploration.', status: 'pending' },
       ],
       summary: [],
-      error: null,
     },
   }
 }
 
 export function cloneDemoData() {
-  return JSON.parse(JSON.stringify(createDemoData())) as DataModelingWorkspaceData
+  return JSON.parse(JSON.stringify(createDemoData())) as DataModelingDemoData
 }

@@ -141,69 +141,18 @@ class AnalysisArtifactService:
     def run_preflight(self, artifact: AnalysisArtifact) -> dict[str, Any]:
         definition = artifact.definition_json or {}
         required: list[str] = []
-        queries: list[str] = []
-        metrics: list[str] = []
-        evidence: list[str] = []
-        result_snapshots: list[str] = []
         for block in definition.get("sections", []) or []:
             block_type = block.get("type")
             if block_type in {"metric", "chart", "table"} and not (block.get("query_ref") or block.get("metric_ref")):
                 required.append(f"{block.get('title', block_type)}: query_ref or metric_ref")
             if block_type in {"evidence", "finding"} and not block.get("evidence_refs"):
                 required.append(f"{block.get('title', block_type)}: evidence_refs")
-            self._append_unique(queries, block.get("query_ref"))
-            self._append_unique(metrics, block.get("metric_ref"))
-            self._append_unique(result_snapshots, block.get("result_snapshot_ref"))
-            for evidence_ref in block.get("evidence_refs") or []:
-                self._append_unique(evidence, evidence_ref)
-
-        result_snapshot_defs = definition.get("result_snapshots") if isinstance(definition.get("result_snapshots"), dict) else {}
-        for result_snapshot_id, snapshot in result_snapshot_defs.items():
-            if isinstance(snapshot, dict):
-                self._append_unique(queries, snapshot.get("query_ref"))
-                if snapshot.get("status") == "succeeded":
-                    self._append_unique(result_snapshots, result_snapshot_id)
-
-        source_snapshots = [str(item) for item in definition.get("source_snapshot_refs") or []]
-        blocking_issues = [f"missing binding: {item}" for item in required]
         return {
             "artifact_id": artifact.id,
             "status": "not_started",
             "message": "Artifact run preflight completed; execution scheduler is not wired in this slice.",
             "required_bindings": required,
-            "dependency_summary": {
-                "queries": queries,
-                "metrics": metrics,
-                "evidence": evidence,
-                "source_snapshots": source_snapshots,
-                "result_snapshots": result_snapshots,
-                "semantic_model_versions": [str(item) for item in definition.get("semantic_model_versions") or []],
-            },
-            "blocking_issues": blocking_issues,
         }
-
-    def latest_successful_snapshot(self, artifact: AnalysisArtifact) -> dict[str, Any] | None:
-        definition = artifact.definition_json or {}
-        snapshots = definition.get("result_snapshots")
-        if not isinstance(snapshots, dict):
-            return None
-
-        explicit_id = artifact.latest_result_snapshot_id
-        if explicit_id:
-            explicit = snapshots.get(explicit_id)
-            if isinstance(explicit, dict) and explicit.get("status") == "succeeded":
-                return {"artifact_id": artifact.id, "snapshot_id": explicit_id, "snapshot": explicit}
-
-        successful = [
-            (snapshot_id, snapshot)
-            for snapshot_id, snapshot in snapshots.items()
-            if isinstance(snapshot, dict) and snapshot.get("status") == "succeeded"
-        ]
-        if not successful:
-            return None
-        successful.sort(key=lambda item: str(item[1].get("captured_at") or ""), reverse=True)
-        snapshot_id, snapshot = successful[0]
-        return {"artifact_id": artifact.id, "snapshot_id": snapshot_id, "snapshot": snapshot}
 
     def _render_block_markdown(self, block: dict[str, Any]) -> list[str]:
         title = block.get("title") or block.get("type", "Section").title()
@@ -232,10 +181,3 @@ class AnalysisArtifactService:
             lines.extend([f"- `{ref}`" for ref in evidence_refs])
         lines.append("")
         return lines
-
-    def _append_unique(self, values: list[str], value: Any) -> None:
-        if value is None:
-            return
-        normalized = str(value)
-        if normalized and normalized not in values:
-            values.append(normalized)

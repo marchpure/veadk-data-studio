@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.collaboration.contracts import ChannelResult, ResponseRef
-from server.collaboration.feishu.client import FeishuApiClient
+from server.collaboration.feishu.client import FeishuApiClient, feishu_error_requires_reauth
 from server.collaboration.models import CollaborationConversation, CollaborationInstallation
 from server.collaboration.repositories import CollaborationInstallationRepository, CollaborationResponseRefRepository
 from server.services.crypto_service import CryptoService
+
+FEISHU_TEXT_MESSAGE_MAX_CHARS = 3800
+FEISHU_TRUNCATION_NOTICE = "结果较长，已截断。请在 Byaan 中打开 Notebook 查看完整结果。"
+FEISHU_DELIVERY_ATTEMPTS = 3
 
 
 class FeishuChannelAdapter:
@@ -27,9 +33,14 @@ class FeishuChannelAdapter:
             "bot_external_id": result.get("bot_external_id"),
             "external_tenant_id": result.get("external_tenant_id") or self.installation.external_tenant_id,
             "external_tenant_name": result.get("external_tenant_name") or self.installation.external_tenant_name,
-            "health_status": "ok",
+            "health_status": "configured",
             "health_error": None,
         }
+        config = dict(self.installation.config_json or {})
+        if result.get("tenant_token_expires_at"):
+            config["tenant_token_expires_at"] = result.get("tenant_token_expires_at")
+        if config:
+            updates["config_json"] = config
         await CollaborationInstallationRepository(self.session).update(self.installation, **updates)
         return result
 
@@ -42,13 +53,22 @@ class FeishuChannelAdapter:
     ) -> ResponseRef:
         client = await self._client()
         if reply_to_message_id:
-            result = await client.reply_text_message(message_id=reply_to_message_id, text=response.summary)
+            result = await _with_delivery_retry(
+                lambda: client.reply_text_message(
+                    message_id=reply_to_message_id,
+                    text=response.summary,
+                    request_uuid=f"feishu-ack-{conversation.id}-{reply_to_message_id}",
+                )
+            )
         else:
-            result = await client.send_text_message(
-                receive_id_type="chat_id",
-                receive_id=conversation.external_chat_id,
-                text=response.summary,
-                root_id=conversation.external_root_id,
+            result = await _with_delivery_retry(
+                lambda: client.send_text_message(
+                    receive_id_type="chat_id",
+                    receive_id=conversation.external_chat_id,
+                    text=response.summary,
+                    root_id=conversation.external_root_id,
+                    request_uuid=f"feishu-ack-{conversation.id}",
+                )
             )
         message_id = (
             result.get("message_id")
@@ -79,14 +99,24 @@ class FeishuChannelAdapter:
         conversation: CollaborationConversation,
     ) -> ResponseRef:
         client = await self._client()
+        summary = self._render_final_text(result, conversation)
         if response_ref.platform_message_id:
-            sent = await client.reply_text_message(message_id=response_ref.platform_message_id, text=result.summary)
+            sent = await _with_delivery_retry(
+                lambda: client.reply_text_message(
+                    message_id=response_ref.platform_message_id,
+                    text=summary,
+                    request_uuid=f"feishu-final-{conversation.id}-{result.run_id}-{response_ref.sequence}",
+                )
+            )
         else:
-            sent = await client.send_text_message(
-                receive_id_type="chat_id",
-                receive_id=conversation.external_chat_id,
-                text=result.summary,
-                root_id=conversation.external_root_id,
+            sent = await _with_delivery_retry(
+                lambda: client.send_text_message(
+                    receive_id_type="chat_id",
+                    receive_id=conversation.external_chat_id,
+                    text=summary,
+                    root_id=conversation.external_root_id,
+                    request_uuid=f"feishu-final-{conversation.id}-{result.run_id}-{response_ref.sequence}",
+                )
             )
         message_id = (
             sent.get("message_id")
@@ -108,6 +138,49 @@ class FeishuChannelAdapter:
             sequence=response_ref.sequence,
         )
         return response_ref
+
+    @staticmethod
+    def _render_final_text(result: ChannelResult, conversation: CollaborationConversation) -> str:
+        refs: list[str] = []
+        notebook_id = result.artifact_id or (str(conversation.notebook_id) if conversation.notebook_id else None)
+        if notebook_id:
+            refs.append(f"Notebook: {notebook_id}")
+            refs.append(f"Open in Byaan: /notebooks/{notebook_id}")
+        if result.run_id:
+            refs.append(f"Run: {result.run_id}")
+        if not refs:
+            return _truncate_text(result.summary)
+        refs_block = "\n\n---\n" + "\n".join(refs)
+        text = f"{result.summary}{refs_block}"
+        if len(text) <= FEISHU_TEXT_MESSAGE_MAX_CHARS:
+            return text
+
+        truncation_block = f"\n\n{FEISHU_TRUNCATION_NOTICE}{refs_block}"
+        available_summary_chars = FEISHU_TEXT_MESSAGE_MAX_CHARS - len(truncation_block) - 2
+        truncated_summary = result.summary[: max(0, available_summary_chars)].rstrip()
+        return f"{truncated_summary}\n…{truncation_block}"[:FEISHU_TEXT_MESSAGE_MAX_CHARS]
+
+
+def _truncate_text(text: str) -> str:
+    if len(text) <= FEISHU_TEXT_MESSAGE_MAX_CHARS:
+        return text
+    suffix = f"\n\n{FEISHU_TRUNCATION_NOTICE}"
+    available_chars = FEISHU_TEXT_MESSAGE_MAX_CHARS - len(suffix) - 2
+    return f"{text[: max(0, available_chars)].rstrip()}\n…{suffix}"[:FEISHU_TEXT_MESSAGE_MAX_CHARS]
+
+
+async def _with_delivery_retry(operation: Callable[[], Awaitable[dict]]) -> dict:
+    last_error: Exception | None = None
+    for attempt in range(FEISHU_DELIVERY_ATTEMPTS):
+        try:
+            return await operation()
+        except Exception as exc:
+            last_error = exc
+            if feishu_error_requires_reauth(exc) or attempt == FEISHU_DELIVERY_ATTEMPTS - 1:
+                raise
+            await asyncio.sleep(0.2 * (attempt + 1))
+    assert last_error is not None
+    raise last_error
 
 
 async def feishu_adapter_for_installation(session: AsyncSession, installation_id: UUID) -> FeishuChannelAdapter:

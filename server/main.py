@@ -48,7 +48,6 @@ from server.collaboration.feishu.transport import feishu_ws_manager
 from server.db.session import ensure_database_encoding, ensure_database_schema
 from server.routers import analysis_artifacts as analysis_artifacts_router
 from server.routers import app_config as app_config_router
-from server.routers import assets as assets_router
 from server.routers import auth as auth_router
 from server.routers import cache as cache_router
 from server.routers import claude_oauth as claude_oauth_router
@@ -115,6 +114,7 @@ logger = get_logger(__name__)
 
 # Global migration status tracking
 migration_status = {"completed": False, "error": None, "message": "Migrations pending"}
+shutdown_completed = False
 
 
 async def init_posthog_background():
@@ -206,6 +206,16 @@ async def app_lifespan(app: FastAPI):
         else:
             logger.info("⏭️  Skill loop service disabled (SKILL_LOOP_ENABLED=false)")
 
+        start = time.perf_counter()
+        try:
+            resume_summary = await feishu_ws_manager.resume_active_installations()
+            logger.info(
+                "🔌 Feishu WebSocket auto-resume completed: "
+                f"{resume_summary} in {time.perf_counter() - start:.3f}s"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️  Feishu WebSocket auto-resume failed non-fatally: {e}")
+
         migration_status["message"] = "Backend ready"
         logger.info("✅ Backend initialization completed successfully")
         logger.info(f"⏱️  TOTAL STARTUP TIME: {time.perf_counter() - total_start:.3f}s")
@@ -226,7 +236,10 @@ async def app_lifespan(app: FastAPI):
         # Don't re-raise - keep backend alive to report error
         logger.warning("⚠️  Backend staying alive to report initialization error to frontend")
 
-    yield
+    try:
+        yield
+    finally:
+        await shutdown_backend_services()
 
 
 from fastmcp.utilities.lifespan import combine_lifespans
@@ -245,7 +258,15 @@ app = FastAPI(
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    await shutdown_backend_services()
+
+
+async def shutdown_backend_services():
     """Clean up resources on shutdown."""
+    global shutdown_completed
+    if shutdown_completed:
+        return
+    shutdown_completed = True
     try:
         # Stop credit sync service (only if it was started)
         if not is_self_hosted():
@@ -312,6 +333,7 @@ if get_security_flags()["proxy_headers_enabled"]:
 EXCLUDED_PATHS = [
     "/api/unified-agent/stream",
     "/api/mcp.*",
+    "/api/collaboration/feishu/callback/.*",
 ]
 
 
@@ -579,7 +601,6 @@ app.include_router(datasources_router.router, prefix="/api", tags=["datasources"
 app.include_router(semantic_models_router.router, prefix="/api", tags=["semantic-models"])
 
 app.include_router(analysis_artifacts_router.router, prefix="/api", tags=["analysis-artifacts"])
-app.include_router(assets_router.router, prefix="/api", tags=["assets"])
 
 app.include_router(source_connections_router.router, prefix="/api", tags=["source-connections"])
 
