@@ -186,7 +186,7 @@ Commit:
 
 ### Phase 2 Execution Slice: Manifest-Bound DashboardRun Query
 
-Status: implemented for governed `saved_query` compatibility views.
+Status: implemented initially for governed `saved_query` compatibility views; post-handoff audit extended execution to `semantic_metric` and `context_search`.
 
 Allowlist:
 
@@ -198,7 +198,7 @@ Behavior:
 
 - Added `DashboardService.query_dashboard` as the canonical execution entry point for later REST/MCP wrappers.
 - Query accepts `data_view_ids`, not arbitrary query IDs; the service resolves selected views from the published manifest.
-- Supported P0 execution in this slice is reviewed `saved_query` compatibility binding; unsupported semantic/context views return blocked in the run contract.
+- Initial slice supported reviewed `saved_query` compatibility binding; later completion-audit slice `e564dae` executes published semantic-model `semantic_metric` and provider-neutral evidence `context_search` views through governed service bindings.
 - Persists `DashboardRun` with filter digest, pinned versions, execution plan digest, cache/stale/as_of, warnings/errors, and audit event.
 - `pinned_snapshot` requests are honestly blocked until immutable result artifacts exist.
 
@@ -533,10 +533,12 @@ Evidence scope:
 
 Commands and results:
 
-- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_contract_schemas.py tests/test_dashboard_execution_service.py tests/test_dashboard_lifecycle_service.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_persistence_migration.py tests/test_dashboard_rest_api.py tests/test_dashboard_security_regressions.py tests/test_migration_chain_hardening.py` -> initially passed, `33 passed`, `56 warnings`; post-handoff completion audit after semantic/context data-view execution passed, `36 passed`, `69 warnings`.
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_contract_schemas.py tests/test_dashboard_execution_service.py tests/test_dashboard_lifecycle_service.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_persistence_migration.py tests/test_dashboard_rest_api.py tests/test_dashboard_security_regressions.py tests/test_migration_chain_hardening.py` -> initially passed, `33 passed`, `56 warnings`; post-handoff completion audit after semantic/context data-view execution passed, `36 passed`, `69 warnings`; after legacy HTML tool gating passed, `40 passed`, `69 warnings`.
 - `cd server && uv run ruff check schemas/dashboard.py models/dashboard.py repositories/dashboard.py services/dashboard.py routers/dashboard.py mcp/tool_wrappers.py mcp/tools.py tests/test_dashboard_contract_schemas.py tests/test_dashboard_execution_service.py tests/test_dashboard_lifecycle_service.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_persistence_migration.py tests/test_dashboard_rest_api.py tests/test_dashboard_security_regressions.py tests/test_migration_chain_hardening.py` -> passed.
 - `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_execution_service.py` after semantic/context data-view execution -> passed, `7 passed`, `34 warnings`.
 - `cd server && uv run ruff check services/dashboard.py tests/test_dashboard_execution_service.py` after semantic/context data-view execution -> passed.
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_legacy_tool_gating.py tests/test_dashboard_mcp_contract.py` after legacy HTML tool gating -> passed, `7 passed`, `17 warnings`.
+- `cd server && uv run ruff check tools/agentic.py tests/test_dashboard_legacy_tool_gating.py` after legacy HTML tool gating -> passed.
 - `cd server && uv run alembic heads` -> `backfill_legacy_dashboard_assets (head)`.
 - Disposable SQLite migration evidence DB: `.tmp/dashboard-migration-evidence-20260816-1208/app.db`.
 - `DATABASE_URL=sqlite+aiosqlite:///$PWD/../.tmp/dashboard-migration-evidence-20260816-1208/app.db uv run alembic upgrade add_knowledge_provider_metadata` -> passed.
@@ -572,20 +574,22 @@ Commit:
 | `b5c679e` | `dashboard: add browser smoke evidence` | Phase 6 browser workspace smoke slice | `pnpm smoke:dashboard` -> passed against real REST/UI on `8123`/`5179` with 0 page errors, console errors, failed requests, and HTTP 5xx; `node --check scripts/dashboard-workspace-smoke.mjs` -> passed; `pnpm lint` -> passed with existing 355 warnings; `pnpm build:check` -> passed with existing CSS/chunk warnings; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `3e39d3d` | `dashboard: record backend acceptance evidence` | Phase 6 backend/MCP/security/migration evidence slice | Dashboard focused pytest suite -> 33 passed; Dashboard backend ruff surface -> passed; Alembic head/current evidence -> `backfill_legacy_dashboard_assets`; disposable SQLite Dashboard upgrade/downgrade evidence -> passed with source-resource stamp workaround documented | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `e564dae` | `dashboard: execute semantic and context views` | Phase 6 completion-audit execution slice | `pytest tests/test_dashboard_execution_service.py` -> 7 passed; Dashboard focused pytest suite -> 36 passed; `ruff check services/dashboard.py tests/test_dashboard_execution_service.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| `7a0f83d` | `dashboard: gate legacy html tools` | Phase 6 completion-audit legacy tool slice | `pytest tests/test_dashboard_legacy_tool_gating.py tests/test_dashboard_mcp_contract.py` -> 7 passed; Dashboard focused pytest suite with legacy gating -> 40 passed; `ruff check tools/agentic.py tests/test_dashboard_legacy_tool_gating.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 
 ## Acceptance Evidence
 
-Browser workspace evidence captured under `docs/product/dashboard-browser-smoke/` for structured data, lineage/evidence, permission-denied policy guard, legacy fallback, and mobile layout. Backend/MCP/security/migration evidence is recorded above, including post-handoff coverage that executes all P0 data-view kinds (`saved_query`, `semantic_metric`, and `context_search`) through governed service bindings. Real `8080` has not been verified in this isolated Dashboard worktree.
+Browser workspace evidence captured under `docs/product/dashboard-browser-smoke/` for structured data, lineage/evidence, permission-denied policy guard, legacy fallback, and mobile layout. Backend/MCP/security/migration evidence is recorded above, including post-handoff coverage that executes all P0 data-view kinds (`saved_query`, `semantic_metric`, and `context_search`) through governed service bindings and blocks deprecated legacy HTML tools from reading or mutating structured Dashboard versions. Real `8080` has not been verified in this isolated Dashboard worktree.
 
 ## Final Integration Handoff
 
-Status: post-handoff completion audit found and fixed missing `semantic_metric`/`context_search` data-view execution in `e564dae`; ledger update prepared after `HEAD == @{upstream}` verification.
+Status: post-handoff completion audit fixed missing `semantic_metric`/`context_search` data-view execution in `e564dae` and legacy HTML tool gating in `7a0f83d`; ledger update prepared after `HEAD == @{upstream}` verification.
 
 Final branch/evidence state recorded by the handoff ledger before this doc-only update:
 
 - Base SHA: `24c6b69a1f816a831ee6ce94d8515817b4752913`
 - Dashboard evidence HEAD before post-handoff audit: `98adf4db32de12582824b887c89c66c68cc7bd27`
 - Latest implementation evidence HEAD before this doc-only update: `e564dae8763c490c82d5f0097a621b36e9774a68`
+- Latest legacy-tool gate implementation HEAD before this doc-only update: `7a0f83dbfd724da331c1494297137b2580f1513a`
 - Remote branch: `veadk-data-studio/agent/dashboard-human-agent-p0`
 - Integration source observed only: `veadk-data-studio/agent/data-studio-p0` at `9718bf6431c177c0b48e6fc21c36626a9057c47a`
 - Merge base with integration source: `24c6b69a1f816a831ee6ce94d8515817b4752913`
@@ -631,6 +635,8 @@ b5c679e dashboard: add browser smoke evidence
 59de702 dashboard: finalize handoff ledger
 738f33a dashboard: correct final handoff sha
 e564dae dashboard: execute semantic and context views
+bb54fc0 dashboard: record semantic context execution evidence
+7a0f83d dashboard: gate legacy html tools
 ```
 
 `git diff --name-status 24c6b69a1f816a831ee6ce94d8515817b4752913..HEAD`:
@@ -691,6 +697,7 @@ Acceptance evidence summary:
 
 - Contract schemas: `dashboard.manifest.v1` and `dashboard.run.v1` covered by `tests/test_dashboard_contract_schemas.py`.
 - Data-view execution: `tests/test_dashboard_execution_service.py` covers manifest-bound `saved_query`, published semantic-model `semantic_metric`, provider-neutral evidence `context_search`, data-view allowlist rejection, pinned snapshot honesty, and unresolved policy blocking.
+- Legacy HTML tool gating: `tests/test_dashboard_legacy_tool_gating.py` covers deprecated HTML tools allowing `legacy_unstructured` rows and rejecting structured manifest-backed Dashboard versions before HTML read/edit.
 - Security: viewer arbitrary saved-query ID execution blocked for other notebook/cross-tenant/filter cases; unresolved row/column/redaction policy refs return auditable `permission_denied` without saved-query execution.
 - REST/MCP parity: same tenant principal, dashboard version, filters, digests, values, schema, cache/freshness, `as_of`, warnings, evidence, and lineage covered in `tests/test_dashboard_rest_api.py` and `tests/test_dashboard_mcp_contract.py`.
 - Lifecycle: draft creation, JSON Patch allowlist, stale ETag `409`, validate, preview, publish, reload review draft, export, audit, lineage, and state covered by focused tests.
