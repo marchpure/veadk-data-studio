@@ -2,22 +2,28 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   BarChart3,
   Braces,
   CheckCircle2,
   Database,
+  Filter,
   GitBranch,
   LayoutDashboard,
   LineChart,
   Loader2,
+  Plus,
   RefreshCw,
+  Save,
   Search,
   ShieldCheck,
   Table2,
+  Trash2,
 } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import { Input } from '../../../components/ui/input'
-import { DashboardService } from '../../../services/dashboard'
+import { DashboardApiError, DashboardService } from '../../../services/dashboard'
 import type {
   DashboardAsset,
   DashboardAssetDetail,
@@ -36,6 +42,12 @@ import type {
 import { cn } from '../../../lib/utils'
 
 type WorkspaceTab = 'dashboard' | 'data' | 'lineage'
+type EditorSelection = { kind: 'tile'; id: string } | { kind: 'filter'; id: string }
+type JsonPatchOperation = { op: 'add' | 'replace' | 'remove'; path: string; value?: unknown }
+type ConflictState = { currentEtag?: string; message: string }
+type LastDraftPatch = { jsonPatch: JsonPatchOperation[]; changeSummary: string; successMessage: string }
+
+const filterOperatorOptions = ['eq', 'ne', 'gt', 'lt', 'gte', 'lte', 'in', 'between', 'contains', 'like']
 
 const statusTone: Record<string, string> = {
   published: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
@@ -68,6 +80,9 @@ export default function DashboardWorkspacePage() {
   const [error, setError] = useState<string | null>(null)
   const [validationMessage, setValidationMessage] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
+  const [editorSelection, setEditorSelection] = useState<EditorSelection | null>(null)
+  const [conflict, setConflict] = useState<ConflictState | null>(null)
+  const [lastDraftPatch, setLastDraftPatch] = useState<LastDraftPatch | null>(null)
   const [semanticDiff, setSemanticDiff] = useState<DashboardSemanticDiff | null>(null)
   const [auditEvents, setAuditEvents] = useState<DashboardAuditEvent[]>([])
   const [shareFolderId, setShareFolderId] = useState('')
@@ -105,6 +120,7 @@ export default function DashboardWorkspacePage() {
       const asset = await DashboardService.getAsset(id)
       setSelectedAsset(asset)
       setEditingTitle(asset.name)
+      setConflict(null)
       const versionSummary = chooseVersion(asset.versions, requestedVersionNum)
       if (!versionSummary) {
         setSelectedVersion(null)
@@ -115,6 +131,7 @@ export default function DashboardWorkspacePage() {
       const version = await DashboardService.getVersion(id, versionSummary.version_num)
       setSelectedVersion(version)
       setVersionNum(version.version_num)
+      setEditorSelection(previous => normalizeEditorSelection(version.manifest, previous))
       const diff = extractSemanticDiff(version)
       setSemanticDiff(diff ?? extractSemanticDiff(asset))
       void loadAudit(id)
@@ -207,23 +224,57 @@ export default function DashboardWorkspacePage() {
     }
   }
 
-  const patchTitle = async () => {
-    if (!selectedAsset || !selectedVersion || !editingTitle.trim()) return
+  const applyDraftPatch = async (jsonPatch: JsonPatchOperation[], changeSummary: string, successMessage: string, baseEtag?: string) => {
+    if (!selectedAsset || !selectedVersion || jsonPatch.length === 0) return false
     setLoadingWorkflow(true)
+    setValidationMessage(null)
+    setConflict(null)
+    setLastDraftPatch({ jsonPatch, changeSummary, successMessage })
     try {
       await DashboardService.patchDraft(selectedAsset.id, {
-        base_etag: selectedAsset.etag,
-        json_patch: [{ op: 'replace', path: '/title', value: editingTitle.trim() }],
-        change_summary: 'Update Dashboard title from workspace',
+        base_etag: baseEtag ?? selectedAsset.etag,
+        json_patch: jsonPatch,
+        change_summary: changeSummary,
       })
       await loadDetail(selectedAsset.id, null)
       await loadAssets()
-      setValidationMessage('Draft title updated')
+      setValidationMessage(successMessage)
+      setLastDraftPatch(null)
+      return true
     } catch (err) {
-      setValidationMessage(err instanceof Error ? err.message : 'Draft update failed')
+      const conflictState = getConflictState(err)
+      if (conflictState) {
+        setConflict(conflictState)
+        setValidationMessage('Draft conflict detected')
+      } else {
+        setValidationMessage(err instanceof Error ? err.message : 'Draft update failed')
+      }
+      return false
     } finally {
       setLoadingWorkflow(false)
     }
+  }
+
+  const refreshAfterConflict = async () => {
+    if (!selectedAsset) return
+    await loadDetail(selectedAsset.id, null)
+    await loadAssets()
+    setValidationMessage('Draft refreshed after conflict')
+  }
+
+  const retryLastDraftPatch = async () => {
+    if (!selectedAsset || !lastDraftPatch) return
+    const latest = await DashboardService.getAsset(selectedAsset.id)
+    await applyDraftPatch(lastDraftPatch.jsonPatch, lastDraftPatch.changeSummary, lastDraftPatch.successMessage, latest.etag)
+  }
+
+  const patchTitle = async () => {
+    if (!editingTitle.trim()) return
+    await applyDraftPatch(
+      [{ op: 'replace', path: '/title', value: editingTitle.trim() }],
+      'Update Dashboard title from workspace',
+      'Draft title updated',
+    )
   }
 
   const createReloadDraft = async () => {
@@ -381,6 +432,15 @@ export default function DashboardWorkspacePage() {
             </div>
           )}
 
+          {conflict && (
+            <ConflictBanner
+              conflict={conflict}
+              loading={loadingWorkflow}
+              onRefresh={() => void refreshAfterConflict()}
+              onRetry={() => void retryLastDraftPatch()}
+            />
+          )}
+
           <section className="lg:hidden">
             <div className="rounded-md border border-[#293037] bg-[#14181c] p-3">
               <div className="flex items-center gap-2">
@@ -502,6 +562,17 @@ export default function DashboardWorkspacePage() {
                 <AuditTrail events={auditEvents} />
               </section>
 
+              {manifest && (
+                <ManifestEditor
+                  manifest={manifest}
+                  selection={editorSelection}
+                  loading={loadingWorkflow}
+                  disabled={selectedVersion?.status === 'published'}
+                  onSelect={setEditorSelection}
+                  onPatch={(patch, summary, message) => void applyDraftPatch(patch, summary, message)}
+                />
+              )}
+
               {(selectedAsset.lifecycle === 'legacy_unstructured' || selectedVersion?.migration_state === 'legacy_unstructured') && (
                 <LegacyFallbackPanel notebookId={selectedAsset.notebook_id} />
               )}
@@ -548,6 +619,35 @@ function extractSemanticDiff(source: DashboardVersion | DashboardAssetDetail | n
   }
   const diff = source.health_summary.semantic_diff
   return isRecord(diff) ? diff as DashboardSemanticDiff : null
+}
+
+function normalizeEditorSelection(manifest: DashboardManifest, selection: EditorSelection | null): EditorSelection | null {
+  if (selection?.kind === 'tile' && manifest.tiles.some(tile => tile.id === selection.id)) return selection
+  if (selection?.kind === 'filter' && manifest.filters.some(filter => filter.id === selection.id)) return selection
+  const firstTile = manifest.tiles[0]
+  if (firstTile) return { kind: 'tile', id: firstTile.id }
+  const firstFilter = manifest.filters[0]
+  if (firstFilter) return { kind: 'filter', id: firstFilter.id }
+  return null
+}
+
+function uniqueManifestId(prefix: string, existingIds: string[]): string {
+  const existing = new Set(existingIds)
+  for (let index = 1; index < 1000; index += 1) {
+    const candidate = `${prefix}-${index}`
+    if (!existing.has(candidate)) return candidate
+  }
+  return `${prefix}-${Date.now()}`
+}
+
+function getConflictState(error: unknown): ConflictState | null {
+  if (!(error instanceof DashboardApiError) || error.status !== 409) return null
+  const data = isRecord(error.data) ? error.data : {}
+  const currentEtag = typeof data.current_etag === 'string' ? data.current_etag : undefined
+  return {
+    currentEtag,
+    message: 'The draft changed on the server. Refresh the latest draft before retrying this JSON Patch.',
+  }
 }
 
 function InventoryEvidenceTable({ assets, selectedAssetId }: { assets: DashboardAsset[]; selectedAssetId?: string }) {
@@ -610,6 +710,467 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function ConflictBanner({
+  conflict,
+  loading,
+  onRefresh,
+  onRetry,
+}: {
+  conflict: ConflictState
+  loading: boolean
+  onRefresh: () => void
+  onRetry: () => void
+}) {
+  return (
+    <section className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100" role="alert">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 font-semibold">
+            <AlertTriangle className="h-4 w-4" />
+            <span>Draft conflict (409)</span>
+          </div>
+          <p className="mt-1 break-words text-xs text-red-100/80">
+            {conflict.message}
+            {conflict.currentEtag ? ` Current ETag ${conflict.currentEtag}.` : ''}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button variant="secondary" size="sm" onClick={onRefresh} disabled={loading}>
+            <RefreshCw className="h-4 w-4" />
+            Refresh Draft
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onRetry} disabled={loading}>
+            <Save className="h-4 w-4" />
+            Retry Patch
+          </Button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function ManifestEditor({
+  manifest,
+  selection,
+  loading,
+  disabled,
+  onSelect,
+  onPatch,
+}: {
+  manifest: DashboardManifest
+  selection: EditorSelection | null
+  loading: boolean
+  disabled: boolean
+  onSelect: (selection: EditorSelection) => void
+  onPatch: (patch: JsonPatchOperation[], summary: string, message: string) => void
+}) {
+  const activeSelection = normalizeEditorSelection(manifest, selection)
+  const selectedTile = activeSelection?.kind === 'tile' ? manifest.tiles.find(tile => tile.id === activeSelection.id) ?? null : null
+  const selectedFilter = activeSelection?.kind === 'filter' ? manifest.filters.find(filter => filter.id === activeSelection.id) ?? null : null
+
+  const moveTile = (tileId: string, direction: -1 | 1) => {
+    const sectionIndex = manifest.layout.sections.findIndex(section => section.tile_ids.includes(tileId))
+    if (sectionIndex < 0) return
+    const section = manifest.layout.sections[sectionIndex]
+    const currentIndex = section.tile_ids.indexOf(tileId)
+    const nextIndex = currentIndex + direction
+    if (nextIndex < 0 || nextIndex >= section.tile_ids.length) return
+    const tileIds = [...section.tile_ids]
+    const [tile] = tileIds.splice(currentIndex, 1)
+    tileIds.splice(nextIndex, 0, tile)
+    onPatch(
+      [{ op: 'replace', path: `/layout/sections/${sectionIndex}/tile_ids`, value: tileIds }],
+      'Reorder Dashboard tile layout from workspace',
+      'Tile order updated',
+    )
+  }
+
+  const addFilter = () => {
+    const firstViewId = manifest.data_views[0]?.id
+    const id = uniqueManifestId('filter', manifest.filters.map(filter => filter.id))
+    const filter: DashboardFilter = {
+      id,
+      label: 'New Filter',
+      source: 'saved_query_contract',
+      field: manifest.filters[0]?.field ?? 'region',
+      filter_type: 'enum',
+      operators: ['eq'],
+      affected_data_view_ids: firstViewId ? [firstViewId] : [],
+      default_value: '',
+      required: false,
+      domain: manifest.filters[0]?.domain ?? [],
+      timezone: null,
+    }
+    onPatch(
+      [{ op: 'add', path: '/filters/-', value: filter }],
+      'Add Dashboard filter from workspace',
+      'Filter added',
+    )
+    onSelect({ kind: 'filter', id })
+  }
+
+  return (
+    <section className="rounded-md border border-[#293037] bg-[#14181c]" aria-label="Manifest editor">
+      <div className="flex flex-col gap-3 border-b border-[#293037] p-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold">Manifest editor</h2>
+          <p className="mt-1 text-xs text-[#818c95]">Tile, filter, and layout edits use JSON Patch with the current draft ETag.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge>{disabled ? 'Published view' : 'Draft editable'}</Badge>
+          <Badge>json_patch</Badge>
+          <Badge>base_etag</Badge>
+        </div>
+      </div>
+      <div className="grid min-w-0 gap-0 xl:grid-cols-[260px_minmax(0,1fr)_360px]">
+        <ManifestOutline
+          manifest={manifest}
+          selection={activeSelection}
+          disabled={disabled || loading}
+          onSelect={onSelect}
+          onMoveTile={moveTile}
+          onAddFilter={addFilter}
+        />
+        <div className="min-w-0 border-t border-[#293037] p-3 xl:border-l xl:border-t-0">
+          <DashboardCanvas manifest={manifest} run={null} loadingRun={false} selectedTileId={selectedTile?.id ?? null} onSelectTile={tileId => onSelect({ kind: 'tile', id: tileId })} />
+        </div>
+        <ManifestInspector
+          manifest={manifest}
+          selection={activeSelection}
+          tile={selectedTile}
+          filter={selectedFilter}
+          loading={loading}
+          disabled={disabled}
+          onPatch={onPatch}
+        />
+      </div>
+    </section>
+  )
+}
+
+function ManifestOutline({
+  manifest,
+  selection,
+  disabled,
+  onSelect,
+  onMoveTile,
+  onAddFilter,
+}: {
+  manifest: DashboardManifest
+  selection: EditorSelection | null
+  disabled: boolean
+  onSelect: (selection: EditorSelection) => void
+  onMoveTile: (tileId: string, direction: -1 | 1) => void
+  onAddFilter: () => void
+}) {
+  const orderedTileIds = manifest.layout.sections.flatMap(section => section.tile_ids)
+  const tileOrder = new Map(orderedTileIds.map((tileId, index) => [tileId, index]))
+  return (
+    <aside className="min-w-0 p-3" aria-label="Manifest outline">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-medium uppercase text-[#818c95]">Outline</h3>
+        <Button variant="secondary" size="sm" onClick={onAddFilter} disabled={disabled}>
+          <Plus className="h-4 w-4" />
+          Filter
+        </Button>
+      </div>
+      <div className="mt-3 space-y-4">
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-xs text-[#9aa4ac]">
+            <LayoutDashboard className="h-4 w-4 text-brand-orange" />
+            Tiles
+          </div>
+          <div className="space-y-2">
+            {manifest.tiles.map(tile => {
+              const index = tileOrder.get(tile.id) ?? -1
+              const active = selection?.kind === 'tile' && selection.id === tile.id
+              return (
+                <div key={tile.id} className={cn('rounded border p-2', active ? 'border-brand-orange/60 bg-brand-orange/10' : 'border-[#303940] bg-[#101316]')}>
+                  <button
+                    type="button"
+                    onClick={() => onSelect({ kind: 'tile', id: tile.id })}
+                    className="block w-full min-w-0 text-left"
+                    aria-label={`Select tile ${tile.title}`}
+                  >
+                    <div className="truncate text-sm text-[#f3f5f5]">{tile.title}</div>
+                    <div className="mt-1 truncate text-xs text-[#818c95]">{tile.tile_type} · {tile.id}</div>
+                  </button>
+                  <div className="mt-2 flex gap-1">
+                    <IconButton label={`Move ${tile.title} up`} disabled={disabled || index <= 0} onClick={() => onMoveTile(tile.id, -1)}>
+                      <ArrowUp className="h-4 w-4" />
+                    </IconButton>
+                    <IconButton label={`Move ${tile.title} down`} disabled={disabled || index < 0 || index >= orderedTileIds.length - 1} onClick={() => onMoveTile(tile.id, 1)}>
+                      <ArrowDown className="h-4 w-4" />
+                    </IconButton>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-xs text-[#9aa4ac]">
+            <Filter className="h-4 w-4 text-brand-orange" />
+            Filters
+          </div>
+          <div className="space-y-2">
+            {manifest.filters.map(filter => {
+              const active = selection?.kind === 'filter' && selection.id === filter.id
+              return (
+                <button
+                  key={filter.id}
+                  type="button"
+                  onClick={() => onSelect({ kind: 'filter', id: filter.id })}
+                  className={cn(
+                    'block w-full min-w-0 rounded border p-2 text-left',
+                    active ? 'border-brand-orange/60 bg-brand-orange/10' : 'border-[#303940] bg-[#101316]',
+                  )}
+                >
+                  <div className="truncate text-sm text-[#f3f5f5]">{filter.label}</div>
+                  <div className="mt-1 truncate text-xs text-[#818c95]">{filter.field} · {filter.operators.join(', ')}</div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+function ManifestInspector({
+  manifest,
+  selection,
+  tile,
+  filter,
+  loading,
+  disabled,
+  onPatch,
+}: {
+  manifest: DashboardManifest
+  selection: EditorSelection | null
+  tile: DashboardTile | null
+  filter: DashboardFilter | null
+  loading: boolean
+  disabled: boolean
+  onPatch: (patch: JsonPatchOperation[], summary: string, message: string) => void
+}) {
+  return (
+    <aside className="min-w-0 border-t border-[#293037] p-3 xl:border-l xl:border-t-0" aria-label="Manifest inspector">
+      <h3 className="text-xs font-medium uppercase text-[#818c95]">Inspector</h3>
+      {!selection && <div className="mt-3 text-sm text-[#818c95]">Select a tile or filter.</div>}
+      {tile && (
+        <TileInspector
+          manifest={manifest}
+          tile={tile}
+          loading={loading}
+          disabled={disabled}
+          onPatch={onPatch}
+        />
+      )}
+      {filter && (
+        <FilterInspector
+          manifest={manifest}
+          filter={filter}
+          loading={loading}
+          disabled={disabled}
+          onPatch={onPatch}
+        />
+      )}
+    </aside>
+  )
+}
+
+function TileInspector({
+  manifest,
+  tile,
+  loading,
+  disabled,
+  onPatch,
+}: {
+  manifest: DashboardManifest
+  tile: DashboardTile
+  loading: boolean
+  disabled: boolean
+  onPatch: (patch: JsonPatchOperation[], summary: string, message: string) => void
+}) {
+  const [title, setTitle] = useState(tile.title)
+  const [question, setQuestion] = useState(tile.business_question)
+  const [encodingText, setEncodingText] = useState(JSON.stringify(tile.encoding ?? {}, null, 2))
+  const [encodingError, setEncodingError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setTitle(tile.title)
+    setQuestion(tile.business_question)
+    setEncodingText(JSON.stringify(tile.encoding ?? {}, null, 2))
+    setEncodingError(null)
+  }, [tile])
+
+  const tileIndex = manifest.tiles.findIndex(item => item.id === tile.id)
+  const save = () => {
+    if (tileIndex < 0 || !title.trim() || !question.trim()) return
+    let encoding: Record<string, unknown>
+    try {
+      const parsed = JSON.parse(encodingText || '{}') as unknown
+      if (!isRecord(parsed)) throw new Error('Encoding must be a JSON object')
+      encoding = parsed
+      setEncodingError(null)
+    } catch (err) {
+      setEncodingError(err instanceof Error ? err.message : 'Encoding must be valid JSON')
+      return
+    }
+    const patch: JsonPatchOperation[] = [
+      { op: 'replace', path: `/tiles/${tileIndex}/title`, value: title.trim() },
+      { op: 'replace', path: `/tiles/${tileIndex}/business_question`, value: question.trim() },
+      { op: 'replace', path: `/tiles/${tileIndex}/encoding`, value: encoding },
+    ]
+    onPatch(patch, `Edit Dashboard tile ${tile.id} from workspace`, 'Tile inspector saved')
+  }
+
+  return (
+    <div className="mt-3 space-y-3">
+      <InspectorField label="Tile title">
+        <Input value={title} onChange={event => setTitle(event.target.value)} disabled={disabled || loading} aria-label="Tile title" className="border-[#303940] bg-[#0e1114] text-sm text-[#eef2f3]" />
+      </InspectorField>
+      <InspectorField label="Business question">
+        <textarea
+          value={question}
+          onChange={event => setQuestion(event.target.value)}
+          disabled={disabled || loading}
+          aria-label="Tile business question"
+          className="min-h-[84px] w-full resize-y rounded-md border border-[#303940] bg-[#0e1114] px-3 py-2 text-sm text-[#eef2f3] outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+        />
+      </InspectorField>
+      <InspectorField label="Encoding JSON">
+        <textarea
+          value={encodingText}
+          onChange={event => setEncodingText(event.target.value)}
+          disabled={disabled || loading}
+          aria-label="Tile encoding JSON"
+          className="min-h-[112px] w-full resize-y rounded-md border border-[#303940] bg-[#0e1114] px-3 py-2 font-mono text-xs text-[#eef2f3] outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+        />
+        {encodingError && <div className="mt-1 text-xs text-red-100">{encodingError}</div>}
+      </InspectorField>
+      <Button variant="secondary" onClick={save} disabled={disabled || loading || !title.trim() || !question.trim()}>
+        <Save className="h-4 w-4" />
+        Save Tile
+      </Button>
+    </div>
+  )
+}
+
+function FilterInspector({
+  manifest,
+  filter,
+  loading,
+  disabled,
+  onPatch,
+}: {
+  manifest: DashboardManifest
+  filter: DashboardFilter
+  loading: boolean
+  disabled: boolean
+  onPatch: (patch: JsonPatchOperation[], summary: string, message: string) => void
+}) {
+  const [label, setLabel] = useState(filter.label)
+  const [operator, setOperator] = useState(filter.operators[0] ?? 'eq')
+  const [defaultValue, setDefaultValue] = useState(filter.default_value === null || filter.default_value === undefined ? '' : String(filter.default_value))
+
+  useEffect(() => {
+    setLabel(filter.label)
+    setOperator(filter.operators[0] ?? 'eq')
+    setDefaultValue(filter.default_value === null || filter.default_value === undefined ? '' : String(filter.default_value))
+  }, [filter])
+
+  const filterIndex = manifest.filters.findIndex(item => item.id === filter.id)
+  const save = () => {
+    if (filterIndex < 0 || !label.trim()) return
+    onPatch(
+      [
+        { op: 'replace', path: `/filters/${filterIndex}/label`, value: label.trim() },
+        { op: 'replace', path: `/filters/${filterIndex}/operators`, value: [operator] },
+        { op: 'replace', path: `/filters/${filterIndex}/default_value`, value: coerceFilterValue(filter, defaultValue) },
+      ],
+      `Edit Dashboard filter ${filter.id} from workspace`,
+      'Filter inspector saved',
+    )
+  }
+  const remove = () => {
+    if (filterIndex < 0) return
+    onPatch([{ op: 'remove', path: `/filters/${filterIndex}` }], `Remove Dashboard filter ${filter.id} from workspace`, 'Filter removed')
+  }
+
+  return (
+    <div className="mt-3 space-y-3">
+      <InspectorField label="Filter label">
+        <Input value={label} onChange={event => setLabel(event.target.value)} disabled={disabled || loading} aria-label="Filter label" className="border-[#303940] bg-[#0e1114] text-sm text-[#eef2f3]" />
+      </InspectorField>
+      <InspectorField label="Operator">
+        <select
+          value={operator}
+          onChange={event => setOperator(event.target.value)}
+          disabled={disabled || loading}
+          aria-label="Filter operator"
+          className="h-9 w-full rounded border border-[#303940] bg-[#0e1114] px-2 text-sm text-[#eef2f3] disabled:opacity-50"
+        >
+          {filterOperatorOptions.map(value => <option key={value} value={value}>{value}</option>)}
+        </select>
+      </InspectorField>
+      <InspectorField label="Default value">
+        <Input value={defaultValue} onChange={event => setDefaultValue(event.target.value)} disabled={disabled || loading} aria-label="Filter default value" className="border-[#303940] bg-[#0e1114] text-sm text-[#eef2f3]" />
+      </InspectorField>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="secondary" onClick={save} disabled={disabled || loading || !label.trim()}>
+          <Save className="h-4 w-4" />
+          Save Filter
+        </Button>
+        <Button variant="secondary" onClick={remove} disabled={disabled || loading || manifest.filters.length <= 1}>
+          <Trash2 className="h-4 w-4" />
+          Remove Filter
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function InspectorField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="text-xs font-medium text-[#9aa4ac]">{label}</span>
+      <div className="mt-1">{children}</div>
+    </label>
+  )
+}
+
+function IconButton({
+  label,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string
+  disabled?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={event => {
+        event.preventDefault()
+        event.stopPropagation()
+        onClick()
+      }}
+      className="inline-flex h-8 w-8 items-center justify-center rounded border border-[#303940] bg-[#151a1f] text-[#cdd3d8] transition-colors hover:border-brand-orange/50 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
+  )
+}
+
 function FilterBar({ filters, values, onChange }: { filters: DashboardFilter[]; values: Record<string, unknown>; onChange: (filter: DashboardFilter, value: string) => void }) {
   if (filters.length === 0) {
     return <div className="text-sm text-[#818c95]">No global filters</div>
@@ -643,7 +1204,19 @@ function FilterBar({ filters, values, onChange }: { filters: DashboardFilter[]; 
   )
 }
 
-function DashboardCanvas({ manifest, run, loadingRun }: { manifest: DashboardManifest; run: DashboardRun | null; loadingRun: boolean }) {
+function DashboardCanvas({
+  manifest,
+  run,
+  loadingRun,
+  selectedTileId,
+  onSelectTile,
+}: {
+  manifest: DashboardManifest
+  run: DashboardRun | null
+  loadingRun: boolean
+  selectedTileId?: string | null
+  onSelectTile?: (tileId: string) => void
+}) {
   const viewsById = useMemo(() => new Map((run?.views ?? []).map(view => [view.data_view_id, view])), [run])
   const tilesById = useMemo(() => new Map(manifest.tiles.map(tile => [tile.id, tile])), [manifest.tiles])
   return (
@@ -657,7 +1230,17 @@ function DashboardCanvas({ manifest, run, loadingRun }: { manifest: DashboardMan
               if (!tile) return null
               const view = tile.data_view_id ? viewsById.get(tile.data_view_id) : undefined
               const dataView = manifest.data_views.find(item => item.id === tile.data_view_id)
-              return <DashboardTileCard key={tile.id} tile={tile} view={view} dataView={dataView} loading={loadingRun} />
+              return (
+                <DashboardTileCard
+                  key={tile.id}
+                  tile={tile}
+                  view={view}
+                  dataView={dataView}
+                  loading={loadingRun}
+                  selected={selectedTileId === tile.id}
+                  onSelect={onSelectTile ? () => onSelectTile(tile.id) : undefined}
+                />
+              )
             })}
           </div>
         </section>
@@ -666,15 +1249,38 @@ function DashboardCanvas({ manifest, run, loadingRun }: { manifest: DashboardMan
   )
 }
 
-function DashboardTileCard({ tile, view, dataView, loading }: { tile: DashboardTile; view?: DashboardRunView; dataView?: DashboardDataView; loading: boolean }) {
+function DashboardTileCard({
+  tile,
+  view,
+  dataView,
+  loading,
+  selected,
+  onSelect,
+}: {
+  tile: DashboardTile
+  view?: DashboardRunView
+  dataView?: DashboardDataView
+  loading: boolean
+  selected?: boolean
+  onSelect?: () => void
+}) {
   const rows = Array.isArray(view?.result) ? view.result : view?.result ? [view.result] : []
   const first = rows[0] ?? {}
   const firstField = view?.schema?.[0]?.name ?? dataView?.output_schema?.[0]?.name
   const primaryValue = firstField ? first[firstField] : tile.tile_type === 'text' ? tile.business_question : null
   const unit = view?.schema?.[0]?.unit ?? dataView?.output_schema?.[0]?.unit
   const status = loading ? 'running' : view?.status ?? (tile.tile_type === 'text' ? 'success' : 'pending')
+  const Component = onSelect ? 'button' : 'article'
   return (
-    <article className="min-h-[210px] rounded-md border border-[#2d3338] bg-[#101316] p-4">
+    <Component
+      type={onSelect ? 'button' : undefined}
+      onClick={onSelect}
+      className={cn(
+        'block min-h-[210px] w-full rounded-md border bg-[#101316] p-4 text-left',
+        selected ? 'border-brand-orange/70 ring-1 ring-brand-orange/40' : 'border-[#2d3338]',
+        onSelect ? 'transition-colors hover:border-brand-orange/50' : '',
+      )}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -713,7 +1319,7 @@ function DashboardTileCard({ tile, view, dataView, loading }: { tile: DashboardT
         {dataView?.sensitivity && <Badge>{dataView.sensitivity}</Badge>}
         {view?.row_count !== undefined && <Badge>{view.row_count} rows</Badge>}
       </div>
-    </article>
+    </Component>
   )
 }
 

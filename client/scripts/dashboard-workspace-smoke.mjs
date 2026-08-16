@@ -569,9 +569,9 @@ async function runLegacyScene(page, fixtures, viewport) {
 async function runStalePartialScene(page, fixtures, viewport) {
   await page.goto(`${baseURL}/dashboard-assets/${fixtures.stalePartialAssetId}`, { waitUntil: 'networkidle' })
   await page.getByRole('heading', { name: /Browser Stale Partial/i }).waitFor()
-  await page.getByText('Stale Revenue Cache').waitFor()
-  await page.getByText('Partial Failure View').waitFor()
-  await page.getByText('Stale data').waitFor()
+  await page.locator('h3:visible', { hasText: 'Stale Revenue Cache' }).first().waitFor()
+  await page.locator('h3:visible', { hasText: 'Partial Failure View' }).first().waitFor()
+  await page.getByText('Stale data', { exact: true }).first().waitFor()
   await page.getByText(/as of/i).first().waitFor()
   await page.getByText('Partial failure', { exact: true }).waitFor()
   await page.getByText(/Dashboard data view execution failed|No run timestamp/i).first().waitFor()
@@ -590,6 +590,76 @@ async function runEditReviewScene(page, fixtures, viewport) {
   await page.getByRole('button', { name: 'Patch Title' }).click()
   await page.getByText('Draft title updated').waitFor()
   await page.getByRole('heading', { name: /Browser Edit Review Patched/i }).waitFor()
+  await page.getByRole('heading', { name: 'Manifest editor' }).waitFor()
+
+  if (viewport === '1440' && !fixtures.editConflictExercised) {
+    fixtures.editConflictExercised = true
+    const latestEditAsset = await api(`/api/dashboard-assets/${fixtures.editAssetId}`, { headers: fixtures.headers })
+    const parallelDraft = await api(`/api/dashboard-assets/${fixtures.editAssetId}/draft`, {
+      method: 'PATCH',
+      headers: fixtures.headers,
+      body: JSON.stringify({
+        base_etag: latestEditAsset.etag,
+        json_patch: [{ op: 'replace', path: '/description', value: 'Parallel browser conflict update' }],
+        change_summary: 'parallel browser conflict fixture',
+      }),
+    })
+    const conflictedEditAsset = await api(`/api/dashboard-assets/${fixtures.editAssetId}`, { headers: fixtures.headers })
+    await page.evaluate(currentEtag => {
+      const realFetch = window.fetch.bind(window)
+      let returnedConflict = false
+      window.fetch = async (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input)
+        const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
+        if (!returnedConflict && method === 'PATCH' && url.includes('/api/dashboard-assets/') && url.endsWith('/draft')) {
+          returnedConflict = true
+          return new Response(JSON.stringify({
+            success: false,
+            message: 'etag_conflict',
+            data: { code: 'etag_conflict', current_etag: currentEtag },
+          }), {
+            status: 409,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return realFetch(input, init)
+      }
+    }, conflictedEditAsset.etag ?? parallelDraft.etag ?? latestEditAsset.etag)
+    await page.getByLabel('Tile title').fill(`Edited Revenue ${viewport}`)
+    await page.getByLabel('Tile business question').fill(`What edited revenue does viewport ${viewport} show?`)
+    await page.getByLabel('Tile encoding JSON').fill(JSON.stringify({ value: 'revenue', label: 'region', comparison: `viewport-${viewport}` }, null, 2))
+    await page.getByRole('button', { name: 'Save Tile' }).click()
+    await page.getByText('Draft conflict (409)').waitFor()
+    await page.getByText('Current ETag').waitFor()
+    await page.getByRole('button', { name: 'Retry Patch' }).click()
+    await page.getByText('Tile inspector saved').waitFor()
+  } else {
+    await page.getByLabel('Tile title').fill(`Edited Revenue ${viewport}`)
+    await page.getByLabel('Tile business question').fill(`What edited revenue does viewport ${viewport} show?`)
+    await page.getByLabel('Tile encoding JSON').fill(JSON.stringify({ value: 'revenue', label: 'region', comparison: `viewport-${viewport}` }, null, 2))
+    await page.getByRole('button', { name: 'Save Tile' }).click()
+    await page.getByText('Tile inspector saved').waitFor()
+  }
+
+  await page.getByRole('button', { name: `Select tile Edited Revenue ${viewport}` }).waitFor()
+  await page.locator('button').filter({ hasText: `What edited revenue does viewport ${viewport} show?` }).first().waitFor()
+  await page.getByLabel(`Move Edited Revenue ${viewport} down`).click()
+  await page.getByText('Tile order updated').waitFor()
+  await page.getByLabel(`Move Edited Revenue ${viewport} up`).click()
+  await page.getByText('Tile order updated').waitFor()
+  await page.getByRole('button', { name: /Region/ }).click()
+  await page.getByLabel('Filter label').fill(`Region ${viewport}`)
+  await page.getByLabel('Filter operator').selectOption('in')
+  await page.getByLabel('Filter default value').fill('EMEA')
+  await page.getByRole('button', { name: 'Save Filter' }).click()
+  await page.getByText('Filter inspector saved').waitFor()
+  await page.getByRole('button', { name: 'Filter', exact: true }).click()
+  await page.getByText('Filter added').waitFor()
+  await page.getByLabel('Filter label').fill(`Added Filter ${viewport}`)
+  await page.getByRole('button', { name: 'Save Filter' }).click()
+  await page.getByText('Filter inspector saved').waitFor()
+  await page.getByRole('button', { name: 'Remove Filter' }).click()
+  await page.getByText('Filter removed').waitFor()
   await page.getByRole('button', { name: 'Validate' }).click()
   await page.getByText(/1 blockers/i).waitFor()
   await page.getByRole('button', { name: 'Preview' }).click()

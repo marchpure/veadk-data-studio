@@ -68,6 +68,23 @@ class DashboardService:
         return DashboardService.validate_manifest_payload(manifest)
 
     @staticmethod
+    def assert_manifest_update_allowed(current_manifest: dict[str, Any], next_manifest: dict[str, Any]) -> None:
+        current = DashboardService.validate_manifest_payload(current_manifest)
+        proposed = DashboardService.validate_manifest_payload(next_manifest)
+        changed_keys = {key for key in set(current) | set(proposed) if current.get(key) != proposed.get(key)}
+        blocked_keys = changed_keys - DashboardService.PATCHABLE_MANIFEST_PATHS
+        if blocked_keys:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "dashboard_manifest_patch_forbidden",
+                    "message": "Dashboard full-manifest draft update changed non-patchable top-level keys",
+                    "blocked_keys": sorted(blocked_keys),
+                    "allowed_keys": sorted(DashboardService.PATCHABLE_MANIFEST_PATHS),
+                },
+            )
+
+    @staticmethod
     def _manifest_patch_target(path: str) -> str:
         if not path.startswith("/"):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dashboard patch path must be absolute")
@@ -257,6 +274,9 @@ class DashboardService:
         )
         if not current_draft:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard draft not found")
+
+        if current_draft.manifest_json:
+            self.assert_manifest_update_allowed(current_draft.manifest_json, manifest_payload)
 
         manifest = self.validate_manifest_payload(manifest_payload)
         content_hash = self.digest_payload(manifest)
