@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from server.models.notebooks import Notebook
 from server.models.settings import Setting
+from server.models.sharing import SharingCompatibilityLink, SharingGrant, SharingSecret
 from server.models.tenant import Tenant
 
 pytestmark = pytest.mark.asyncio
@@ -117,6 +118,15 @@ class _WorkerClient:
             )
         raise AssertionError(f"Unexpected worker GET {url}")
 
+    async def post(self, url: str, **kwargs) -> _WorkerResponse:
+        if url.endswith("/api/html"):
+            assert kwargs["json"]["id"]
+            return _WorkerResponse(200, {"is_new": True, "has_password": bool(kwargs["json"].get("password"))})
+        if url.endswith("/api/notebook"):
+            assert kwargs["json"]["notebook_id"]
+            return _WorkerResponse(200, {"id": "json-share-created", "has_password": bool(kwargs["json"].get("password"))})
+        raise AssertionError(f"Unexpected worker POST {url}")
+
     async def put(self, url: str, **kwargs) -> _WorkerResponse:
         assert kwargs["json"] == {"password": "rotated-password"}
         return _WorkerResponse(
@@ -129,6 +139,11 @@ class _WorkerClient:
                 "token": "raw-share-token",
             },
         )
+
+    async def delete(self, url: str, **kwargs) -> _WorkerResponse:
+        if "/api/html/" in url or "/api/notebook/" in url:
+            return _WorkerResponse(200, {"success": True})
+        raise AssertionError(f"Unexpected worker DELETE {url}")
 
 
 class _FailingWorkerClient:
@@ -195,6 +210,73 @@ async def test_share_manage_endpoints_redact_worker_secrets(test_client, test_se
     update_payload = update_response.json()
     _assert_no_share_secret(update_payload)
     assert update_payload["data"] == {"success": True, "has_password": True}
+
+
+async def test_worker_backed_notebook_shares_write_canonical_grants_without_plain_secret(
+    test_client,
+    test_session,
+    share_worker_redaction,
+    monkeypatch,
+):
+    notebook_id = await _seed_notebook_and_worker_key(test_session)
+
+    async def fake_generate_compiled_html(**_kwargs):
+        return "<html>safe</html>"
+
+    async def fake_export_notebook(*_args, **_kwargs):
+        class Export:
+            def model_dump(self):
+                return {"notebook": {"id": notebook_id}}
+
+        return Export()
+
+    monkeypatch.setattr(
+        "server.routers.exports.CompiledHtmlExportService.generate_compiled_html",
+        fake_generate_compiled_html,
+    )
+    monkeypatch.setattr("server.routers.exports.NotebookExportService.export_notebook", fake_export_notebook)
+
+    html_response = await test_client.post(f"/api/notebooks/{notebook_id}/share?password=worker-password")
+    json_response = await test_client.post(
+        f"/api/notebooks/{notebook_id}/share/notebook",
+        json={"password": "plain-json-password"},
+    )
+    rotate_response = await test_client.put(
+        f"/api/notebooks/{notebook_id}/shares/notebook/json-share-created/password?password=rotated-password"
+    )
+
+    assert html_response.status_code == 200
+    assert json_response.status_code == 200
+    assert rotate_response.status_code == 200
+    links = (
+        await test_session.execute(
+            select(SharingCompatibilityLink).where(
+                SharingCompatibilityLink.legacy_surface.in_(["html_notebook_share", "json_notebook_share"])
+            )
+        )
+    ).scalars().all()
+    assert {link.legacy_surface for link in links} == {"html_notebook_share", "json_notebook_share"}
+    grants = (
+        await test_session.execute(select(SharingGrant).where(SharingGrant.object_type == "notebook"))
+    ).scalars().all()
+    assert len(grants) == 2
+    assert {grant.channel for grant in grants} == {"worker"}
+    assert all(grant.status == "active" for grant in grants)
+    secrets = (await test_session.execute(select(SharingSecret))).scalars().all()
+    assert len([secret for secret in secrets if secret.status == "active"]) == 2
+    serialized = "\n".join(f"{secret.salt}:{secret.verifier_hash}" for secret in secrets)
+    assert "worker-password" not in serialized
+    assert "plain-json-password" not in serialized
+    assert "rotated-password" not in serialized
+
+    delete_html = await test_client.delete(f"/api/notebooks/{notebook_id}/share")
+    delete_json = await test_client.delete(f"/api/notebooks/{notebook_id}/shares/notebook/json-share-created")
+    assert delete_html.status_code == 200
+    assert delete_json.status_code == 200
+    revoked_statuses = (
+        await test_session.execute(select(SharingGrant.status).where(SharingGrant.object_type == "notebook"))
+    ).scalars().all()
+    assert set(revoked_statuses) == {"revoked"}
 
 
 async def test_share_worker_errors_do_not_leak_secrets_to_response_or_logs(

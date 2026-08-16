@@ -12,6 +12,7 @@ from server.schemas.standard_response import success_response
 from server.services.export_service import CompiledHtmlExportService
 from server.services.notebook_export_service import NotebookExportService
 from server.services.settings import SettingsService
+from server.services.sharing import SharingService
 from server.utils.config_loader import get_waitlist_config
 from server.utils.custom_logger import get_logger
 from server.utils.deployment import is_feature_enabled
@@ -251,6 +252,16 @@ async def share_notebook(
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create share link")
 
         data = response.json()
+        await SharingService(session).ensure_notebook_worker_grant(
+            tenant_id=auth.tenant_id,
+            actor_id=auth.user_id,
+            notebook_id=notebook_id,
+            legacy_surface="html_notebook_share",
+            legacy_id=notebook_id,
+            has_password=bool(data.get("has_password", bool(password and password.strip()))),
+            password=password.strip() if password and password.strip() else None,
+            metadata={"version": version, "share_url": f"https://www.byaan.ai/share/{notebook_id}"},
+        )
         is_update = not data.get("is_new", True)
         return success_response(
             data={
@@ -367,6 +378,13 @@ async def delete_share(
             _log_worker_error(response)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete share")
 
+        await SharingService(session).revoke_legacy_grant(
+            tenant_id=auth.tenant_id,
+            legacy_surface="html_notebook_share",
+            legacy_id=notebook_id,
+            actor_id=auth.user_id,
+            reason="worker html notebook share deleted",
+        )
         return success_response(data=None, message="Share deleted")
 
     except httpx.ConnectError as e:
@@ -507,6 +525,16 @@ async def share_notebook_json(
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create share link")
 
         data = response.json()
+        await SharingService(session).ensure_notebook_worker_grant(
+            tenant_id=auth.tenant_id,
+            actor_id=auth.user_id,
+            notebook_id=notebook_id,
+            legacy_surface="json_notebook_share",
+            legacy_id=str(data["id"]),
+            has_password=bool(request and request.password and request.password.strip()),
+            password=request.password.strip() if request and request.password and request.password.strip() else None,
+            metadata={"share_id": str(data["id"])},
+        )
         return success_response(
             data={"share_id": data["id"]},
             message="Notebook shared successfully",
@@ -620,6 +648,16 @@ async def update_notebook_json_share_password(
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update password")
 
         data = response.json()
+        await SharingService(session).ensure_notebook_worker_grant(
+            tenant_id=auth.tenant_id,
+            actor_id=auth.user_id,
+            notebook_id=notebook_id,
+            legacy_surface="json_notebook_share",
+            legacy_id=share_id,
+            has_password=bool(data.get("has_password")),
+            password=password.strip() if password and password.strip() else None,
+            metadata={"share_id": share_id},
+        )
         return success_response(
             data={"success": data.get("success"), "has_password": data.get("has_password")},
             message="Password updated" if password else "Password removed",
@@ -677,6 +715,13 @@ async def delete_notebook_json_share(
             _log_worker_error(response)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete share")
 
+        await SharingService(session).revoke_legacy_grant(
+            tenant_id=auth.tenant_id,
+            legacy_surface="json_notebook_share",
+            legacy_id=share_id,
+            actor_id=auth.user_id,
+            reason="worker json notebook share deleted",
+        )
         return success_response(data=None, message="Share deleted")
 
     except httpx.ConnectError as e:

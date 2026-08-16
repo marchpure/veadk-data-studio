@@ -154,6 +154,116 @@ class SharingService:
         await self._session.refresh(grant)
         return grant
 
+    async def ensure_notebook_worker_grant(
+        self,
+        *,
+        tenant_id: str | UUID,
+        actor_id: str | UUID,
+        notebook_id: str | UUID,
+        legacy_surface: str,
+        legacy_id: str,
+        has_password: bool = False,
+        password: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SharingGrant:
+        tenant_uuid = _coerce_uuid(tenant_id)
+        actor_uuid = _coerce_uuid(actor_id)
+        notebook_uuid = _coerce_uuid(notebook_id)
+        existing = await self._grant_for_legacy_link(legacy_surface, legacy_id)
+        if existing is not None:
+            existing.object_id = notebook_uuid
+            existing.object_version_id = None
+            existing.object_version_digest = ""
+            existing.status = "active"
+            existing.revoked_at = None
+            existing.revoked_by = None
+            existing.revocation_reason = None
+            existing.metadata_json = sanitize_error_payload(
+                {
+                    "legacy_surface": legacy_surface,
+                    "legacy_id": legacy_id,
+                    "has_password": has_password,
+                    **(metadata or {}),
+                }
+            )
+            grant = existing
+        else:
+            grant = SharingGrant(
+                tenant_id=tenant_uuid,
+                object_type="notebook",
+                object_id=notebook_uuid,
+                object_version_id=None,
+                object_version_digest="",
+                mode="live_notebook_export",
+                channel="worker",
+                audience="link_holder",
+                status="active",
+                created_by=actor_uuid,
+                metadata_json=sanitize_error_payload(
+                    {
+                        "legacy_surface": legacy_surface,
+                        "legacy_id": legacy_id,
+                        "has_password": has_password,
+                        **(metadata or {}),
+                    }
+                ),
+            )
+            self._session.add(grant)
+            await self._session.flush()
+            self._session.add(
+                SharingCompatibilityLink(
+                    tenant_id=tenant_uuid,
+                    grant_id=grant.id,
+                    legacy_surface=legacy_surface,
+                    legacy_id=legacy_id,
+                    metadata_json=sanitize_error_payload({"notebook_id": str(notebook_uuid), **(metadata or {})}),
+                )
+            )
+        await self._replace_password_secret(
+            tenant_id=tenant_uuid,
+            grant_id=grant.id,
+            actor_id=actor_uuid,
+            password=password,
+            has_password=has_password,
+        )
+        self._session.add(
+            self._audit_event(
+                tenant_id=tenant_uuid,
+                grant=grant,
+                actor_id=str(actor_uuid),
+                action="sharing.compat.notebook_worker.upsert",
+                outcome="active",
+                details={
+                    "legacy_surface": legacy_surface,
+                    "legacy_id": legacy_id,
+                    "notebook_id": str(notebook_uuid),
+                    "has_password": has_password,
+                },
+            )
+        )
+        await self._session.commit()
+        await self._session.refresh(grant)
+        return grant
+
+    async def revoke_legacy_grant(
+        self,
+        *,
+        tenant_id: str | UUID,
+        legacy_surface: str,
+        legacy_id: str,
+        actor_id: str | UUID,
+        reason: str,
+    ) -> SharingGrant | None:
+        grant = await self._grant_for_legacy_link(legacy_surface, legacy_id)
+        if grant is None or grant.tenant_id != _coerce_uuid(tenant_id):
+            return None
+        return await self.revoke_grant(
+            tenant_id=tenant_id,
+            grant_id=grant.id,
+            actor_id=actor_id,
+            reason=reason,
+        )
+
     async def verify_grant_secret(self, *, grant_id: str | UUID, secret: str) -> bool:
         grant_uuid = _coerce_uuid(grant_id)
         result = await self._session.execute(
@@ -454,6 +564,36 @@ class SharingService:
             status="active",
             created_by=actor_id,
         )
+
+    async def _replace_password_secret(
+        self,
+        *,
+        tenant_id: UUID,
+        grant_id: UUID,
+        actor_id: UUID,
+        password: str | None,
+        has_password: bool,
+    ) -> None:
+        result = await self._session.execute(
+            select(SharingSecret).where(
+                SharingSecret.grant_id == grant_id,
+                SharingSecret.secret_type == "password",
+                SharingSecret.status == "active",
+            )
+        )
+        active_secret = result.scalars().first()
+        if active_secret is not None and (password is not None or not has_password):
+            active_secret.status = "rotated"
+            active_secret.rotated_at = self._now()
+        if password:
+            self._session.add(
+                self._build_secret(
+                    tenant_id=tenant_id,
+                    grant_id=grant_id,
+                    actor_id=actor_id,
+                    secret=password,
+                )
+            )
 
     def _audit_event(
         self,
