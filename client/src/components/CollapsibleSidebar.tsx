@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Database, SquarePen, PanelLeftClose, PanelLeft, Sparkles, Download, Home, Search, Boxes } from 'lucide-react'
+import { Database, SquarePen, PanelLeftClose, PanelLeft, Sparkles, Download, Home, Search, Boxes, LayoutDashboard } from 'lucide-react'
 import NotebookHistory from './NotebookHistory'
 import CreateNotebook from './CreateNotebook'
 import ImportNotebookModal from './ImportNotebookModal'
@@ -60,6 +60,9 @@ export default function CollapsibleSidebar() {
     }
     if (path === '/data-models') {
       return location.pathname === '/data-models' || location.pathname.startsWith('/data-models/')
+    }
+    if (path === '/dashboard-assets') {
+      return location.pathname === '/dashboard-assets' || location.pathname.startsWith('/dashboard-assets/')
     }
     if (path === '/llm-connections') {
       return location.pathname === '/llm-connections'
@@ -223,6 +226,22 @@ export default function CollapsibleSidebar() {
                 >
                   <Boxes className="h-4 w-4 flex-shrink-0" />
                   {isExpanded && <span className="text-sm whitespace-nowrap transition-opacity duration-300">Data Models</span>}
+                </div>
+              </Link>
+
+              <Link to="/dashboard-assets" onClick={(e) => !isExpanded && e.stopPropagation()}>
+                <div
+                  className={`flex items-center rounded-lg transition-all duration-300 cursor-pointer ${
+                    isExpanded ? 'gap-3 px-3 py-1.5' : 'p-2 justify-center'
+                  } ${
+                    isActive('/dashboard-assets')
+                      ? 'bg-brand-orange/10 text-brand-orange border-l-3 border-brand-orange'
+                      : 'text-gray-300 hover:text-white hover:bg-[#2a2a2a]'
+                  }`}
+                  title={!isExpanded ? "Dashboards" : undefined}
+                >
+                  <LayoutDashboard className="h-4 w-4 flex-shrink-0" />
+                  {isExpanded && <span className="text-sm whitespace-nowrap transition-opacity duration-300">Dashboards</span>}
                 </div>
               </Link>
 

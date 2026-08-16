@@ -8,6 +8,7 @@ import DatabasesPage from './pages/Databases'
 import SourceDetailPage from './pages/SourceDetailPage'
 import DataModelsHomePage from './features/data-modeling/pages/DataModelsHomePage'
 import DataModelBuilderPage from './features/data-modeling/pages/DataModelBuilderPage'
+import DashboardWorkspacePage from './features/dashboard/pages/DashboardWorkspacePage'
 import TeamMembersPage from './pages/TeamMembers'
 import NotebooksPage from './pages/NotebooksPage'
 import SkillReviewPage from './pages/SkillReviewPage'
@@ -267,6 +268,30 @@ function App() {
             }
           />
           <Route
+            path="/dashboard-assets"
+            element={
+              <AuthGuard>
+                <ViewerRedirect>
+                  <Layout>
+                    <DashboardWorkspacePage />
+                  </Layout>
+                </ViewerRedirect>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/dashboard-assets/:assetId"
+            element={
+              <AuthGuard>
+                <ViewerRedirect>
+                  <Layout>
+                    <DashboardWorkspacePage />
+                  </Layout>
+                </ViewerRedirect>
+              </AuthGuard>
+            }
+          />
+          <Route
             path="/github"
             element={
               <AuthGuard>
@@ -373,6 +398,8 @@ function App() {
             <Route path="/sources/:sourceId" element={<SourceDetailPage />} />
             <Route path="/data-models" element={<DataModelsHomePage />} />
             <Route path="/data-models/:modelId" element={<DataModelBuilderPage />} />
+            <Route path="/dashboard-assets" element={<DashboardWorkspacePage />} />
+            <Route path="/dashboard-assets/:assetId" element={<DashboardWorkspacePage />} />
             <Route path="/github" element={<GitHubIntegrations />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
             <Route path="/folders" element={<FoldersPage />} />
@@ -419,6 +446,8 @@ function App() {
             <Route path="/sources/:sourceId" element={<SourceDetailPage />} />
             <Route path="/data-models" element={<DataModelsHomePage />} />
             <Route path="/data-models/:modelId" element={<DataModelBuilderPage />} />
+            <Route path="/dashboard-assets" element={<DashboardWorkspacePage />} />
+            <Route path="/dashboard-assets/:assetId" element={<DashboardWorkspacePage />} />
             <Route path="/github" element={<GitHubIntegrations />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
             <Route path="/folders" element={<FoldersPage />} />

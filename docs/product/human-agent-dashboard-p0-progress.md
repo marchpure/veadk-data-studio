@@ -275,6 +275,38 @@ Commit:
 
 - `c3e28b1` `dashboard: expose dashboard mcp contract`
 
+### Phase 4 Human Workspace Slice: Inventory, View, Data, Lineage
+
+Status: implemented for the first human workspace vertical slice.
+
+Allowlist:
+
+- `client/src/features/dashboard/pages/DashboardWorkspacePage.tsx`
+- `client/src/services/dashboard.ts`
+- `client/src/types/dashboard.ts`
+- `client/src/App.tsx` - conditional shared route registration for `/dashboard-assets`.
+- `client/src/components/CollapsibleSidebar.tsx` - conditional shared navigation registration for governed Dashboards.
+- `client/src/constants/scopes.ts` - conditional shared scope constants for governed Dashboard read/query/create/edit/publish separation.
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Behavior:
+
+- Added a governed Dashboard workspace under the existing React app routes, with inventory, selected asset/version detail, manifest filters, review state, validation entry point, reload, and draft title JSON Patch.
+- Added a structured renderer that consumes `dashboard.manifest.v1` and `dashboard.run.v1` types from the REST Dashboard asset contract, including canonical `data_view_id` execution.
+- Added Dashboard/Data/Lineage tabs with tile state rendering, accessible table equivalents, freshness/filter/content hash signals, pinned model/source versions, lineage locators, and evidence locators.
+- Added a dashboard-specific frontend REST client that preserves existing hosted/Tauri backend resolution, auth token use, active tenant header, and `/api/dashboard-assets` contract boundaries.
+- This slice does not yet complete the full edit/review/publish/reload semantic diff, share/export compatibility, or browser screenshot acceptance gates; those remain Phase 4 follow-up slices.
+
+Tests:
+
+- `cd client && pnpm build:check` -> passed.
+- `cd client && pnpm lint` -> passed with warnings only from existing frontend lint debt.
+- `git diff --check` -> passed.
+
+Commit:
+
+- pending `dashboard: render structured dashboard workspace`
+
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
@@ -287,6 +319,7 @@ Commit:
 | `0d05215` | `dashboard: bind dashboard run execution` | Phase 2 execution slice | `pytest tests/test_dashboard_execution_service.py` -> 3 passed; `ruff check services/dashboard.py tests/test_dashboard_execution_service.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `4de07e7` | `dashboard: expose dashboard rest contract` | Phase 3 REST slice | `pytest tests/test_dashboard_rest_api.py` -> 2 passed; `ruff check routers/dashboard.py main.py repositories/dashboard.py auth/scopes.py tests/test_dashboard_rest_api.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `c3e28b1` | `dashboard: expose dashboard mcp contract` | Phase 3 MCP slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_lifecycle_service.py` -> 7 passed; `ruff check services/dashboard.py routers/dashboard.py mcp/tool_wrappers.py mcp/tools.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| pending | `dashboard: render structured dashboard workspace` | Phase 4 human workspace inventory/view slice | `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pending push |
 
 ## Acceptance Evidence
 
