@@ -386,6 +386,7 @@ function modelingStatusLabel(status: DataModelingDatasource['modelingStatus']): 
   if (status === 'context_only') return 'Context only'
   if (status === 'permission_required') return 'Permission required'
   if (status === 'reauthorization_required') return 'Reauthorization required'
+  if (status === 'blocked') return 'Blocked'
   if (status === 'source_unavailable') return 'Source unavailable'
   if (status === 'processing') return 'Processing'
   if (status === 'failed') return 'Failed'

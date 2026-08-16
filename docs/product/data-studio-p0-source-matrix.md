@@ -17,6 +17,31 @@
 |---:|---:|---:|---:|---:|
 | 0 | 14 | 26 | 0 | 40 |
 
+## Readiness Classification
+
+- Final acceptance status: `PARTIAL`. The matrix has `0` ready rows, `14` beta rows, `26` planned rows, and `0` blocked rows; zero ready rows means the P0 source catalog is not ready-complete.
+- 8080 deployment status: `8080_PARTIAL`. Restored strict E2E evidence exists on isolated local port `18096`; the current `8080` listener was not killed or occupied during correction, so this run does not prove the restored gate against `8080`.
+- OpenHuman runtime adapter status remains `UNVERIFIED`; do not promote context extraction rows to ready until verified adapter provenance is persisted at runtime.
+
+## Beta To Ready Promotion Checklist
+
+| beta source_type | missing before ready |
+|---|---|
+| `local_file_csv` | Real customer-scale CSV fixtures, large/resumable upload hardening, profiling evidence from non-trivial files, and manual projection review records. |
+| `local_file_xlsx_xlsm` | Workbook edge-case coverage for multi-sheet formulas/merged cells, real upload fixtures, profiling evidence, and reviewed projection records. |
+| `local_file_pdf_docx_pptx` | Verified semi-structured extraction provenance, OpenHuman-compatible runtime metadata, real document fixtures, and human review of extracted evidence quality. |
+| `local_file_parquet_json_jsonl` | Nested/semi-structured flattening policy, real Parquet/JSON/JSONL profiling evidence, customer-scale fixtures, and reviewed projection materialization. |
+| `web_url` | Crawler/page-group policy, public-site capture fixtures, richer table extraction evidence, retry/freshness review, and manual compliance review. |
+| `feishu_doc_wiki` | Live tenant OAuth credentials, real Feishu Docs/Wiki E2E evidence, verified OpenHuman extraction adapter metadata, and manual evidence-quality review. |
+| `feishu_sheet_base` | Live tenant OAuth credentials, real Sheets/Base import E2E, projection review evidence, profiling evidence, and source-level permission regression coverage. |
+| `volcengine_tos_bucket_prefix` | Real TOS credentials, bucket/prefix incremental sync policy, prefix parser coverage, freshness evidence, and manual review of imported manifests. |
+| `volcengine_tos_object_tabular` | Real TOS credentials and objects, parser/profile evidence across supported tabular formats, projection review evidence, and S3-compatible vendor normalization. |
+| `volcengine_tos_object_context` | Real TOS credentials and context objects, verified extraction provenance, parser warnings/freshness evidence, and manual evidence-quality review. |
+| `sql_pg_mysql_sqlite_oracle_mssql` | Live-driver credentials for each dialect, real schema/profile E2E evidence, deeper dialect-specific profiling, and reviewed semantic draft quality. |
+| `mongo` | Reviewed tabular projection materialization, real Mongo credentials/data, profiling evidence for nested documents, and semantic draft handoff after review. |
+| `dynamodb` | Reviewed tabular projection materialization, real DynamoDB credentials/data, key/index profiling evidence, and semantic draft handoff after review. |
+| `databricks` | Live Databricks OAuth credentials, warehouse/catalog drill-down E2E evidence, profile freshness proof, and reviewed semantic draft quality. |
+
 ## Modeling Mode Coverage
 
 | mode | current rows | coverage note |

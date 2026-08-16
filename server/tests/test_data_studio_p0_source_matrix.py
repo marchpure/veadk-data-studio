@@ -4,6 +4,7 @@ from pathlib import Path
 
 from server.scripts.generate_data_studio_p0_source_matrix import (
     OUTPUT_PATH,
+    beta_to_ready_requirements,
     build_matrix_rows,
     matrix_summary,
     render_markdown,
@@ -57,3 +58,17 @@ def test_data_studio_p0_source_matrix_covers_connector_catalog_and_statuses() ->
     assert row_by_source["mongo"].modeling_mode == "document_projection"
     assert row_by_source["dynamodb"].final_status == "beta"
     assert row_by_source["dynamodb"].modeling_mode == "document_projection"
+
+
+def test_data_studio_p0_source_matrix_readiness_is_partial_until_rows_are_ready() -> None:
+    rows = build_matrix_rows()
+    summary = matrix_summary(rows)
+    rendered = render_markdown()
+    requirement_sources = {source_type for source_type, _requirement in beta_to_ready_requirements()}
+    beta_sources = {row.source_type for row in rows if row.final_status == "beta"}
+
+    assert summary == {"ready": 0, "beta": 14, "planned": 26, "blocked": 0}
+    assert requirement_sources == beta_sources
+    assert "Final acceptance status: `PARTIAL`" in rendered
+    assert "8080 deployment status: `8080_PARTIAL`" in rendered
+    assert "Runtime adapter status: `UNVERIFIED`" in rendered

@@ -29,7 +29,14 @@ def test_semantic_versions_revision_alias_preserves_legacy_and_short_ids() -> No
     assert legacy.down_revision == "add_semantic_model_versions"
     assert alias.revision == "harden_semantic_versions"
     assert alias.down_revision == "harden_semantic_model_versions_compat"
-    assert script.get_heads() == ["backfill_legacy_dashboard_assets"]
+    blocked_status = script.get_revision("add_blocked_source_resource_status")
+    assert blocked_status.down_revision == "add_file_source_resource_type"
+    merge_head = script.get_revision("merge_ds_dash_20260816")
+    assert set(merge_head.down_revision) == {
+        "backfill_legacy_dashboard_assets",
+        "add_blocked_source_resource_status",
+    }
+    assert script.get_heads() == ["merge_ds_dash_20260816"]
 
     collaboration = script.get_revision("add_collaboration_integration_tables")
     assert collaboration.down_revision == "harden_semantic_versions"

@@ -17,6 +17,7 @@ ModelingStatus = Literal[
     "context_only",
     "permission_required",
     "reauthorization_required",
+    "blocked",
     "source_unavailable",
     "processing",
     "failed",

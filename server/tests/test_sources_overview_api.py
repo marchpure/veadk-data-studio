@@ -98,7 +98,7 @@ async def test_sources_overview_includes_ready_web_source_and_compatibility_alia
     assert compatibility.json()["data"] == payload
 
 
-async def test_sources_overview_maps_failed_and_needs_confirmation_to_product_states(test_client):
+async def test_sources_overview_maps_blocked_and_needs_confirmation_to_product_states(test_client):
     failed = await test_client.post(
         "/api/source-resources",
         json={
@@ -123,11 +123,16 @@ async def test_sources_overview_maps_failed_and_needs_confirmation_to_product_st
     items = {item["id"]: item for item in overview.json()["data"]["items"]}
 
     failed_item = items[failed.json()["data"]["id"]]
-    assert failed_item["status"] == "Failed"
-    assert failed_item["attention_state"] == "parse"
+    assert failed_item["status"] == "Blocked"
+    assert failed_item["attention_state"] == "policy"
     assert failed_item["context_index_status"] == "unavailable"
     assert failed_item["parse_status"] == "pending"
     assert failed_item["freshness_status"] == "unknown"
+    assert failed_item["next_actions"] == ["Review source settings", "Choose an allowed source"]
+    assert failed_item["modeling_status"] == "blocked"
+    assert failed_item["modeling_reason"] == "Source capture is blocked by policy or upstream safety controls."
+    assert failed_item["modeling_next_action"] == "Review source settings"
+    assert failed_item["modeling_can_load_profile"] is False
 
     pending_item = items[pending.json()["data"]["id"]]
     assert pending_item["status"] == "Needs confirmation"

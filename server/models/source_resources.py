@@ -43,6 +43,7 @@ SOURCE_RESOURCE_STATUSES = (
     "understanding",
     "authorization_required",
     "reauthorization_required",
+    "blocked",
     "source_unavailable",
     "permission_lost",
     "needs_confirmation",
