@@ -11,34 +11,40 @@ branch was created from Coordinator BASE_SHA
 
 Status: `PARTIAL`.
 
-Reason: `e9358ea` contains real dashboard and evaluation UI/backend surfaces, but
-Commercial P0 still requires fresh runtime proof for migrations, connector
-families, modeling, dashboard governance, evaluation governance, sharing, and
-Playwright route health. No whole-product READY claim is made here.
+Reason: `e9358ea` contains real dashboard and evaluation UI/backend surfaces,
+and isolated runtime proved self-hosted auth plus all configured commercial API
+probes on fresh SQLite, existing SQLite, and PostgreSQL. The route matrix still
+has failing Playwright evidence: `/data-modeling` is not registered, the default
+specified dashboard asset path is not a UUID-backed seeded asset, and PostgreSQL
+with seeded legacy dashboard assets triggers a dashboard React error. No
+whole-product READY claim is made here.
 
 ## Branch / Build Provenance
 
 | Field | Evidence |
 |---|---|
 | BASE_SHA | `e9358ea56554cc0ecdf93b723359eee711cb13b1` |
+| Verification HEAD | `1f7fa63fbda9f987adb1cf56b7fea3a4d7552afa` |
 | Verification branch | `verification/data-studio-commercial-p0` |
+| Pushed safe remote branch | `veadk-data-studio/verification/data-studio-commercial-p0-e9358ea` |
+| Exact remote branch push | Rejected non-fast-forward because remote `verification/data-studio-commercial-p0` contains old wrong-baseline history at `9c2a2d9`; no force push was performed. |
 | Worktree | `/Users/bytedance/worktrees/byaan-commercial-verification-p0` |
 | Backend port | `18123` |
 | Frontend port | `15179` |
-| 8080 policy | Do not stop, restart, probe, or occupy `8080`. |
-| Image revision | Captured by `scripts/commercial_p0_verification.mjs` when `COMMERCIAL_P0_IMAGE` is set. |
-| Clean status | Captured in each `result.json` under `provenance.clean`. |
+| 8080 policy | Not stopped, restarted, probed, or occupied by this verifier. |
+| Image revision | Not set; `COMMERCIAL_P0_IMAGE` was not provided. |
+| Clean status | `true` in all collected `result.json` files. |
 
 ## Migration Evidence
 
-| Gate | Required evidence | Current status |
+| Gate | Evidence | Current status |
 |---|---|---|
-| Fresh SQLite | Start backend in self-hosted mode with `DATABASE_URL=sqlite+aiosqlite:///$EVIDENCE_DIR/runtime/sqlite/app.db`; record migration logs and API readiness. | Pending runtime run |
-| Existing SQLite | Re-run against the same SQLite file; record idempotent startup and unchanged head. | Pending runtime run |
-| PostgreSQL | `scripts/commercial_p0_verification.sh postgres` uses dedicated container `byaan-commercial-p0-postgres`, volume `byaan-commercial-p0-postgres-data`, and port `15432`. | Pending runtime run |
-| Single Alembic head | `server/tests/test_migration_chain_hardening.py` asserts the expected single head in this base. | Test to run |
-| Upgrade / downgrade | Existing self-hosted entrypoint contract test covers serialized upgrade and downgrade commands. | Test to run |
-| Persistent Docker volume | PostgreSQL mode must include Docker ps/volume evidence in `result.json` and logs. | Pending runtime run |
+| Fresh SQLite | `/Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-sqlite-fresh/result.json`; DB at `runtime/sqlite/app.db`; backend/frontend logs under `logs/`. | `PARTIAL`: startup and all API probes passed; browser route matrix has known failures. |
+| Existing SQLite | `/Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-sqlite-existing/result.json`; reused fresh SQLite DB path. | `PARTIAL`: idempotent startup and all API probes passed; same browser route failures as fresh SQLite. |
+| PostgreSQL | `/Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-postgres/result.json`; container `byaan-commercial-p0-postgres`; volume `byaan-commercial-p0-postgres-data`; port `15432`. | `PARTIAL`: startup and all API probes passed; dashboard browser route also hit a React error with seeded legacy assets. |
+| Single Alembic head | Contracted by existing `server/tests/test_migration_chain_hardening.py`; not rerun in this verification commit. | Not independently rerun here. |
+| Upgrade / downgrade | Existing self-hosted entrypoint tests cover command contract; runtime startup exercised upgrade path on isolated DBs. | Downgrade not independently rerun here. |
+| Persistent Docker volume | `docker volume inspect byaan-commercial-p0-postgres-data` returned mountpoint `/var/lib/docker/volumes/byaan-commercial-p0-postgres-data/_data`. | Proven for dedicated volume creation/persistence during run. |
 
 ## Connector Evidence Matrix
 
@@ -62,16 +68,23 @@ is `scripts/commercial_p0_matrix.json`.
 | MongoDB | `beta` | Source profile snapshots/evidence exist; reviewed projection materialization must be proven before semantic-ready. |
 | DynamoDB | `beta` | Key/item profile snapshots/evidence exist; reviewed projection materialization must be proven before semantic-ready. |
 
+Runtime API evidence: all three runs passed `connector_definitions`,
+`sources_overview`, `datasources`, `source_resources`, `data_models`,
+`semantic_models`, `folders`, and `mcp_stdio_config` probes with authenticated
+`Authorization` and `X-Tenant-ID` headers.
+
 ## Modeling Evidence
 
 Required modeling checks include source understanding, profile, projection
 review, semantic draft, publish, reload, MCP `query_metric`, lineage/evidence,
 honest partial/blocked states, and OpenHuman runtime provenance.
 
-Current status: `PARTIAL`. The generated source matrix says OpenHuman runtime
-adapter status is `UNVERIFIED`. MongoDB and DynamoDB must not display
-semantic-ready without reviewed projection evidence; the verifier keeps these as
-beta until runtime evidence proves the guard.
+Current status: `PARTIAL`. `/api/data-models`, `/api/semantic-models`, and the
+real `/data-models` UI route passed in all three runtime runs at both viewports.
+The requested `/data-modeling` route failed in every run by redirecting to `/`.
+OpenHuman runtime adapter status remains `UNVERIFIED`; MongoDB and DynamoDB
+remain beta until reviewed projection materialization proves they do not present
+semantic-ready prematurely.
 
 ## Dashboard Evidence
 
@@ -83,8 +96,19 @@ gating.
 
 Current status: `PARTIAL`. Static inspection confirms `client/src/App.tsx`
 registers `/dashboard-assets` and `/dashboard-assets/:assetId`, and
-`server/main.py` includes `dashboard_router`. Runtime dashboard API and browser
-evidence remain pending.
+`server/main.py` includes `dashboard_router`. `/api/dashboard-assets` passed in
+all three runtime runs.
+
+Browser blockers:
+
+- Fresh/existing SQLite: `/dashboard-assets` passed at both viewports, but
+  `/dashboard-assets/commercial-verification-asset` produced two 422 console
+  errors per run because the placeholder path is not a valid UUID asset id.
+- PostgreSQL: `/dashboard-assets` redirected to a seeded legacy asset and hit
+  `TypeError: Cannot read properties of undefined (reading '0')` in
+  `DashboardWorkspacePage.tsx` `normalizeEditorSelection`; the error boundary
+  rendered "Something went wrong". The placeholder specified asset path still
+  produced 422 console errors.
 
 ## Evaluation Evidence
 
@@ -94,8 +118,10 @@ REST/MCP parity, tenant isolation, idempotency, and audit.
 
 Current status: `PARTIAL`. Static inspection confirms `client/src/App.tsx`
 registers `/evaluation` and `/evaluation/:suiteId`, and `server/main.py`
-includes `evaluation_router`. Runtime REST, browser, and MCP parity evidence
-remain pending.
+includes `evaluation_router`. `/api/evaluation/suites` and `/evaluation` passed
+in all three runtime runs at both viewports. Deeper suite lifecycle, worker,
+MCP parity, and advisor/promotion flows were not independently run in this
+verification pass.
 
 ## Sharing Evidence
 
@@ -103,54 +129,55 @@ Required sharing checks include authorization, binding, secret redaction,
 rotation, revoke, audit, folder/dashboard/notebook/worker, and self-hosted
 external-sharing policy.
 
-Current status: `PARTIAL`. Folder, notebook, dashboard share, and viewer routes
-exist in the base, but this verification report still needs isolated runtime
-evidence for policy behavior, redaction, rotation/revoke, and audit trails.
+Current status: `PARTIAL`. Authenticated `/api/folders` passed in all three
+runtime runs, and dashboard/folder routers are present. This verification pass
+did not independently exercise share creation, rotation, revoke, external
+sharing policy, or audit trail flows.
 
 ## Playwright Route Evidence
 
-The verifier must exercise these routes at `1440x900` and `390x844`, recording
-`pageerror`, `consoleError`, `requestfailed`, `http5xx`, screenshot paths, final
-URL/path, marker status, and horizontal overflow:
+The verifier exercised each route at `1440x900` and `390x844`, recording
+`pageerror`, `consoleError`, `requestfailed`, `http5xx`, screenshots, final
+URL/path, marker status, and horizontal overflow.
 
-| Route | Current expectation before runtime run |
-|---|---|
-| `/login` | Present under self-hosted mode. |
-| `/dashboard-assets` | Present; protected route requires verifier login. |
-| `/dashboard-assets/commercial-verification-asset` | Dynamic route present; default asset may show missing-asset behavior unless `COMMERCIAL_P0_ASSET_PATH` points to a seeded asset. |
-| `/evaluation` | Present; protected route requires verifier login. |
-| `/data-modeling` | Requested alias; may fail or redirect because e9358ea canonical route is `/data-models`. |
-| `/data-models` | Real e9358ea modeling route, included as compatibility evidence. |
-| `/databases` | Present; protected route requires verifier login. |
-| `/sources` | Present; protected route requires verifier login. |
+| Run | Result JSON | API failures | Browser failures | Notes |
+|---|---|---:|---:|---|
+| Fresh SQLite | `/Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-sqlite-fresh/result.json` | 0 | 4 | Failing routes: specified dashboard asset at both viewports, `/data-modeling` at both viewports. |
+| Existing SQLite | `/Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-sqlite-existing/result.json` | 0 | 4 | Same failure set as fresh SQLite while reusing the same SQLite DB. |
+| PostgreSQL | `/Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-postgres/result.json` | 0 | 6 | Adds `/dashboard-assets` failures at both viewports due dashboard React error with seeded legacy asset. |
 
-Runtime output location:
-`$HOME/.codex/data-studio-commercial-p0-evidence/<run-id>/result.json`.
+Passed route evidence across all runs: `/login`, `/evaluation`, `/data-models`,
+`/databases`, and `/sources` at both required viewports. SQLite also passed
+`/dashboard-assets` at both viewports.
 
-## Commands
+## Commands Run
 
 ```bash
-cd /Users/bytedance/worktrees/byaan-commercial-verification-p0
 uv run pytest tests/commercial_p0 -q
 node --check scripts/commercial_p0_verification.mjs
 bash -n scripts/commercial_p0_verification.sh
 git diff --check
-scripts/commercial_p0_verification.sh sqlite
-scripts/commercial_p0_verification.sh postgres
+RUN_ID=20260817Tcommercial-sqlite-fresh bash scripts/commercial_p0_verification.sh sqlite
+SQLITE_DB=/Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-sqlite-fresh/runtime/sqlite/app.db RUN_ID=20260817Tcommercial-sqlite-existing bash scripts/commercial_p0_verification.sh sqlite
+RUN_ID=20260817Tcommercial-postgres bash scripts/commercial_p0_verification.sh postgres
 ```
 
-The runtime commands use isolated ports `18123` and `15179`, isolated SQLite,
+The runtime commands used isolated ports `18123` and `15179`, isolated SQLite,
 and the dedicated PostgreSQL container/volume names from
-`scripts/commercial_p0_matrix.json`. They must not run against shared
-Coordinator databases.
+`scripts/commercial_p0_matrix.json`. They did not run against shared Coordinator
+databases.
 
 ## Open Items
 
-- Execute the SQLite runtime pass and update this report with generated evidence
-  paths, screenshots, route counters, and API statuses.
-- Re-run SQLite against the same database file for existing-DB idempotency.
-- Execute the PostgreSQL runtime pass if Docker is available.
-- Run focused dashboard and evaluation smoke scripts when fixture setup is
-  available.
-- If Coordinator provides a concrete dashboard asset path, rerun with
-  `COMMERCIAL_P0_ASSET_PATH=<path>`.
+- Decide whether to force-update the exact remote branch
+  `verification/data-studio-commercial-p0` over its old wrong-baseline history,
+  or keep using the pushed safe branch
+  `verification/data-studio-commercial-p0-e9358ea`.
+- Product follow-up: add/redirect the requested `/data-modeling` route or amend
+  the acceptance contract to use `/data-models`.
+- Product follow-up: seed/provide a concrete dashboard asset path for the
+  specified asset route, or let the verifier create one before browser probes.
+- Product follow-up: fix the PostgreSQL dashboard legacy-asset React error in
+  `DashboardWorkspacePage.tsx` `normalizeEditorSelection`.
+- Run deeper dashboard/evaluation/sharing smoke flows after fixture setup is
+  made deterministic for this isolated self-hosted verifier.
