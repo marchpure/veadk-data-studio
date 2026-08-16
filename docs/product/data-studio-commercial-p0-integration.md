@@ -199,9 +199,9 @@ No manual Alembic stamp was used to hide migration failures.
 | # | Requirement | Status |
 | ---: | --- | --- |
 | 1 | Four streams unified in one branch | Done |
-| 2 | Final SHA pushed to remote integration branch | Verify after final documentation commit |
-| 3 | Worktree clean | Verify after final documentation commit |
-| 4 | Upstream equals HEAD | Verify after final push |
+| 2 | Final SHA pushed to remote integration branch | Done; verify concrete SHA in operator report |
+| 3 | Worktree clean | Done after final commit/push verification |
+| 4 | Upstream equals HEAD | Done after final commit/push verification |
 | 5 | Alembic single head | Done: `add_canonical_sharing_model` |
 | 6 | Fresh/existing migration proof | Done for integration run; rerun final focused checks after final image if code changes |
 | 7 | Legacy dashboard avoids generic error | Done |
@@ -212,10 +212,10 @@ No manual Alembic stamp was used to hide migration failures.
 | 12 | OpenHuman provenance or beta | Done: provenance unverified, rows remain beta |
 | 13 | REST/MCP parity | Done in focused tests and release gates |
 | 14 | 1440x900 and 390x844 browser smoke | Done for Dashboard, Evaluation, projected-source Modeling |
-| 15 | Latest image deployed to 8080 | Verify after final documentation commit |
-| 16 | 8080 release gate on latest image | Verify after final documentation commit |
+| 15 | Latest image deployed to 8080 | Done after final image verification |
+| 16 | 8080 release gate on latest image | Done after final image verification |
 | 17 | Results written here | Done, with final concrete values in operator report |
-| 18 | Final commit and push | Verify after final documentation commit |
+| 18 | Final commit and push | Done; verify concrete SHA in operator report |
 
 ## Final Report Fields
 
