@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 3/4 — Evaluation MCP surface slice complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers. Current slice: ready for Human UI and explicit advisor verify/regress/review/apply REST surfaces. Next slice: add Human UI workspace for suites/cases/runs/advisor/feedback review using the shared EvaluationService/auth serializers, then add verify/regress/apply review endpoints.
+CURRENT_PHASE: Phase 3/4 — Evaluation REST read surface complete; Human UI and explicit advisor review/apply REST surfaces next. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface. Current slice: ready for Human UI workspace and explicit advisor verify/regress/review/apply REST surfaces. Next slice: add Human UI workspace for suites/cases/runs/advisor/feedback review using the shared EvaluationService/auth serializers, then add verify/regress/apply review endpoints.
 
 ## Phase 0 Slice Checklist
 
@@ -397,6 +397,28 @@ Evidence:
 - `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_evaluation_mcp_contract.py tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_evaluation_runner_service.py tests/test_evaluation_rest_api.py tests/test_evaluation_feedback_advisor_api.py tests/test_migration_chain_hardening.py -q` -> `25 passed, 18 warnings`.
 - `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_evaluation_rest_api.py tests/test_evaluation_feedback_advisor_api.py -q` -> `5 passed, 11 warnings`.
 - `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check mcp/tool_wrappers.py mcp/tools.py services/evaluation.py repositories/evaluation.py routers/evaluation.py serializers/evaluation.py tests/test_evaluation_mcp_contract.py tests/test_evaluation_rest_api.py tests/test_evaluation_feedback_advisor_api.py` -> passed with the existing removed-rule warning.
+
+Remaining Phase 3/4 work:
+
+- Add Human UI surfaces for suite inventory/detail, case editor, run compare, failure drawer, feedback review, and advisor staged patch review.
+- Add explicit REST review/apply endpoints for advisor verification/regression lifecycle if the UI needs review-specific shapes beyond the existing runner/promotion endpoints.
+- Add end-to-end browser/MCP parity tests showing failed-set verification plus full-suite regression evidence is visible before promotion/apply.
+
+## 2026-08-16 19:03 CST - Phase 3/4 Evaluation REST Read Surface
+
+Scope:
+
+- Added tenant-scoped REST read endpoints for Evaluation suite inventory, suite detail, suite-version case listing, suite-version run listing, run detail, failure summary, and baseline/candidate run comparison.
+- REST read endpoints call the existing `EvaluationService` read methods and shared Evaluation serializers so REST and MCP keep the same redacted payload shapes.
+- Suite inventory supports query, target kind, lifecycle/status, and bounded limit filtering for Human UI usage.
+- Run detail and failure summary return bounded case-run payloads with assessments while redacting result, error, and assessment detail payloads through the shared serializers.
+- Added regression coverage proving inventory/detail/case/run/failure/compare responses are tenant-scoped, return the expected shape, and do not leak raw tokens or unauthorized SQL table names.
+
+Evidence:
+
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check routers/evaluation.py tests/test_evaluation_rest_api.py` -> passed with the existing removed-rule warning.
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_evaluation_rest_api.py -q` -> `4 passed, 11 warnings`.
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_evaluation_runner_service.py tests/test_evaluation_rest_api.py tests/test_evaluation_feedback_advisor_api.py tests/test_evaluation_mcp_contract.py tests/test_migration_chain_hardening.py -q` -> `26 passed, 18 warnings`.
 
 Remaining Phase 3/4 work:
 

@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.models.evaluation import (
     AdvisorChangeSet,
     EvaluationArtifact,
+    EvaluationAssessment,
     EvaluationCase,
+    EvaluationCaseRun,
     EvaluationRun,
     EvaluationSuite,
     EvaluationSuiteVersion,
@@ -34,6 +36,7 @@ async def _seed_suite_version(test_session: AsyncSession) -> tuple[Tenant, User,
         name="REST Evaluation suite",
         description="Evaluation suite exposed through REST",
         owner_id=owner.id,
+        target_kinds_json=["semantic_model"],
         lifecycle="published",
     )
     test_session.add(suite)
@@ -138,6 +141,137 @@ async def _seed_completed_run(
     test_session.add(run)
     await test_session.flush()
     return run
+
+
+async def _seed_case_result(
+    test_session: AsyncSession,
+    *,
+    tenant_id,
+    run_id,
+    case_id,
+    status: str,
+    hard_fail: bool = False,
+) -> EvaluationCaseRun:
+    case_run = EvaluationCaseRun(
+        tenant_id=tenant_id,
+        run_id=run_id,
+        case_id=case_id,
+        status=status,
+        attempt=1,
+        input_digest=f"sha256:input-{status}",
+        output_digest=f"sha256:output-{status}",
+        result_json={"answer": status, "token": "super-secret-token"},
+        error_json={"sql": "select * from restricted_table"} if status != "passed" else {},
+        immutable=True,
+    )
+    test_session.add(case_run)
+    await test_session.flush()
+    assessment = EvaluationAssessment(
+        tenant_id=tenant_id,
+        case_run_id=case_run.id,
+        category="security" if hard_fail else "answer",
+        status=status,
+        score="0.0" if status != "passed" else "1.0",
+        hard_fail=hard_fail,
+        details_json={"reason": "contains token=super-secret-token"},
+        immutable=True,
+    )
+    test_session.add(assessment)
+    await test_session.flush()
+    return case_run
+
+
+async def test_evaluation_rest_read_surfaces_describe_inventory_runs_failures_and_compare(
+    test_client,
+    test_session: AsyncSession,
+) -> None:
+    tenant, _owner, suite_version = await _seed_suite_version(test_session)
+    suite = await test_session.get(EvaluationSuite, suite_version.suite_id)
+    assert suite is not None
+    cases = (
+        await test_session.execute(
+            select(EvaluationCase)
+            .where(EvaluationCase.suite_version_id == suite_version.id)
+            .order_by(EvaluationCase.case_key)
+        )
+    ).scalars().all()
+    assert len(cases) == 2
+    baseline_run = await _seed_completed_run(
+        test_session,
+        tenant_id=tenant.id,
+        suite_version_id=suite_version.id,
+        gate_decision="passed",
+    )
+    candidate_run = await _seed_completed_run(
+        test_session,
+        tenant_id=tenant.id,
+        suite_version_id=suite_version.id,
+        gate_decision="failed",
+    )
+    await _seed_case_result(
+        test_session,
+        tenant_id=tenant.id,
+        run_id=baseline_run.id,
+        case_id=cases[0].id,
+        status="passed",
+    )
+    await _seed_case_result(
+        test_session,
+        tenant_id=tenant.id,
+        run_id=candidate_run.id,
+        case_id=cases[0].id,
+        status="failed",
+        hard_fail=True,
+    )
+    await test_session.commit()
+
+    suites_response = await test_client.get("/api/evaluation/suites?query=REST&target_kind=semantic_model")
+    assert suites_response.status_code == 200
+    suites_payload = suites_response.json()["data"]
+    assert suites_payload["total"] == 1
+    assert suites_payload["items"][0]["id"] == str(suite.id)
+    assert "super-secret-token" not in json.dumps(suites_payload)
+
+    suite_response = await test_client.get(f"/api/evaluation/suites/{suite.id}?include_manifests=true")
+    assert suite_response.status_code == 200
+    suite_payload = suite_response.json()["data"]["suite"]
+    assert suite_payload["versions"][0]["id"] == str(suite_version.id)
+    assert suite_payload["versions"][0]["manifest"]["suite_id"] == "rest"
+
+    cases_response = await test_client.get(f"/api/evaluation/suite-versions/{suite_version.id}/cases")
+    assert cases_response.status_code == 200
+    cases_payload = cases_response.json()["data"]
+    assert cases_payload["total"] == 2
+    assert cases_payload["items"][0]["case_key"] == "case-one"
+
+    runs_response = await test_client.get(f"/api/evaluation/suite-versions/{suite_version.id}/runs")
+    assert runs_response.status_code == 200
+    runs_payload = runs_response.json()["data"]
+    assert runs_payload["total"] == 2
+    assert {item["id"] for item in runs_payload["items"]} == {str(baseline_run.id), str(candidate_run.id)}
+
+    run_response = await test_client.get(f"/api/evaluation/runs/{candidate_run.id}")
+    assert run_response.status_code == 200
+    run_payload = run_response.json()["data"]
+    assert run_payload["run"]["id"] == str(candidate_run.id)
+    assert run_payload["case_runs"][0]["assessments"][0]["hard_fail"] is True
+    assert "super-secret-token" not in json.dumps(run_payload)
+    assert "restricted_table" not in json.dumps(run_payload)
+
+    failures_response = await test_client.get(f"/api/evaluation/runs/{candidate_run.id}/failures")
+    assert failures_response.status_code == 200
+    failures_payload = failures_response.json()["data"]
+    assert failures_payload["total"] == 1
+    assert failures_payload["failures"][0]["status"] == "failed"
+    assert failures_payload["failures"][0]["assessments"][0]["category"] == "security"
+
+    compare_response = await test_client.get(
+        f"/api/evaluation/runs/compare?baseline_run_id={baseline_run.id}&candidate_run_id={candidate_run.id}"
+    )
+    assert compare_response.status_code == 200
+    comparison = compare_response.json()["data"]["comparison"]
+    assert comparison["summary"]["regression_count"] == 1
+    assert comparison["regressions"][0]["case_id"] == str(cases[0].id)
 
 
 async def test_evaluation_run_rest_lifecycle_artifact_and_completion(

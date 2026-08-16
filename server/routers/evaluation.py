@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +16,9 @@ from server.serializers.evaluation import (
     advisor_suggestion_payload,
     evaluation_artifact_payload,
     evaluation_case_payload,
+    evaluation_case_run_payload,
     evaluation_run_payload,
+    evaluation_suite_payload,
     promotion_payload,
 )
 from server.services.evaluation import EvaluationService
@@ -70,6 +72,185 @@ def _service_error(exc: ValueError) -> HTTPException:
     if "leased by this worker" in detail or "case results do not match" in detail or "immutable" in detail:
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+@router.get("/evaluation/suites")
+async def list_evaluation_suites(
+    query: str = "",
+    target_kind: str = "",
+    status_filter: str = Query(default="", alias="status"),
+    limit: int = 50,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    suites = await EvaluationService(session).list_suites(
+        tenant_id=auth.tenant_id,
+        query=query,
+        target_kind=target_kind,
+        status=status_filter,
+        limit=max(1, min(limit, 100)),
+    )
+    return success_response(
+        data={"items": [evaluation_suite_payload(suite) for suite in suites], "total": len(suites)},
+        message="Evaluation suites listed",
+    )
+
+
+@router.get("/evaluation/suites/{suite_id}")
+async def describe_evaluation_suite(
+    suite_id: UUID,
+    include_manifests: bool = False,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        suite, versions = await EvaluationService(session).describe_suite(
+            tenant_id=auth.tenant_id,
+            suite_id=suite_id,
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    return success_response(
+        data={
+            "suite": evaluation_suite_payload(
+                suite,
+                versions=versions,
+                include_versions=True,
+                include_manifests=include_manifests,
+            )
+        },
+        message="Evaluation suite described",
+    )
+
+
+@router.get("/evaluation/suite-versions/{suite_version_id}/cases")
+async def list_evaluation_cases(
+    suite_version_id: UUID,
+    include_expected_contract: bool = True,
+    limit: int = 100,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        cases = await EvaluationService(session).list_cases(
+            tenant_id=auth.tenant_id,
+            suite_version_id=suite_version_id,
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    limit = max(1, min(limit, 500))
+    return success_response(
+        data={
+            "items": [
+                evaluation_case_payload(case, include_expected_contract=include_expected_contract)
+                for case in cases[:limit]
+            ],
+            "total": len(cases),
+            "has_more": len(cases) > limit,
+        },
+        message="Evaluation cases listed",
+    )
+
+
+@router.get("/evaluation/suite-versions/{suite_version_id}/runs")
+async def list_evaluation_runs(
+    suite_version_id: UUID,
+    limit: int = 50,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        runs = await EvaluationService(session).list_runs(
+            tenant_id=auth.tenant_id,
+            suite_version_id=suite_version_id,
+            limit=max(1, min(limit, 100)),
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    return success_response(
+        data={"items": [evaluation_run_payload(run) for run in runs], "total": len(runs)},
+        message="Evaluation runs listed",
+    )
+
+
+@router.get("/evaluation/runs/compare")
+async def compare_evaluation_runs(
+    baseline_run_id: UUID,
+    candidate_run_id: UUID,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        comparison = await EvaluationService(session).compare_runs(
+            tenant_id=auth.tenant_id,
+            baseline_run_id=baseline_run_id,
+            candidate_run_id=candidate_run_id,
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    return success_response(data={"comparison": comparison}, message="Evaluation runs compared")
+
+
+@router.get("/evaluation/runs/{run_id}")
+async def get_evaluation_run(
+    run_id: UUID,
+    include_case_results: bool = True,
+    limit: int = 100,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        run, case_runs = await EvaluationService(session).get_run_report(
+            tenant_id=auth.tenant_id,
+            run_id=run_id,
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    limit = max(1, min(limit, 500))
+    data: dict[str, Any] = {"run": evaluation_run_payload(run)}
+    if include_case_results:
+        data["case_runs"] = [
+            evaluation_case_run_payload(case_run, assessments=assessments)
+            for case_run, assessments in case_runs[:limit]
+        ]
+        data["total_case_runs"] = len(case_runs)
+        data["has_more_case_runs"] = len(case_runs) > limit
+    return success_response(data=data, message="Evaluation run described")
+
+
+@router.get("/evaluation/runs/{run_id}/failures")
+async def describe_evaluation_failures(
+    run_id: UUID,
+    limit: int = 100,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        run, case_runs = await EvaluationService(session).get_run_report(
+            tenant_id=auth.tenant_id,
+            run_id=run_id,
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    failures = []
+    for case_run, assessments in case_runs:
+        failed_assessments = [
+            assessment
+            for assessment in assessments
+            if assessment.status != "passed" or assessment.hard_fail
+        ]
+        if case_run.status != "passed" or failed_assessments:
+            failures.append(evaluation_case_run_payload(case_run, assessments=failed_assessments))
+    limit = max(1, min(limit, 500))
+    return success_response(
+        data={
+            "run": evaluation_run_payload(run),
+            "failures": failures[:limit],
+            "total": len(failures),
+            "has_more": len(failures) > limit,
+        },
+        message="Evaluation failures described",
+    )
 
 
 @router.post("/evaluation/runs/preflight", status_code=status.HTTP_202_ACCEPTED)
