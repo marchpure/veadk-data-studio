@@ -223,6 +223,11 @@ async def test_data_models_validate_publish_and_query_metric_use_persisted_model
     assert query_result["result"][0]["paid_revenue"] == 120.5
     assert "sql" in query_result
 
+    reloaded_response = await test_client.get("/api/semantic-models/sales-semantic")
+    assert reloaded_response.status_code == 200
+    reloaded_last_result = reloaded_response.json()["data"]["mcp"]["lastResult"]
+    assert json.loads(reloaded_last_result["result"]) == [{"order_status": "PAID", "paid_revenue": 120.5}]
+
 
 async def test_query_metric_requires_published_model(test_client, test_session):
     tenant = (await test_session.execute(select(Tenant))).scalars().first()
@@ -879,6 +884,13 @@ async def test_projected_dataset_semantic_model_publish_and_mcp_query(
     assert payload["modelVersion"] == "v1"
     assert payload["resolvedMetric"] == "Revenue Revenue"
     assert sorted(payload["result"], key=lambda item: item["revenue_region"]) == [
+        {"revenue_region": "East", "revenue_revenue": 120},
+        {"revenue_region": "West", "revenue_revenue": 80},
+    ]
+    reloaded = await test_client.get(f"/api/semantic-models/{model_slug}")
+    assert reloaded.status_code == 200
+    reloaded_rows = json.loads(reloaded.json()["data"]["mcp"]["lastResult"]["result"])
+    assert sorted(reloaded_rows, key=lambda item: item["revenue_region"]) == [
         {"revenue_region": "East", "revenue_revenue": 120},
         {"revenue_region": "West", "revenue_revenue": 80},
     ]

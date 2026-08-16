@@ -1155,7 +1155,7 @@ class SemanticModelService:
         mcp["lastResult"] = {
             "resolvedMetric": payload["resolvedMetric"],
             "modelVersion": payload["modelVersion"],
-            "result": str(payload["result"][:1] if isinstance(payload["result"], list) else payload["result"]),
+            "result": _json_dump(payload["result"]),
             "freshness": payload["freshness"],
             "lineage": payload["lineage"],
             "policyDecision": payload["policyDecision"],
@@ -1229,7 +1229,7 @@ class SemanticModelService:
         mcp_state["lastResult"] = {
             "resolvedMetric": payload["resolvedMetric"],
             "modelVersion": payload["modelVersion"],
-            "result": str((payload["result"] or [])[:1] if isinstance(payload["result"], list) else payload["result"]),
+            "result": _json_dump(payload["result"] or []),
             "freshness": payload["freshness"],
             "lineage": payload["lineage"],
             "policyDecision": payload["policyDecision"],

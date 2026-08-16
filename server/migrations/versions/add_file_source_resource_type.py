@@ -41,10 +41,14 @@ def _tables() -> set[str]:
     return set(sa.inspect(op.get_bind()).get_table_names())
 
 
-def _check_names(table_name: str) -> set[str]:
+def _check_sqltexts(table_name: str) -> dict[str, str]:
     if table_name not in _tables():
-        return set()
-    return {item["name"] for item in sa.inspect(op.get_bind()).get_check_constraints(table_name) if item.get("name")}
+        return {}
+    return {
+        item["name"]: item.get("sqltext") or ""
+        for item in sa.inspect(op.get_bind()).get_check_constraints(table_name)
+        if item.get("name")
+    }
 
 
 def upgrade() -> None:
@@ -69,7 +73,11 @@ def _replace_resource_type_constraint(resource_types: tuple[str, ...]) -> None:
     constraint_sql = f"resource_type IN {resource_types}"
     if op.get_bind().dialect.name == "postgresql":
         op.execute(sa.text("ALTER TABLE source_resources DROP CONSTRAINT IF EXISTS ck_source_resources_resource_type"))
-        op.execute(sa.text("ALTER TABLE source_resources DROP CONSTRAINT IF EXISTS ck_source_resources_ck_source_resources_resource_type"))
+        op.execute(
+            sa.text(
+                "ALTER TABLE source_resources DROP CONSTRAINT IF EXISTS ck_source_resources_ck_source_resources_resource_type"
+            )
+        )
         op.execute(
             sa.text(
                 f"""
@@ -81,9 +89,12 @@ def _replace_resource_type_constraint(resource_types: tuple[str, ...]) -> None:
         )
         return
 
-    checks = _check_names("source_resources")
+    checks = _check_sqltexts("source_resources")
+    if checks.get("ck_source_resources_resource_type") == constraint_sql:
+        return
+
     with op.batch_alter_table("source_resources") as batch_op:
         for name in ("ck_source_resources_resource_type", "ck_source_resources_ck_source_resources_resource_type"):
             if name in checks:
-                batch_op.drop_constraint(name, type_="check")
-        batch_op.create_check_constraint("ck_source_resources_resource_type", constraint_sql)
+                batch_op.drop_constraint(op.f(name), type_="check")
+        batch_op.create_check_constraint(op.f("ck_source_resources_resource_type"), constraint_sql)

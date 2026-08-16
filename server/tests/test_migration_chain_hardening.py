@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import ast
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVER_DIR = ROOT / "server"
@@ -27,7 +29,7 @@ def test_semantic_versions_revision_alias_preserves_legacy_and_short_ids() -> No
     assert legacy.down_revision == "add_semantic_model_versions"
     assert alias.revision == "harden_semantic_versions"
     assert alias.down_revision == "harden_semantic_model_versions_compat"
-    assert script.get_heads() == ["add_collaboration_integration_tables"]
+    assert script.get_heads() == ["add_file_source_resource_type"]
 
     collaboration = script.get_revision("add_collaboration_integration_tables")
     assert collaboration.down_revision == "harden_semantic_versions"
@@ -45,7 +47,10 @@ def test_self_hosted_entrypoint_serializes_migrations_and_blocks_bad_startup() -
     assert 'MIGRATION_LOCK_FILE="${MIGRATION_LOCK_FILE:-/data/logs/.migration.lock}"' in script
     assert 'flock "$MIGRATION_LOCK_FILE" uv run --frozen --no-sync alembic upgrade head' in script
     assert 'flock "$MIGRATION_LOCK_FILE" uv run --frozen --no-sync alembic downgrade "$CURRENT_REV"' in script
-    assert "exit 1" in script[script.index("if [ $MIGRATION_EXIT_CODE -eq 0 ]") : script.index("# Skip startup migrations")]
+    assert (
+        "exit 1"
+        in script[script.index("if [ $MIGRATION_EXIT_CODE -eq 0 ]") : script.index("# Skip startup migrations")]
+    )
     assert "exec uv run --frozen --no-sync uvicorn" in script
 
 
@@ -77,3 +82,21 @@ def test_collaboration_migration_names_fit_postgres_identifier_limit() -> None:
 
     assert names
     assert all(len(name) <= 63 for name in names)
+
+
+def test_fresh_sqlite_migration_chain_reaches_head(tmp_path: Path) -> None:
+    db_path = tmp_path / "fresh-app.db"
+    env = os.environ.copy()
+    env["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path}"
+    env["PYTHONPATH"] = f"{ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=SERVER_DIR,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
