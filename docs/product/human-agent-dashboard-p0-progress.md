@@ -547,7 +547,7 @@ Commands and results:
 
 Commit:
 
-- pending `dashboard: record backend acceptance evidence`
+- `3e39d3d` `dashboard: record backend acceptance evidence`
 
 ## Commit Ledger
 
@@ -568,7 +568,7 @@ Commit:
 | `17588a6` | `dashboard: add rest mcp query parity` | Phase 6 REST/MCP query parity slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py` -> 6 passed; `ruff check services/dashboard.py mcp/tool_wrappers.py tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `6e0decc` | `dashboard: guard unresolved policy refs` | Phase 6 policy/ref security slice | `pytest tests/test_dashboard_execution_service.py tests/test_dashboard_rest_api.py` -> 8 passed; `ruff check services/dashboard.py tests/test_dashboard_execution_service.py tests/test_dashboard_rest_api.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `b5c679e` | `dashboard: add browser smoke evidence` | Phase 6 browser workspace smoke slice | `pnpm smoke:dashboard` -> passed against real REST/UI on `8123`/`5179` with 0 page errors, console errors, failed requests, and HTTP 5xx; `node --check scripts/dashboard-workspace-smoke.mjs` -> passed; `pnpm lint` -> passed with existing 355 warnings; `pnpm build:check` -> passed with existing CSS/chunk warnings; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
-| pending | `dashboard: record backend acceptance evidence` | Phase 6 backend/MCP/security/migration evidence slice | Dashboard focused pytest suite -> 33 passed; Dashboard backend ruff surface -> passed; Alembic head/current evidence -> `backfill_legacy_dashboard_assets`; disposable SQLite Dashboard upgrade/downgrade evidence -> passed with source-resource stamp workaround documented | Pending push |
+| `3e39d3d` | `dashboard: record backend acceptance evidence` | Phase 6 backend/MCP/security/migration evidence slice | Dashboard focused pytest suite -> 33 passed; Dashboard backend ruff surface -> passed; Alembic head/current evidence -> `backfill_legacy_dashboard_assets`; disposable SQLite Dashboard upgrade/downgrade evidence -> passed with source-resource stamp workaround documented | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 
 ## Acceptance Evidence
 
