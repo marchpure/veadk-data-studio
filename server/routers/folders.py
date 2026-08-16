@@ -14,6 +14,8 @@ from server.models.queries import Query
 from server.models.tenant_member import TenantRole
 from server.repositories.dashboard import DashboardRepository
 from server.repositories.folder import FolderRepository
+from server.repositories.folder_dashboard import FolderDashboardRepository
+from server.repositories.folder_member import FolderMemberRepository
 from server.repositories.notebooks import NotebookRepository
 from server.schemas.folder import (
     CloneNotebookRequest,
@@ -60,6 +62,7 @@ router = APIRouter()
 async def _require_viewer_session(
     dashboard_id: UUID,
     viewer_session: str | None,
+    session: AsyncSession,
 ) -> UUID:
     if not viewer_session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing viewer session")
@@ -72,7 +75,64 @@ async def _require_viewer_session(
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid viewer session payload")
 
+    dashboard_repo = DashboardRepository(session)
+    dashboard = await dashboard_repo.get(dashboard_id)
+    if not dashboard:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard not found")
+
+    required_claims = ("tid", "grant_id", "asset_id", "version_id", "jti", "iat", "nbf", "exp")
+    if any(not payload.get(claim) for claim in required_claims):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid viewer session payload")
+
+    if str(payload.get("tid")) != str(dashboard.tenant_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Viewer session tenant mismatch")
+    if str(payload.get("version_id")) != str(dashboard.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="viewer session is not valid for this dashboard",
+        )
+    if str(payload.get("asset_id")) != str(dashboard.asset_id or dashboard.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="viewer session is not valid for this dashboard asset",
+        )
+
+    try:
+        grant_id = UUID(str(payload["grant_id"]))
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid viewer session payload") from None
+
+    folder_dashboard_repo = FolderDashboardRepository(session)
+    grant = await folder_dashboard_repo.get(grant_id)
+    if not grant or grant.dashboard_id != dashboard.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="viewer session grant has been revoked or rotated",
+        )
+
     return UUID(str(user_id))
+
+
+async def _dashboard_folder_grant_for_user(
+    *,
+    dashboard_id: UUID,
+    user_id: UUID,
+    session: AsyncSession,
+) -> FolderDashboard | None:
+    folder_dashboard_repo = FolderDashboardRepository(session)
+    folder_dashboards = await folder_dashboard_repo.list_by_dashboard(dashboard_id)
+    if not folder_dashboards:
+        return None
+
+    folder_repo = FolderRepository(session)
+    member_repo = FolderMemberRepository(session)
+    for grant in folder_dashboards:
+        folder = await folder_repo.get(grant.folder_id)
+        if folder and folder.is_public:
+            return grant
+        if await member_repo.is_member(grant.folder_id, user_id):
+            return grant
+    return None
 
 
 def _batch_request_query_ids(request: BatchExecuteSavedQueriesRequest) -> list[str]:
@@ -982,13 +1042,13 @@ async def get_viewer_dashboard(
 
     try:
         # Check access via folder membership or public folder
-        can_access = await FolderService.can_access_dashboard_via_folder(
+        folder_grant = await _dashboard_folder_grant_for_user(
             dashboard_id=dashboard_id,
             user_id=auth.user_id,
             session=session,
         )
 
-        if not can_access:
+        if not folder_grant:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have access to this dashboard",
@@ -1009,6 +1069,9 @@ async def get_viewer_dashboard(
         viewer_token = ViewerSessionService.generate_token(
             user_id=auth.user_id,
             tenant_id=auth.tenant_id,
+            grant_id=folder_grant.id,
+            asset_id=dashboard.asset_id or dashboard.id,
+            version_id=dashboard.id,
         )
 
         response.set_cookie(
@@ -1129,7 +1192,7 @@ async def execute_viewer_dashboard_queries(
     try:
         is_tauri_local = not is_self_hosted() and origin and origin.startswith("tauri://")
         if not is_tauri_local:
-            viewer_user_id = await _require_viewer_session(dashboard_id, viewer_session)
+            viewer_user_id = await _require_viewer_session(dashboard_id, viewer_session, session)
 
             can_access = await FolderService.can_access_dashboard_via_folder(
                 dashboard_id=dashboard_id,
@@ -1188,7 +1251,7 @@ async def preflight_viewer_dashboard_queries(
     try:
         is_tauri_local = not is_self_hosted() and origin and origin.startswith("tauri://")
         if not is_tauri_local:
-            viewer_user_id = await _require_viewer_session(dashboard_id, viewer_session)
+            viewer_user_id = await _require_viewer_session(dashboard_id, viewer_session, session)
 
             can_access = await FolderService.can_access_dashboard_via_folder(
                 dashboard_id=dashboard_id,

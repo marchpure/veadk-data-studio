@@ -4,15 +4,20 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.models.dashboard import Dashboard
+from server.models.dashboard import Dashboard, DashboardAsset
+from server.models.folder import Folder
+from server.models.folder_dashboard import FolderDashboard
+from server.models.folder_member import FolderMember
 from server.models.notebooks import Notebook
 from server.models.queries import Query
 from server.models.tenant import Tenant
 from server.models.user import User
 from server.routers import folders
 from server.schemas.query import BatchExecuteSavedQueriesRequest, QueryWithFilters
+from server.services.viewer_session_service import ViewerSessionService
 
 
 async def _seed_dashboard_query_binding_fixture(test_session: AsyncSession) -> dict[str, UUID]:
@@ -188,7 +193,7 @@ async def test_viewer_dashboard_batch_rejects_unbound_query_before_execution(
     viewer_user_id = uuid4()
     executed = False
 
-    async def fake_require_viewer_session(_dashboard_id, _viewer_session):
+    async def fake_require_viewer_session(_dashboard_id, _viewer_session, _session):
         return viewer_user_id
 
     async def fake_can_access_dashboard_via_folder(**_kwargs):
@@ -223,3 +228,132 @@ async def test_viewer_dashboard_batch_rejects_unbound_query_before_execution(
 
     assert exc.value.status_code == 403
     assert executed is False
+
+
+@pytest.mark.asyncio
+async def test_viewer_session_token_binds_to_grant_asset_version_and_registered_claims() -> None:
+    user_id = uuid4()
+    tenant_id = uuid4()
+    grant_id = uuid4()
+    asset_id = uuid4()
+    dashboard_id = uuid4()
+
+    token = ViewerSessionService.generate_token(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        grant_id=grant_id,
+        asset_id=asset_id,
+        version_id=dashboard_id,
+    )
+
+    payload = ViewerSessionService.verify(token)
+    assert payload is not None
+    assert payload["iss"] == "byaan-api"
+    assert payload["aud"] == "byaan-viewer"
+    assert payload["uid"] == str(user_id)
+    assert payload["tid"] == str(tenant_id)
+    assert payload["grant_id"] == str(grant_id)
+    assert payload["asset_id"] == str(asset_id)
+    assert payload["version_id"] == str(dashboard_id)
+    assert isinstance(payload["jti"], str) and payload["jti"]
+    assert payload["iat"] <= payload["nbf"] <= payload["exp"]
+
+
+@pytest.mark.asyncio
+async def test_viewer_session_rejects_token_for_different_dashboard(test_session: AsyncSession) -> None:
+    user_id = uuid4()
+    tenant_id = uuid4()
+    dashboard_id = uuid4()
+    other_dashboard_id = uuid4()
+    asset_id = uuid4()
+    folder_id = uuid4()
+    grant_id = uuid4()
+
+    user = User(
+        id=user_id,
+        email="viewer-session@example.test",
+        hashed_password="hash",
+        is_active=True,
+        is_verified=True,
+    )
+    test_session.add(user)
+    await test_session.flush()
+    test_session.add(Tenant(id=tenant_id, name="Viewer Session Tenant", slug=f"viewer-{tenant_id}", owner_id=user_id))
+    await test_session.flush()
+    test_session.add(Folder(id=folder_id, tenant_id=tenant_id, created_by=user_id, name="Shared dashboards"))
+    test_session.add(
+        Notebook(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            created_by=user_id,
+            notebook_name="Viewer notebook",
+        )
+    )
+    await test_session.flush()
+    notebook = (await test_session.execute(select(Notebook).where(Notebook.tenant_id == tenant_id))).scalars().first()
+    assert notebook is not None
+    test_session.add(
+        DashboardAsset(
+            id=asset_id,
+            tenant_id=tenant_id,
+            notebook_id=notebook.id,
+            slug="viewer-session-dashboard",
+            name="Viewer Session Dashboard",
+            owner_id=user_id,
+        )
+    )
+    test_session.add(FolderMember(folder_id=folder_id, user_id=user_id, added_by=user_id))
+    await test_session.flush()
+    test_session.add_all(
+        [
+            Dashboard(
+                id=dashboard_id,
+                tenant_id=tenant_id,
+                notebook_id=notebook.id,
+                asset_id=asset_id,
+                version_num=1,
+                html_content="<html></html>",
+            ),
+            Dashboard(
+                id=other_dashboard_id,
+                tenant_id=tenant_id,
+                notebook_id=notebook.id,
+                asset_id=asset_id,
+                version_num=2,
+                html_content="<html></html>",
+            ),
+            FolderDashboard(
+                id=grant_id,
+                folder_id=folder_id,
+                dashboard_id=dashboard_id,
+                shared_by=user_id,
+            ),
+        ]
+    )
+    await test_session.commit()
+
+    token = ViewerSessionService.generate_token(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        grant_id=grant_id,
+        asset_id=asset_id,
+        version_id=dashboard_id,
+    )
+
+    assert await folders._require_viewer_session(dashboard_id, token, test_session) == user_id
+    with pytest.raises(HTTPException) as exc:
+        await folders._require_viewer_session(other_dashboard_id, token, test_session)
+
+    assert exc.value.status_code == 403
+    assert "viewer session is not valid for this dashboard" in str(exc.value.detail)
+
+    grant = await test_session.get(FolderDashboard, grant_id)
+    assert grant is not None
+    await test_session.delete(grant)
+    await test_session.commit()
+
+    with pytest.raises(HTTPException) as revoked_exc:
+        await folders._require_viewer_session(dashboard_id, token, test_session)
+
+    assert revoked_exc.value.status_code == 403
+    assert "viewer session grant has been revoked or rotated" in str(revoked_exc.value.detail)

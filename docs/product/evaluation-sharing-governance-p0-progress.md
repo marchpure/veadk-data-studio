@@ -1,13 +1,13 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration worktree init, dashboard merge integration gates, focused migration/security gates, share/manage secret redaction, worker-backed notebook share/export object authorization. Next slice: extend object authorization to folder share/version manage and canonical grant paths.
+CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration worktree init, dashboard merge integration gates, focused migration/security gates, share/manage secret redaction, worker-backed notebook share/export object authorization, viewer session governed-asset binding. Next slice: enforce structured dashboard query manifest `data_view_id` validation.
 
 ## Phase 0 Slice Checklist
 
 - [x] `GET /notebooks/{id}/share`, JSON share list, and manage endpoints never return `password`, `verifier`, or raw token.
 - [x] `ShareModal.tsx` removes display/copy of saved passwords; password is input-only during create/rotate and is never read back.
 - [~] share/create/delete/rotate/export use correct share/export action scope and unified object authorization for tenant, owner/grant, asset, version, and action. Worker-backed notebook share/export/manage endpoints now enforce tenant + owner + action scope through `server.auth.object_authorizer`; folder share/version manage and future canonical grant checks remain.
-- [ ] viewer sessions bind and validate issuer, audience, user, tenant, grant, asset, version, token id, issued-at, not-before, expiry, and revocation/rotation identity.
+- [x] viewer sessions bind and validate issuer, audience, user, tenant, grant, asset, version, token id, issued-at, not-before, expiry, and revocation/rotation identity.
 - [ ] structured dashboard query only accepts immutable manifest `data_view_id` plus validated filters; legacy path is tenant/dashboard-version/notebook bound.
 - [ ] errors, logs, and audit events never leak password, token, verifier, credentials, cross-tenant objects, or unauthorized SQL.
 
@@ -117,7 +117,7 @@ Evidence:
 
 ## 2026-08-16 14:34 CST - Phase 0 Worker-Backed Share Object Authorization
 
-Commit: pending at time of entry.
+Commit: `5ac631cf7a9f42161e34b062eea63086d6556799`.
 
 Scope:
 
@@ -130,3 +130,18 @@ Evidence:
 
 - `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest server/tests/test_share_object_authorization.py server/tests/test_share_secret_redaction.py -q` -> `10 passed, 7 warnings`.
 - `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check server/routers/exports.py server/auth/object_authorizer.py server/tests/test_share_object_authorization.py server/tests/test_share_secret_redaction.py` -> passed with existing removed-rule warning.
+
+## 2026-08-16 14:43 CST - Phase 0 Viewer Session Governed-Asset Binding
+
+Commit: pending at time of entry.
+
+Scope:
+
+- Extended viewer session tokens with `iss`, `aud`, `uid`, `tid`, `grant_id`, `asset_id`, `version_id`, `jti`, `iat`, `nbf`, and `exp`.
+- Viewer dashboard responses now sign the `viewer_session` cookie against the concrete folder-dashboard grant, dashboard asset, and immutable dashboard version.
+- Viewer query and filter preflight endpoints now reject tokens for a different dashboard version, tenant mismatch, asset mismatch, missing required claims, and revoked/rotated folder grants.
+
+Evidence:
+
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest server/tests/test_dashboard_security_regressions.py server/tests/test_share_object_authorization.py server/tests/test_share_secret_redaction.py -q` -> `17 passed, 7 warnings`.
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check server/services/viewer_session_service.py server/routers/folders.py server/tests/test_dashboard_security_regressions.py` -> passed with existing removed-rule warning.
