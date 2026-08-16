@@ -4,6 +4,8 @@ import { mkdirSync, readFileSync } from 'node:fs'
 const baseURL = process.env.BASE_URL || 'http://127.0.0.1:5173'
 const apiURL = process.env.API_URL || 'http://127.0.0.1:8000'
 const screenDir = process.env.SCREEN_DIR || './tmp-evaluation-screens'
+const adminEmail = process.env.BYAAN_ADMIN_EMAIL || 'admin@example.com'
+const adminPassword = process.env.BYAAN_ADMIN_PASSWORD || 'password'
 mkdirSync(screenDir, { recursive: true })
 
 const fixture = loadFixture()
@@ -13,6 +15,7 @@ const stats = {
   requestfailed: 0,
   http5xx: 0,
 }
+let authHeaders = { 'X-Tenant-ID': fixture.tenant_id }
 
 function loadFixture() {
   if (process.env.EVALUATION_SMOKE_FIXTURE_JSON) {
@@ -29,7 +32,7 @@ async function api(path, options = {}) {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      'X-Tenant-ID': fixture.tenant_id,
+      ...authHeaders,
       ...(options.headers || {}),
     },
   })
@@ -38,6 +41,23 @@ async function api(path, options = {}) {
     throw new Error(`API ${path} failed ${response.status}: ${JSON.stringify(payload)}`)
   }
   return payload?.data ?? payload
+}
+
+async function loginForSelfHostedAuth() {
+  const response = await fetch(`${apiURL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ username: adminEmail, password: adminPassword }),
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(`Evaluation smoke login failed ${response.status}: ${JSON.stringify(payload)}`)
+  }
+  const token = payload?.data?.access_token
+  if (!token) {
+    throw new Error(`Evaluation smoke login did not return an access token: ${JSON.stringify(payload)}`)
+  }
+  authHeaders = { Authorization: `Bearer ${token}`, 'X-Tenant-ID': fixture.tenant_id }
 }
 
 async function assertRestParity() {
@@ -87,6 +107,12 @@ async function makePage(viewport) {
       console.error('http5xx:', response.status(), response.url())
     }
   })
+  const loginResponse = await page.request.post(`${apiURL}/api/auth/login`, {
+    form: { username: adminEmail, password: adminPassword },
+  })
+  if (!loginResponse.ok()) {
+    throw new Error(`Browser login failed ${loginResponse.status()}: ${await loginResponse.text()}`)
+  }
   await page.addInitScript(id => {
     localStorage.setItem('byaan_active_tenant', id)
   }, fixture.tenant_id)
@@ -158,6 +184,7 @@ const browser = await chromium.launch({
 })
 
 try {
+  await loginForSelfHostedAuth()
   await assertRestParity()
   await runEvaluationJourney()
 } finally {
