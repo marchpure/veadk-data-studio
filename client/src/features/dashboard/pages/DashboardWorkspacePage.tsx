@@ -129,10 +129,11 @@ export default function DashboardWorkspacePage() {
         return
       }
       const version = await DashboardService.getVersion(id, versionSummary.version_num)
-      setSelectedVersion(version)
+      const normalizedVersion = normalizeDashboardVersion(asset, version)
+      setSelectedVersion(normalizedVersion)
       setVersionNum(version.version_num)
-      setEditorSelection(previous => normalizeEditorSelection(version.manifest, previous))
-      const diff = extractSemanticDiff(version)
+      setEditorSelection(previous => normalizeEditorSelection(normalizedVersion.manifest, previous))
+      const diff = extractSemanticDiff(normalizedVersion)
       setSemanticDiff(diff ?? extractSemanticDiff(asset))
       void loadAudit(id)
     } catch (err) {
@@ -143,6 +144,10 @@ export default function DashboardWorkspacePage() {
   }, [loadAudit])
 
   const executeRun = useCallback(async (asset: DashboardAssetDetail, version: DashboardVersion, nextFilters: Record<string, unknown>) => {
+    if (isLegacyDashboard(asset, version)) {
+      setRun(null)
+      return
+    }
     setLoadingRun(true)
     try {
       const payload = {
@@ -188,6 +193,7 @@ export default function DashboardWorkspacePage() {
   }, [assets, query])
 
   const manifest = selectedVersion?.manifest ?? null
+  const isLegacySelected = Boolean(selectedAsset && selectedVersion && isLegacyDashboard(selectedAsset, selectedVersion))
   const blockers = selectedVersion?.validation_result.blockers ?? manifest?.migration.blockers ?? []
   const semanticWarnings = semanticDiff?.warnings ?? []
   const semanticBlockers = semanticDiff?.blockers ?? []
@@ -562,7 +568,7 @@ export default function DashboardWorkspacePage() {
                 <AuditTrail events={auditEvents} />
               </section>
 
-              {manifest && (
+              {manifest && !isLegacySelected && (
                 <ManifestEditor
                   manifest={manifest}
                   selection={editorSelection}
@@ -573,11 +579,11 @@ export default function DashboardWorkspacePage() {
                 />
               )}
 
-              {(selectedAsset.lifecycle === 'legacy_unstructured' || selectedVersion?.migration_state === 'legacy_unstructured') && (
+              {isLegacySelected && (
                 <LegacyFallbackPanel notebookId={selectedAsset.notebook_id} />
               )}
 
-              {manifest && (
+              {manifest && !isLegacySelected && (
                 <section className="rounded-md border border-[#293037] bg-[#14181c]">
                   <div className="flex flex-col gap-3 border-b border-[#293037] p-3 xl:flex-row xl:items-center xl:justify-between">
                     <FilterBar filters={manifest.filters} values={filters} onChange={handleFilterChange} />
@@ -609,6 +615,85 @@ function chooseVersion(versions: DashboardVersionSummary[], requestedVersionNum?
     if (requested) return requested
   }
   return versions.find(version => version.status === 'published') ?? versions[0] ?? null
+}
+
+function normalizeDashboardVersion(asset: DashboardAssetDetail, version: DashboardVersion): DashboardVersion {
+  return {
+    ...version,
+    manifest: normalizeDashboardManifest(asset, version),
+    migration_state: version.migration_state || version.manifest?.migration?.state || asset.lifecycle,
+  }
+}
+
+function normalizeDashboardManifest(asset: DashboardAssetDetail, version: DashboardVersion): DashboardManifest {
+  const manifest = isRecord(version.manifest) ? version.manifest : {}
+  const migration = isRecord(manifest.migration) ? manifest.migration : {}
+  const title = typeof manifest.title === 'string' && manifest.title.trim() ? manifest.title : asset.name
+  const dashboardId = typeof manifest.dashboard_id === 'string' && manifest.dashboard_id.trim() ? manifest.dashboard_id : asset.id
+  return {
+    schema_version: 'dashboard.manifest.v1',
+    dashboard_id: dashboardId,
+    title,
+    description: typeof manifest.description === 'string' ? manifest.description : asset.description,
+    audience: arrayOrEmpty<string>(manifest.audience),
+    semantic_bindings: arrayOrEmpty(manifest.semantic_bindings),
+    data_views: arrayOrEmpty(manifest.data_views),
+    filters: arrayOrEmpty(manifest.filters).map(normalizeDashboardFilter),
+    layout: normalizeDashboardLayout(manifest.layout),
+    tiles: arrayOrEmpty(manifest.tiles),
+    actions: arrayOrEmpty(manifest.actions),
+    freshness_policy: isRecord(manifest.freshness_policy) ? manifest.freshness_policy : asset.freshness_policy,
+    access_policy: isRecord(manifest.access_policy) ? manifest.access_policy : asset.access_policy,
+    provenance: isRecord(manifest.provenance) ? manifest.provenance : {},
+    migration: {
+      state: typeof migration.state === 'string' ? migration.state : asset.lifecycle,
+      blockers: arrayOrEmpty<string>(migration.blockers),
+      legacy_dashboard_id: typeof migration.legacy_dashboard_id === 'string' ? migration.legacy_dashboard_id : null,
+      reviewed_by: typeof migration.reviewed_by === 'string' ? migration.reviewed_by : null,
+      reviewed_at: typeof migration.reviewed_at === 'string' ? migration.reviewed_at : null,
+    },
+  }
+}
+
+function normalizeDashboardFilter(filter: unknown): DashboardFilter {
+  const source = isRecord(filter) ? filter : {}
+  return {
+    id: typeof source.id === 'string' && source.id ? source.id : uniqueManifestId('filter', []),
+    label: typeof source.label === 'string' && source.label ? source.label : 'Filter',
+    source: source.source === 'semantic_field' ? 'semantic_field' : 'saved_query_contract',
+    field: typeof source.field === 'string' && source.field ? source.field : 'region',
+    filter_type: typeof source.filter_type === 'string' && source.filter_type ? source.filter_type : 'enum',
+    operators: arrayOrEmpty<string>(source.operators).length > 0 ? arrayOrEmpty<string>(source.operators) : ['eq'],
+    affected_data_view_ids: arrayOrEmpty<string>(source.affected_data_view_ids),
+    default_value: source.default_value,
+    required: Boolean(source.required),
+    domain: Array.isArray(source.domain) ? source.domain : [],
+    timezone: typeof source.timezone === 'string' ? source.timezone : null,
+  }
+}
+
+function normalizeDashboardLayout(layout: unknown): DashboardManifest['layout'] {
+  const sections = isRecord(layout) ? arrayOrEmpty<Record<string, unknown>>(layout.sections) : []
+  return {
+    sections: sections.map((section, index) => ({
+      id: typeof section.id === 'string' && section.id ? section.id : `section-${index + 1}`,
+      title: typeof section.title === 'string' ? section.title : undefined,
+      tile_ids: arrayOrEmpty<string>(section.tile_ids),
+    })),
+  }
+}
+
+function arrayOrEmpty<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value as T[] : []
+}
+
+function isLegacyDashboard(asset: DashboardAssetDetail, version: DashboardVersion): boolean {
+  return asset.lifecycle === 'legacy_unstructured'
+    || version.status === 'legacy_unstructured'
+    || version.migration_state === 'legacy_unstructured'
+    || version.manifest.migration.state === 'legacy_unstructured'
+    || version.manifest.data_views.length === 0
+    || version.manifest.tiles.length === 0
 }
 
 function extractSemanticDiff(source: DashboardVersion | DashboardAssetDetail | null): DashboardSemanticDiff | null {
