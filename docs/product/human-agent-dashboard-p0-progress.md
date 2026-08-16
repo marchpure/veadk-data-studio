@@ -27,7 +27,7 @@ Result: baseline matches required worktree, branch, upstream, and start SHA. Wor
 
 ### Phase 0: Current-State Audit
 
-Status: in progress.
+Status: first audit and viewer query-binding regression/fix slices complete.
 
 Allowlist for first slice:
 
@@ -67,16 +67,43 @@ Migration head:
 
 Risks and dependencies:
 
-- Existing viewer batch route is the highest-priority security boundary: arbitrary saved query IDs are currently accepted after dashboard access is established.
+- Existing viewer batch/preflight routes now reject saved query IDs that are not bound to the selected dashboard notebook and tenant. Remaining Phase 2 work must replace raw query-ID execution with structured manifest `data_view_id` execution and add share revocation/RLS/column-policy coverage.
 - Existing share `is_snapshot` flags are not backed by immutable DashboardRun/result artifacts.
 - Semantic model published versions exist, but Dashboard does not pin them.
 - Integration Gate will need to reconcile shared route/model registration and any Alembic heads after later phases.
+
+### Phase 2 Security Slice: Viewer Batch Query Binding
+
+Status: implemented before broader schema work because it closes the prompt's mandatory safety boundary.
+
+Allowlist:
+
+- `server/routers/folders.py` - conditional shared file; additive binding check only for viewer dashboard batch/preflight routes.
+- `server/tests/test_dashboard_security_regressions.py`
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Behavior:
+
+- Viewer dashboard batch execution and preflight resolve the selected dashboard, collect query IDs from `query_ids` or `queries_with_filters`, and reject any query not in the same dashboard notebook and tenant before calling `QueryService`.
+- Rejection uses `403` with a generic dashboard-scoped message so cross-tenant or unbound query object names are not leaked.
+- This keeps legacy compatibility shape while blocking arbitrary query-ID execution. It is not the final structured manifest/data-view execution contract.
+
+Tests:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_security_regressions.py` -> passed, `5 passed`.
+- `cd server && uv run ruff check routers/folders.py tests/test_dashboard_security_regressions.py` -> passed.
+- `git diff --check` -> passed.
+
+Commit:
+
+- Pending.
 
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
 | --- | --- | --- | --- | --- |
 | `4a4f4e1` | `dashboard: audit human agent contract` | Phase 0 | `pytest tests/test_dashboard_security_regressions.py` -> 1 strict xfail; `ruff check tests/test_dashboard_security_regressions.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| Pending | `dashboard: enforce viewer query binding` | Phase 2 security slice | `pytest tests/test_dashboard_security_regressions.py` -> 5 passed; `ruff check routers/folders.py tests/test_dashboard_security_regressions.py` -> passed | Pending |
 
 ## Acceptance Evidence
 
