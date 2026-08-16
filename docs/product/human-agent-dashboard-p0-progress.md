@@ -59,7 +59,7 @@ Tests:
 
 Commit:
 
-- Pending.
+- `4a4f4e1` `dashboard: audit human agent contract`
 
 Migration head:
 
@@ -76,7 +76,7 @@ Risks and dependencies:
 
 | SHA | Subject | Phase | Tests | Push |
 | --- | --- | --- | --- | --- |
-| Pending | `dashboard: audit human agent contract` | Phase 0 | Pending | Pending |
+| `4a4f4e1` | `dashboard: audit human agent contract` | Phase 0 | `pytest tests/test_dashboard_security_regressions.py` -> 1 strict xfail; `ruff check tests/test_dashboard_security_regressions.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 
 ## Acceptance Evidence
 
