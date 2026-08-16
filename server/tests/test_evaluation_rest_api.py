@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.evaluation import (
     AdvisorChangeSet,
+    AdvisorSuggestion,
     EvaluationArtifact,
     EvaluationAssessment,
     EvaluationCase,
@@ -435,6 +436,137 @@ async def test_evaluation_promotion_rest_requires_publish_scope_and_records_gate
     assert decision["audit"]["verification_gate"] == "passed"
     assert decision["audit"]["regression_gate"] == "passed"
     assert "super-secret" not in json.dumps(decision)
+
+
+async def test_evaluation_advisor_rest_review_verify_regress_and_apply_surfaces(
+    test_client,
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant, _owner, suite_version = await _seed_suite_version(test_session)
+    verification_run = await _seed_completed_run(
+        test_session,
+        tenant_id=tenant.id,
+        suite_version_id=suite_version.id,
+        gate_decision="passed",
+    )
+    regression_run = await _seed_completed_run(
+        test_session,
+        tenant_id=tenant.id,
+        suite_version_id=suite_version.id,
+        gate_decision="failed",
+    )
+    change_set = AdvisorChangeSet(
+        tenant_id=tenant.id,
+        suite_version_id=suite_version.id,
+        target_ref="semantic_model:sales",
+        base_version_ref="semantic_model:sales:v1",
+        base_etag="sha256:base",
+        status="draft",
+        evidence_json={"token": "super-secret-token", "summary": "Review this staged patch"},
+        verification_run_id=verification_run.id,
+        regression_run_id=regression_run.id,
+        created_by="advisor-1",
+    )
+    test_session.add(change_set)
+    await test_session.flush()
+    test_session.add(
+        AdvisorSuggestion(
+            tenant_id=tenant.id,
+            change_set_id=change_set.id,
+            suggestion_type="semantic_metadata",
+            patch_json={"op": "replace", "path": "/description", "value": "password=plain"},
+            affected_case_ids_json=["case-one"],
+            status="draft",
+        )
+    )
+    member = User(
+        id=uuid4(),
+        email=f"advisor-member-{uuid4()}@example.test",
+        hashed_password="fakehash",
+        is_active=True,
+        is_verified=True,
+        is_superuser=False,
+    )
+    test_session.add(member)
+    await test_session.flush()
+    test_session.add(TenantMember(user_id=member.id, tenant_id=tenant.id, role=TenantRole.MEMBER.value))
+    await test_session.commit()
+
+    review_response = await test_client.get(f"/api/evaluation/advisor-change-sets/{change_set.id}/review")
+    assert review_response.status_code == 200
+    review = review_response.json()["data"]
+    assert review["change_set"]["id"] == str(change_set.id)
+    assert review["advisor_suggestions"][0]["suggestion_type"] == "semantic_metadata"
+    assert review["verification_run"]["id"] == str(verification_run.id)
+    assert review["regression_run"]["id"] == str(regression_run.id)
+    assert review["gate_summary"] == {
+        "verification_gate": "passed",
+        "regression_gate": "failed",
+        "ready_to_apply": False,
+    }
+    assert "super-secret-token" not in json.dumps(review)
+    assert "plain" not in json.dumps(review)
+
+    advisor_list_response = await test_client.get(
+        f"/api/evaluation/suite-versions/{suite_version.id}/advisor-change-sets"
+    )
+    assert advisor_list_response.status_code == 200
+    advisor_list = advisor_list_response.json()["data"]
+    assert advisor_list["total"] == 1
+    assert advisor_list["items"][0]["id"] == str(change_set.id)
+
+    verify_response = await test_client.post(
+        f"/api/evaluation/advisor-change-sets/{change_set.id}/verification",
+        json={"target_snapshot": _complete_snapshot(str(tenant.id)), "idempotency_key": "advisor-rest-verify"},
+    )
+    assert verify_response.status_code == 202
+    verify_payload = verify_response.json()["data"]
+    assert verify_payload["change_set"]["verification_run_id"] == verify_payload["run"]["id"]
+    assert verify_payload["change_set"]["status"] == "verification_queued"
+    assert verify_payload["run"]["status"] == "queued"
+
+    regress_response = await test_client.post(
+        f"/api/evaluation/advisor-change-sets/{change_set.id}/regression",
+        json={"target_snapshot": _complete_snapshot(str(tenant.id)), "idempotency_key": "advisor-rest-regress"},
+    )
+    assert regress_response.status_code == 202
+    regress_payload = regress_response.json()["data"]
+    assert regress_payload["change_set"]["regression_run_id"] == regress_payload["run"]["id"]
+    assert regress_payload["change_set"]["status"] == "regression_queued"
+
+    monkeypatch.setenv("BYAAN_LOCAL_AUTH_IMPERSONATION_ENABLED", "true")
+    denied_apply = await test_client.post(
+        f"/api/evaluation/advisor-change-sets/{change_set.id}/apply",
+        headers={"x-local-user-id": str(member.id), "x-tenant-id": str(tenant.id)},
+    )
+    assert denied_apply.status_code == 403
+
+    latest_change_set = await test_session.get(AdvisorChangeSet, change_set.id)
+    assert latest_change_set is not None
+    verification_pass = await _seed_completed_run(
+        test_session,
+        tenant_id=tenant.id,
+        suite_version_id=suite_version.id,
+        gate_decision="passed",
+    )
+    regression_pass = await _seed_completed_run(
+        test_session,
+        tenant_id=tenant.id,
+        suite_version_id=suite_version.id,
+        gate_decision="passed",
+    )
+    latest_change_set.verification_run_id = verification_pass.id
+    latest_change_set.regression_run_id = regression_pass.id
+    latest_change_set.status = "ready_for_review"
+    await test_session.commit()
+
+    apply_response = await test_client.post(f"/api/evaluation/advisor-change-sets/{change_set.id}/apply")
+    assert apply_response.status_code == 200
+    apply_payload = apply_response.json()["data"]
+    assert apply_payload["promotion"]["decision"] == "accepted"
+    assert apply_payload["review"]["gate_summary"]["ready_to_apply"] is True
+    assert apply_payload["review"]["change_set"]["status"] == "promoted"
 
 
 async def test_evaluation_preflight_rest_is_tenant_scoped(

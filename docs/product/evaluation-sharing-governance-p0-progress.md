@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 3/4 — Evaluation REST read surface complete; Human UI and explicit advisor review/apply REST surfaces next. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface. Current slice: ready for Human UI workspace and explicit advisor verify/regress/review/apply REST surfaces. Next slice: add Human UI workspace for suites/cases/runs/advisor/feedback review using the shared EvaluationService/auth serializers, then add verify/regress/apply review endpoints.
+CURRENT_PHASE: Phase 3/4 — Evaluation Human UI and advisor REST lifecycle surfaces complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface, Phase 3/4 Human UI workspace and advisor verify/regress/review/apply REST surfaces. Current slice: ready for browser/MCP parity smoke and then Phase 5 canonical Sharing. Next slice: add end-to-end browser/MCP parity evidence showing failed-set verification plus full-suite regression evidence is visible before promotion/apply, then start canonical Sharing model/service.
 
 ## Phase 0 Slice Checklist
 
@@ -403,6 +403,33 @@ Remaining Phase 3/4 work:
 - Add Human UI surfaces for suite inventory/detail, case editor, run compare, failure drawer, feedback review, and advisor staged patch review.
 - Add explicit REST review/apply endpoints for advisor verification/regression lifecycle if the UI needs review-specific shapes beyond the existing runner/promotion endpoints.
 - Add end-to-end browser/MCP parity tests showing failed-set verification plus full-suite regression evidence is visible before promotion/apply.
+
+## 2026-08-16 19:17 CST - Phase 3/4 Evaluation Human UI And Advisor REST Lifecycle
+
+Scope:
+
+- Added explicit advisor REST lifecycle endpoints for suite-version change-set inventory, advisor review, verification run creation, regression run creation, and apply/promotion decision.
+- Advisor review returns the staged change set, typed suggestions, verification/regression run evidence, promotion history, and a computed `ready_to_apply` gate summary without applying patches directly.
+- Advisor verification/regression endpoints call `EvaluationService.create_advisor_gate_run`; apply calls the existing promotion gate decision so published assets are still protected by verification and regression pass evidence.
+- Added a client Evaluation API service and typed Evaluation domain models for suites, versions, cases, runs, failures, comparisons, advisor reviews, and target snapshots.
+- Added a real `/evaluation` workspace in the existing app shell with suite inventory, suite detail tabs for Cases/Runs/Advisor/Feedback/Settings, run comparison, failure/case-run drilldowns, feedback provenance review, and advisor staged patch review with Verify/Regress/Apply actions.
+- Added route coverage for enterprise, community, and legacy local desktop flows plus a sidebar navigation entry using the existing dark operational workspace style.
+
+Evidence:
+
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_evaluation_rest_api.py -q` -> `5 passed, 11 warnings`.
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_evaluation_runner_service.py tests/test_evaluation_rest_api.py tests/test_evaluation_feedback_advisor_api.py tests/test_evaluation_mcp_contract.py tests/test_migration_chain_hardening.py -q` -> `27 passed, 18 warnings`.
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check routers/evaluation.py services/evaluation.py repositories/evaluation.py tests/test_evaluation_rest_api.py` -> passed with the existing removed-rule warning.
+- `cd client && pnpm exec tsc -b --pretty false` -> passed.
+- `cd client && pnpm exec eslint src/features/evaluation/pages/EvaluationWorkspacePage.tsx src/services/evaluation.ts src/types/evaluation.ts src/App.tsx src/components/CollapsibleSidebar.tsx --quiet` -> passed.
+- `cd client && pnpm lint` -> passed with existing `0 errors, 357 warnings`.
+- `cd client && pnpm build:check` -> passed with existing CSS/chunk warnings.
+
+Remaining Phase 3/4 work:
+
+- Add browser/MCP parity smoke evidence for the Evaluation workspace and advisor lifecycle.
+- Confirm failed-set verification and full-suite regression evidence remains visible before promotion/apply in rendered UI.
+- Start Phase 5 canonical Sharing model/service after Evaluation parity evidence is recorded.
 
 ## 2026-08-16 19:03 CST - Phase 3/4 Evaluation REST Read Surface
 

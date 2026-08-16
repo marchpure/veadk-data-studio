@@ -127,6 +127,24 @@ class EvaluationRepository:
         )
         return result.scalar_one_or_none()
 
+    async def list_change_sets_for_suite_version(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_version_id: str | UUID,
+        limit: int = 50,
+    ) -> list[AdvisorChangeSet]:
+        result = await self._session.execute(
+            select(AdvisorChangeSet)
+            .where(
+                AdvisorChangeSet.tenant_id == tenant_id,
+                AdvisorChangeSet.suite_version_id == suite_version_id,
+            )
+            .order_by(AdvisorChangeSet.created_at.desc(), AdvisorChangeSet.id)
+            .limit(max(1, limit))
+        )
+        return list(result.scalars().all())
+
     async def get_change_set_for_legacy_skill_suggestion(
         self,
         *,
@@ -160,6 +178,22 @@ class EvaluationRepository:
                 AdvisorSuggestion.change_set_id == change_set_id,
             )
             .order_by(AdvisorSuggestion.created_at, AdvisorSuggestion.id)
+        )
+        return list(result.scalars().all())
+
+    async def list_promotion_decisions_for_change_set(
+        self,
+        *,
+        tenant_id: str | UUID,
+        change_set_id: str | UUID,
+    ) -> list[PromotionDecision]:
+        result = await self._session.execute(
+            select(PromotionDecision)
+            .where(
+                PromotionDecision.tenant_id == tenant_id,
+                PromotionDecision.change_set_id == change_set_id,
+            )
+            .order_by(PromotionDecision.created_at.desc(), PromotionDecision.id)
         )
         return list(result.scalars().all())
 

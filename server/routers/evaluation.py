@@ -65,6 +65,11 @@ class EvaluationSkillSuggestionAdvisorRequest(EvaluationRouterModel):
     affected_case_ids: list[UUID] = Field(default_factory=list)
 
 
+class EvaluationAdvisorGateRequest(EvaluationRouterModel):
+    target_snapshot: dict[str, Any]
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
+
+
 def _service_error(exc: ValueError) -> HTTPException:
     detail = str(exc)
     if "not found" in detail:
@@ -72,6 +77,23 @@ def _service_error(exc: ValueError) -> HTTPException:
     if "leased by this worker" in detail or "case results do not match" in detail or "immutable" in detail:
         return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+def _advisor_review_payload(review: dict[str, Any]) -> dict[str, Any]:
+    verification_run = review.get("verification_run")
+    regression_run = review.get("regression_run")
+    return {
+        "change_set": advisor_change_set_payload(review["change_set"]),
+        "advisor_suggestions": [
+            advisor_suggestion_payload(suggestion) for suggestion in review["advisor_suggestions"]
+        ],
+        "verification_run": evaluation_run_payload(verification_run) if verification_run else None,
+        "regression_run": evaluation_run_payload(regression_run) if regression_run else None,
+        "promotion_decisions": [
+            promotion_payload(promotion) for promotion in review["promotion_decisions"]
+        ],
+        "gate_summary": review["gate_summary"],
+    }
 
 
 @router.get("/evaluation/suites")
@@ -170,6 +192,27 @@ async def list_evaluation_runs(
     return success_response(
         data={"items": [evaluation_run_payload(run) for run in runs], "total": len(runs)},
         message="Evaluation runs listed",
+    )
+
+
+@router.get("/evaluation/suite-versions/{suite_version_id}/advisor-change-sets")
+async def list_evaluation_advisor_change_sets(
+    suite_version_id: UUID,
+    limit: int = 50,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        change_sets = await EvaluationService(session).list_advisor_change_sets(
+            tenant_id=auth.tenant_id,
+            suite_version_id=suite_version_id,
+            limit=max(1, min(limit, 100)),
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    return success_response(
+        data={"items": [advisor_change_set_payload(change_set) for change_set in change_sets], "total": len(change_sets)},
+        message="Advisor change sets listed",
     )
 
 
@@ -377,6 +420,94 @@ async def decide_evaluation_promotion(
     except ValueError as exc:
         raise _service_error(exc) from exc
     return success_response(data=promotion_payload(promotion), message="Evaluation promotion decision recorded")
+
+
+@router.get("/evaluation/advisor-change-sets/{change_set_id}/review")
+async def review_evaluation_advisor_change_set(
+    change_set_id: UUID,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_READ)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        review = await EvaluationService(session).get_advisor_review(
+            tenant_id=auth.tenant_id,
+            change_set_id=change_set_id,
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    return success_response(data=_advisor_review_payload(review), message="Advisor change set reviewed")
+
+
+@router.post("/evaluation/advisor-change-sets/{change_set_id}/verification", status_code=status.HTTP_202_ACCEPTED)
+async def run_evaluation_advisor_verification(
+    change_set_id: UUID,
+    payload: EvaluationAdvisorGateRequest,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_QUERY)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        change_set, run = await EvaluationService(session).create_advisor_gate_run(
+            tenant_id=auth.tenant_id,
+            change_set_id=change_set_id,
+            gate_kind="verification",
+            target_snapshot_payload=payload.target_snapshot,
+            actor_id=str(auth.user_id),
+            idempotency_key=payload.idempotency_key,
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    return success_response(
+        data={"change_set": advisor_change_set_payload(change_set), "run": evaluation_run_payload(run)},
+        message="Advisor verification run queued",
+    )
+
+
+@router.post("/evaluation/advisor-change-sets/{change_set_id}/regression", status_code=status.HTTP_202_ACCEPTED)
+async def run_evaluation_advisor_regression(
+    change_set_id: UUID,
+    payload: EvaluationAdvisorGateRequest,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_QUERY)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        change_set, run = await EvaluationService(session).create_advisor_gate_run(
+            tenant_id=auth.tenant_id,
+            change_set_id=change_set_id,
+            gate_kind="regression",
+            target_snapshot_payload=payload.target_snapshot,
+            actor_id=str(auth.user_id),
+            idempotency_key=payload.idempotency_key,
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    return success_response(
+        data={"change_set": advisor_change_set_payload(change_set), "run": evaluation_run_payload(run)},
+        message="Advisor regression run queued",
+    )
+
+
+@router.post("/evaluation/advisor-change-sets/{change_set_id}/apply")
+async def apply_evaluation_advisor_change_set(
+    change_set_id: UUID,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_PUBLISH)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        promotion = await EvaluationService(session).decide_promotion(
+            tenant_id=auth.tenant_id,
+            change_set_id=change_set_id,
+            actor_id=str(auth.user_id),
+        )
+        review = await EvaluationService(session).get_advisor_review(
+            tenant_id=auth.tenant_id,
+            change_set_id=change_set_id,
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    return success_response(
+        data={"promotion": promotion_payload(promotion), "review": _advisor_review_payload(review)},
+        message="Advisor apply decision recorded",
+    )
 
 
 @router.post("/evaluation/feedback/conversation-evaluations/{evaluation_id}/case-draft")

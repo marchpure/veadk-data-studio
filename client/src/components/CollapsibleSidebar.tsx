@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Database, SquarePen, PanelLeftClose, PanelLeft, Sparkles, Download, Home, Search, Boxes, LayoutDashboard } from 'lucide-react'
+import { Database, SquarePen, PanelLeftClose, PanelLeft, Sparkles, Download, Home, Search, Boxes, LayoutDashboard, ClipboardCheck } from 'lucide-react'
 import NotebookHistory from './NotebookHistory'
 import CreateNotebook from './CreateNotebook'
 import ImportNotebookModal from './ImportNotebookModal'
@@ -63,6 +63,9 @@ export default function CollapsibleSidebar() {
     }
     if (path === '/dashboard-assets') {
       return location.pathname === '/dashboard-assets' || location.pathname.startsWith('/dashboard-assets/')
+    }
+    if (path === '/evaluation') {
+      return location.pathname === '/evaluation' || location.pathname.startsWith('/evaluation/')
     }
     if (path === '/llm-connections') {
       return location.pathname === '/llm-connections'
@@ -242,6 +245,22 @@ export default function CollapsibleSidebar() {
                 >
                   <LayoutDashboard className="h-4 w-4 flex-shrink-0" />
                   {isExpanded && <span className="text-sm whitespace-nowrap transition-opacity duration-300">Dashboards</span>}
+                </div>
+              </Link>
+
+              <Link to="/evaluation" onClick={(e) => !isExpanded && e.stopPropagation()}>
+                <div
+                  className={`flex items-center rounded-lg transition-all duration-300 cursor-pointer ${
+                    isExpanded ? 'gap-3 px-3 py-1.5' : 'p-2 justify-center'
+                  } ${
+                    isActive('/evaluation')
+                      ? 'bg-brand-orange/10 text-brand-orange border-l-3 border-brand-orange'
+                      : 'text-gray-300 hover:text-white hover:bg-[#2a2a2a]'
+                  }`}
+                  title={!isExpanded ? "Evaluation" : undefined}
+                >
+                  <ClipboardCheck className="h-4 w-4 flex-shrink-0" />
+                  {isExpanded && <span className="text-sm whitespace-nowrap transition-opacity duration-300">Evaluation</span>}
                 </div>
               </Link>
 

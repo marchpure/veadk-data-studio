@@ -152,6 +152,20 @@ class EvaluationService:
             },
         }
 
+    async def list_advisor_change_sets(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_version_id: str | UUID,
+        limit: int = 50,
+    ) -> list[AdvisorChangeSet]:
+        await self._require_suite_version(tenant_id=tenant_id, suite_version_id=suite_version_id)
+        return await self._repo.list_change_sets_for_suite_version(
+            tenant_id=tenant_id,
+            suite_version_id=suite_version_id,
+            limit=limit,
+        )
+
     async def create_preflight_run(
         self,
         *,
@@ -383,6 +397,49 @@ class EvaluationService:
         await self._session.commit()
         await self._session.refresh(promotion)
         return promotion
+
+    async def get_advisor_review(
+        self,
+        *,
+        tenant_id: str | UUID,
+        change_set_id: str | UUID,
+    ) -> dict[str, Any]:
+        change_set = await self._repo.get_change_set(tenant_id=tenant_id, change_set_id=change_set_id)
+        if change_set is None:
+            raise ValueError("advisor change set not found")
+        suggestions = await self._repo.list_advisor_suggestions_for_change_set(
+            tenant_id=tenant_id,
+            change_set_id=change_set.id,
+        )
+        verification_run = (
+            await self._repo.get_run(tenant_id=tenant_id, run_id=change_set.verification_run_id)
+            if change_set.verification_run_id
+            else None
+        )
+        regression_run = (
+            await self._repo.get_run(tenant_id=tenant_id, run_id=change_set.regression_run_id)
+            if change_set.regression_run_id
+            else None
+        )
+        promotions = await self._repo.list_promotion_decisions_for_change_set(
+            tenant_id=tenant_id,
+            change_set_id=change_set.id,
+        )
+        return {
+            "change_set": change_set,
+            "advisor_suggestions": suggestions,
+            "verification_run": verification_run,
+            "regression_run": regression_run,
+            "promotion_decisions": promotions,
+            "gate_summary": {
+                "verification_gate": self._run_gate_decision(verification_run),
+                "regression_gate": self._run_gate_decision(regression_run),
+                "ready_to_apply": (
+                    self._run_gate_decision(verification_run) == "passed"
+                    and self._run_gate_decision(regression_run) == "passed"
+                ),
+            },
+        }
 
     async def promote_conversation_evaluation_to_case_draft(
         self,

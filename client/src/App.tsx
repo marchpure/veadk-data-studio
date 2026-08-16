@@ -9,6 +9,7 @@ import SourceDetailPage from './pages/SourceDetailPage'
 import DataModelsHomePage from './features/data-modeling/pages/DataModelsHomePage'
 import DataModelBuilderPage from './features/data-modeling/pages/DataModelBuilderPage'
 import DashboardWorkspacePage from './features/dashboard/pages/DashboardWorkspacePage'
+import EvaluationWorkspacePage from './features/evaluation/pages/EvaluationWorkspacePage'
 import TeamMembersPage from './pages/TeamMembers'
 import NotebooksPage from './pages/NotebooksPage'
 import SkillReviewPage from './pages/SkillReviewPage'
@@ -292,6 +293,30 @@ function App() {
             }
           />
           <Route
+            path="/evaluation"
+            element={
+              <AuthGuard>
+                <ViewerRedirect>
+                  <Layout>
+                    <EvaluationWorkspacePage />
+                  </Layout>
+                </ViewerRedirect>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/evaluation/:suiteId"
+            element={
+              <AuthGuard>
+                <ViewerRedirect>
+                  <Layout>
+                    <EvaluationWorkspacePage />
+                  </Layout>
+                </ViewerRedirect>
+              </AuthGuard>
+            }
+          />
+          <Route
             path="/github"
             element={
               <AuthGuard>
@@ -400,6 +425,8 @@ function App() {
             <Route path="/data-models/:modelId" element={<DataModelBuilderPage />} />
             <Route path="/dashboard-assets" element={<DashboardWorkspacePage />} />
             <Route path="/dashboard-assets/:assetId" element={<DashboardWorkspacePage />} />
+            <Route path="/evaluation" element={<EvaluationWorkspacePage />} />
+            <Route path="/evaluation/:suiteId" element={<EvaluationWorkspacePage />} />
             <Route path="/github" element={<GitHubIntegrations />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
             <Route path="/folders" element={<FoldersPage />} />
@@ -448,6 +475,8 @@ function App() {
             <Route path="/data-models/:modelId" element={<DataModelBuilderPage />} />
             <Route path="/dashboard-assets" element={<DashboardWorkspacePage />} />
             <Route path="/dashboard-assets/:assetId" element={<DashboardWorkspacePage />} />
+            <Route path="/evaluation" element={<EvaluationWorkspacePage />} />
+            <Route path="/evaluation/:suiteId" element={<EvaluationWorkspacePage />} />
             <Route path="/github" element={<GitHubIntegrations />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
             <Route path="/folders" element={<FoldersPage />} />
