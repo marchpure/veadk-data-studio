@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from uuid import uuid4
 
@@ -7,6 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from server.mcp import tool_wrappers
+from server.mcp import tools as mcp_tools
 from server.mcp.tool_wrappers import (
     create_dashboard_draft_wrapper,
     describe_dashboard_wrapper,
@@ -272,6 +274,14 @@ async def test_dashboard_mcp_contract_lifecycle_query_and_explain(
     )
     assert lineage_payload["success"] is True
     assert lineage_payload["lineage"]["data_views"][0]["lineage"][0]["ref"] == query_id
+
+
+async def test_dashboard_mcp_legacy_html_tools_are_marked_deprecated() -> None:
+    source = inspect.getsource(mcp_tools.register_all_tools)
+
+    assert "Deprecated legacy-only tool for legacy_unstructured dashboard HTML" in source
+    assert "Deprecated legacy-only search/replace for legacy_unstructured HTML" in source
+    assert "blocked for manifest-backed structured Dashboard versions" in source
 
 
 async def test_dashboard_mcp_publish_requires_publish_scope(test_session: AsyncSession) -> None:

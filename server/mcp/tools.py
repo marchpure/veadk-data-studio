@@ -525,9 +525,11 @@ def register_all_tools(mcp: FastMCP, get_or_create_session_func):
     @mcp.tool()
     async def get_existing_html(context: Context = None) -> str:
         """
-        Get the current dashboard HTML content.
+        Deprecated legacy-only tool for legacy_unstructured dashboard HTML.
 
-        Use this to see what's already in the dashboard before editing.
+        Structured dashboards must use describe_dashboard, query_dashboard, and
+        patch_dashboard_draft with base_etag JSON Patch instead. This tool is
+        blocked for manifest-backed structured Dashboard versions.
         """
         session = await extract_session_from_context(get_or_create_session_func, context)
         if not session["notebook_id"]:
@@ -537,7 +539,11 @@ def register_all_tools(mcp: FastMCP, get_or_create_session_func):
     @mcp.tool()
     async def apply_html_patch(patch_text: str, context: Context = None) -> str:
         """
-        Apply a unified diff patch to modify the dashboard HTML.
+        Deprecated legacy-only tool for legacy_unstructured dashboard HTML.
+
+        Structured dashboards must use patch_dashboard_draft with base_etag
+        JSON Patch. This tool is blocked for manifest-backed structured
+        Dashboard versions and cannot publish structured dashboards.
 
         Args:
             patch_text: Unified diff format patch
@@ -552,7 +558,11 @@ def register_all_tools(mcp: FastMCP, get_or_create_session_func):
     @mcp.tool()
     async def dashboard_search_replace(diff_content: str, context: Context = None) -> str:
         """
-        Search and replace content in the dashboard.
+        Deprecated legacy-only search/replace for legacy_unstructured HTML.
+
+        Structured dashboards must use patch_dashboard_draft with base_etag
+        JSON Patch. This tool is blocked for manifest-backed structured
+        Dashboard versions and cannot publish structured dashboards.
 
         Args:
             diff_content: Search/replace instructions in diff format
