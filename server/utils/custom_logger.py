@@ -3,6 +3,8 @@ import re
 import sys
 from typing import Any
 
+from server.utils.error_sanitizer import sanitize_error_payload, sanitize_text
+
 
 class CustomLogger:
     def __init__(self, name: str):
@@ -23,11 +25,12 @@ class CustomLogger:
         try:
             from server.services.posthog_service import PostHogService
 
+            sanitized_context = sanitize_error_payload(context or {})
             posthog_context = {
                 "module": self.name,
-                "log_message": message,
+                "log_message": sanitize_text(message),
                 "function_name": sys._getframe(3).f_code.co_name,  # Get calling function name
-                **(context or {}),
+                **sanitized_context,
             }
 
             # Automatically use current user_id
@@ -42,11 +45,12 @@ class CustomLogger:
         try:
             from server.services.posthog_service import PostHogService
 
+            sanitized_context = sanitize_error_payload(context or {})
             properties = {
                 "module": self.name,
-                "log_message": message,
+                "log_message": sanitize_text(message),
                 "function_name": sys._getframe(3).f_code.co_name,
-                **(context or {}),
+                **sanitized_context,
             }
 
             # Automatically use current user_id
@@ -59,7 +63,7 @@ class CustomLogger:
     def debug(self, message: str, *args, posthog_context: dict[str, Any] | None = None, **kwargs):
         # Set stacklevel to 2 so logging reports the caller's location, not this wrapper
         kwargs.setdefault("stacklevel", 2)
-        self.logger.debug(message, *args, **kwargs)
+        self.logger.debug(sanitize_text(message), *args, **kwargs)
 
         # Send to PostHog if context provided
         if posthog_context:
@@ -68,7 +72,7 @@ class CustomLogger:
     def info(self, message: str, *args, posthog_context: dict[str, Any] | None = None, **kwargs):
         # Set stacklevel to 2 so logging reports the caller's location, not this wrapper
         kwargs.setdefault("stacklevel", 2)
-        self.logger.info(message, *args, **kwargs)
+        self.logger.info(sanitize_text(message), *args, **kwargs)
 
         # Send to PostHog if context provided
         if posthog_context:
@@ -77,7 +81,7 @@ class CustomLogger:
     def warning(self, message: str, *args, posthog_context: dict[str, Any] | None = None, **kwargs):
         # Set stacklevel to 2 so logging reports the caller's location, not this wrapper
         kwargs.setdefault("stacklevel", 2)
-        self.logger.warning(message, *args, **kwargs)
+        self.logger.warning(sanitize_text(message), *args, **kwargs)
 
         # Send to PostHog if context provided
         if posthog_context:
@@ -86,6 +90,7 @@ class CustomLogger:
     def error(self, message: str, *args, exc_info: Any = None, posthog_context: dict[str, Any] | None = None, **kwargs):
         # Set stacklevel to 2 so logging reports the caller's location, not this wrapper
         kwargs.setdefault("stacklevel", 2)
+        message = sanitize_text(message)
         # Log to standard logger first
         self.logger.error(message, *args, exc_info=exc_info, **kwargs)
 
@@ -108,6 +113,7 @@ class CustomLogger:
     ):
         # Set stacklevel to 2 so logging reports the caller's location, not this wrapper
         kwargs.setdefault("stacklevel", 2)
+        message = sanitize_text(message)
         # Log to standard logger
         self.logger.critical(message, *args, exc_info=exc_info, **kwargs)
 
@@ -149,7 +155,7 @@ class SensitiveDataFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         if hasattr(record, "msg") and record.msg:
-            msg = str(record.msg)
+            msg = sanitize_text(str(record.msg))
             for pattern, replacement in self.PATTERNS:
                 msg = pattern.sub(replacement, msg)
             record.msg = msg

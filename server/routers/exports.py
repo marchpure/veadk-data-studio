@@ -15,6 +15,7 @@ from server.services.settings import SettingsService
 from server.utils.config_loader import get_waitlist_config
 from server.utils.custom_logger import get_logger
 from server.utils.deployment import is_feature_enabled
+from server.utils.error_sanitizer import sanitize_error_message, sanitize_text
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -36,6 +37,16 @@ def _notebook_json_share_response(worker_share: dict) -> dict:
         "created_at": worker_share["created_at"],
         "has_password": worker_share.get("has_password", False),
     }
+
+
+def _log_worker_error(response: httpx.Response | object) -> None:
+    status_code = getattr(response, "status_code", "unknown")
+    body = sanitize_text(str(getattr(response, "text", "")))
+    logger.error(f"Worker returned error: {status_code} - {body}")
+
+
+def _safe_detail(prefix: str, error: Exception) -> str:
+    return f"{prefix}: {sanitize_error_message(error)}"
 
 
 def get_worker_url() -> str:
@@ -102,9 +113,7 @@ async def export_pdf(
                 "version": version,
             },
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to generate PDF: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=_safe_detail("Failed to generate PDF", e))
     except ValueError as e:
         logger.error(
             f"Invalid notebook ID: {str(e)}",
@@ -117,9 +126,7 @@ async def export_pdf(
             exc_info=True,
             posthog_context={"function": "export_pdf", "notebook_id": notebook_id, "version": version},
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to generate PDF: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=_safe_detail("Failed to generate PDF", e))
 
 
 @router.get("/notebooks/{notebook_id}/export/compiled-html")
@@ -175,7 +182,8 @@ async def export_compiled_html(
             posthog_context={"function": "export_compiled_html", "notebook_id": notebook_id, "version": version},
         )
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to generate compiled HTML: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_safe_detail("Failed to generate compiled HTML", e),
         )
 
 
@@ -239,7 +247,7 @@ async def share_notebook(
             )
 
         if response.status_code != 200:
-            logger.error(f"Worker returned error: {response.status_code} - {response.text}")
+            _log_worker_error(response)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create share link")
 
         data = response.json()
@@ -254,7 +262,7 @@ async def share_notebook(
         )
 
     except httpx.ConnectError as e:
-        logger.error(f"Error sharing notebook: {str(e)}")
+        logger.error(f"Error sharing notebook: {sanitize_error_message(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to connect to sharing service. Please check your network connection.",
@@ -262,9 +270,10 @@ async def share_notebook(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error sharing notebook: {str(e)}")
+        logger.error(f"Error sharing notebook: {sanitize_error_message(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to share notebook: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_safe_detail("Failed to share notebook", e),
         ) from e
 
 
@@ -301,14 +310,14 @@ async def get_notebook_share(
             return success_response(data={"share": None}, message="No share exists")
 
         if response.status_code != 200:
-            logger.error(f"Worker returned error: {response.status_code} - {response.text}")
+            _log_worker_error(response)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get share")
 
         share = _dashboard_share_response(notebook_id, response.json())
         return success_response(data={"share": share}, message="Share retrieved")
 
     except httpx.ConnectError as e:
-        logger.error(f"Error getting share: {str(e)}")
+        logger.error(f"Error getting share: {sanitize_error_message(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to connect to sharing service.",
@@ -316,9 +325,10 @@ async def get_notebook_share(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting share: {str(e)}")
+        logger.error(f"Error getting share: {sanitize_error_message(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get share: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_safe_detail("Failed to get share", e),
         ) from e
 
 
@@ -354,13 +364,13 @@ async def delete_share(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
 
         if response.status_code != 200:
-            logger.error(f"Worker returned error: {response.status_code} - {response.text}")
+            _log_worker_error(response)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete share")
 
         return success_response(data=None, message="Share deleted")
 
     except httpx.ConnectError as e:
-        logger.error(f"Error deleting share: {str(e)}")
+        logger.error(f"Error deleting share: {sanitize_error_message(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to connect to sharing service.",
@@ -368,9 +378,10 @@ async def delete_share(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting share: {str(e)}")
+        logger.error(f"Error deleting share: {sanitize_error_message(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete share: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_safe_detail("Failed to delete share", e),
         ) from e
 
 
@@ -431,7 +442,8 @@ async def export_notebook_json(
             posthog_context={"function": "export_notebook_json", "notebook_id": notebook_id},
         )
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to export notebook: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_safe_detail("Failed to export notebook", e),
         )
 
 
@@ -491,7 +503,7 @@ async def share_notebook_json(
             )
 
         if response.status_code != 200:
-            logger.error(f"Worker returned error: {response.status_code} - {response.text}")
+            _log_worker_error(response)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create share link")
 
         data = response.json()
@@ -501,7 +513,7 @@ async def share_notebook_json(
         )
 
     except httpx.ConnectError as e:
-        logger.error(f"Error sharing notebook JSON: {str(e)}")
+        logger.error(f"Error sharing notebook JSON: {sanitize_error_message(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to connect to sharing service. Please check your network connection.",
@@ -509,9 +521,10 @@ async def share_notebook_json(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error sharing notebook JSON: {str(e)}")
+        logger.error(f"Error sharing notebook JSON: {sanitize_error_message(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to share notebook: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_safe_detail("Failed to share notebook", e),
         ) from e
 
 
@@ -544,7 +557,7 @@ async def list_notebook_json_shares(
             )
 
         if response.status_code != 200:
-            logger.error(f"Worker returned error: {response.status_code} - {response.text}")
+            _log_worker_error(response)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list shares")
 
         data = response.json()
@@ -553,7 +566,7 @@ async def list_notebook_json_shares(
         return success_response(data={"shares": shares}, message="Shares retrieved")
 
     except httpx.ConnectError as e:
-        logger.error(f"Error listing JSON shares: {str(e)}")
+        logger.error(f"Error listing JSON shares: {sanitize_error_message(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to connect to sharing service.",
@@ -561,9 +574,10 @@ async def list_notebook_json_shares(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error listing JSON shares: {str(e)}")
+        logger.error(f"Error listing JSON shares: {sanitize_error_message(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to list shares: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_safe_detail("Failed to list shares", e),
         ) from e
 
 
@@ -602,7 +616,7 @@ async def update_notebook_json_share_password(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
 
         if response.status_code != 200:
-            logger.error(f"Worker returned error: {response.status_code} - {response.text}")
+            _log_worker_error(response)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update password")
 
         data = response.json()
@@ -612,7 +626,7 @@ async def update_notebook_json_share_password(
         )
 
     except httpx.ConnectError as e:
-        logger.error(f"Error updating share password: {str(e)}")
+        logger.error(f"Error updating share password: {sanitize_error_message(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to connect to sharing service.",
@@ -620,9 +634,10 @@ async def update_notebook_json_share_password(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error updating share password: {str(e)}")
+        logger.error(f"Error updating share password: {sanitize_error_message(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update password: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_safe_detail("Failed to update password", e),
         ) from e
 
 
@@ -659,13 +674,13 @@ async def delete_notebook_json_share(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
 
         if response.status_code != 200:
-            logger.error(f"Worker returned error: {response.status_code} - {response.text}")
+            _log_worker_error(response)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete share")
 
         return success_response(data=None, message="Share deleted")
 
     except httpx.ConnectError as e:
-        logger.error(f"Error deleting JSON share: {str(e)}")
+        logger.error(f"Error deleting JSON share: {sanitize_error_message(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to connect to sharing service.",
@@ -673,7 +688,8 @@ async def delete_notebook_json_share(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting JSON share: {str(e)}")
+        logger.error(f"Error deleting JSON share: {sanitize_error_message(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete share: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_safe_detail("Failed to delete share", e),
         ) from e

@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration worktree init, dashboard merge integration gates, focused migration/security gates, share/manage secret redaction, worker-backed notebook share/export object authorization, viewer session governed-asset binding, structured dashboard manifest data-view and filter validation. Next slice: prevent errors/logs/audit from leaking password, token, verifier, credentials, cross-tenant objects, or unauthorized SQL.
+CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration worktree init, dashboard merge integration gates, focused migration/security gates, share/manage secret redaction, worker-backed notebook share/export object authorization, viewer session governed-asset binding, structured dashboard manifest data-view/filter validation, share/MCP error redaction. Next slice: Phase 0 completion audit, then Phase 1 Evaluation authoritative model.
 
 ## Phase 0 Slice Checklist
 
@@ -9,7 +9,7 @@ CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration w
 - [~] share/create/delete/rotate/export use correct share/export action scope and unified object authorization for tenant, owner/grant, asset, version, and action. Worker-backed notebook share/export/manage endpoints now enforce tenant + owner + action scope through `server.auth.object_authorizer`; folder share/version manage and future canonical grant checks remain.
 - [x] viewer sessions bind and validate issuer, audience, user, tenant, grant, asset, version, token id, issued-at, not-before, expiry, and revocation/rotation identity.
 - [x] structured dashboard query only accepts immutable manifest `data_view_id` plus validated filters; legacy path is tenant/dashboard-version/notebook bound.
-- [ ] errors, logs, and audit events never leak password, token, verifier, credentials, cross-tenant objects, or unauthorized SQL.
+- [x] errors, logs, and audit events never leak password, token, verifier, credentials, cross-tenant objects, or unauthorized SQL.
 
 ## Environment Side-Effect Registration
 
@@ -170,7 +170,7 @@ Evidence:
 
 ## 2026-08-16 15:24 CST - Phase 0 Structured Dashboard Query Manifest Filters
 
-Commit: pending at time of entry.
+Commit: `858e72282357478a5cd8805fcfacf0e8fd4dd040`.
 
 Scope:
 
@@ -184,4 +184,22 @@ Evidence:
 
 - `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest server/tests/test_dashboard_execution_service.py server/tests/test_dashboard_rest_api.py server/tests/test_dashboard_mcp_contract.py server/tests/test_dashboard_security_regressions.py -q` -> `29 passed, 79 warnings`.
 - `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check server/services/dashboard.py server/tests/test_dashboard_execution_service.py server/tests/test_dashboard_rest_api.py server/tests/test_dashboard_mcp_contract.py` -> passed with existing removed-rule warning.
+- `git diff --check` -> passed.
+
+## 2026-08-16 15:31 CST - Phase 0 Share And MCP Error Redaction
+
+Commit: pending at time of entry.
+
+Scope:
+
+- Extended `server.utils.error_sanitizer` to redact free-form and nested error payloads containing password, token, raw token, verifier, credential, connection strings, and SQL/query text.
+- `CustomLogger` now sanitizes messages and PostHog context before emitting logs/events, reducing leak risk when callers pass raw worker or exception details.
+- Worker-backed notebook share/export routes now sanitize worker error bodies and generic exception details before logs and HTTP responses.
+- MCP `_json_error` now sanitizes both HTTPException details and generic exception messages before returning errors to agents.
+- Added regression coverage proving worker errors and MCP errors do not leak password, token, verifier, credential, or unauthorized SQL strings.
+
+Evidence:
+
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest server/tests/test_error_sanitizer.py server/tests/test_share_secret_redaction.py server/tests/test_share_object_authorization.py server/tests/test_dashboard_execution_service.py server/tests/test_dashboard_rest_api.py server/tests/test_dashboard_mcp_contract.py server/tests/test_dashboard_security_regressions.py -q` -> `43 passed, 80 warnings`.
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check server/utils/error_sanitizer.py server/utils/custom_logger.py server/routers/exports.py server/mcp/tool_wrappers.py server/tests/test_error_sanitizer.py server/tests/test_share_secret_redaction.py server/tests/test_dashboard_mcp_contract.py` -> passed with existing removed-rule warning.
 - `git diff --check` -> passed.

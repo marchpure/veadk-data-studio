@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 from sqlalchemy import select
 
@@ -16,6 +18,11 @@ SENSITIVE_VALUES = {
     "plain-json-password",
     "argon2id-verifier",
     "raw-share-token",
+    "worker-password",
+    "worker-verifier",
+    "worker-token",
+    "worker-credential",
+    "select * from other_tenant.secret_orders",
 }
 
 
@@ -124,6 +131,29 @@ class _WorkerClient:
         )
 
 
+class _FailingWorkerClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def post(self, url: str, **kwargs) -> _WorkerResponse:
+        return _WorkerResponse(
+            500,
+            {
+                "password": "worker-password",
+                "verifier": "worker-verifier",
+                "token": "worker-token",
+                "credential": "worker-credential",
+                "sql": "select * from other_tenant.secret_orders",
+            },
+        )
+
+
 @pytest.fixture
 def share_worker_redaction(monkeypatch):
     monkeypatch.setattr("server.routers.exports.is_feature_enabled", lambda feature: feature == "external_sharing_enabled")
@@ -165,3 +195,34 @@ async def test_share_manage_endpoints_redact_worker_secrets(test_client, test_se
     update_payload = update_response.json()
     _assert_no_share_secret(update_payload)
     assert update_payload["data"] == {"success": True, "has_password": True}
+
+
+async def test_share_worker_errors_do_not_leak_secrets_to_response_or_logs(
+    test_client,
+    test_session,
+    monkeypatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    notebook_id = await _seed_notebook_and_worker_key(test_session)
+
+    async def fake_generate_compiled_html(**_kwargs):
+        return "<html>safe</html>"
+
+    monkeypatch.setattr("server.routers.exports.is_feature_enabled", lambda feature: feature == "external_sharing_enabled")
+    monkeypatch.setattr("server.routers.exports.get_waitlist_config", lambda: {"worker_url": "https://worker.test"})
+    monkeypatch.setattr("server.routers.exports.httpx.AsyncClient", _FailingWorkerClient)
+    monkeypatch.setattr(
+        "server.routers.exports.CompiledHtmlExportService.generate_compiled_html",
+        fake_generate_compiled_html,
+    )
+
+    caplog.set_level(logging.ERROR)
+    response = await test_client.post(f"/api/notebooks/{notebook_id}/share?password=worker-password")
+
+    assert response.status_code == 500
+    payload = response.json()
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+    _assert_no_share_secret(payload)
+    _assert_no_share_secret(log_text)
+    assert "Failed to create share link" in payload["message"]
+    assert "[REDACTED]" in log_text

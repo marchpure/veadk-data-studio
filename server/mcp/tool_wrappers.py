@@ -23,6 +23,7 @@ from server.models.tenant_member import TenantMember, TenantRole
 from server.repositories.dashboard import DashboardRepository
 from server.services.dashboard import DashboardService
 from server.utils.custom_logger import get_logger
+from server.utils.error_sanitizer import sanitize_error_message, sanitize_error_payload
 
 if TYPE_CHECKING:
     from server.mcp.session_manager import MCPSessionManager
@@ -53,7 +54,7 @@ def _json_success(**payload: Any) -> str:
 
 def _json_error(error: Exception | str, *, operation: str | None = None) -> str:
     if isinstance(error, HTTPException):
-        detail = error.detail
+        detail = sanitize_error_payload(error.detail)
         message = detail if isinstance(detail, str) else detail.get("message", detail.get("error", str(detail)))
         payload: dict[str, Any] = {
             "success": False,
@@ -66,7 +67,7 @@ def _json_error(error: Exception | str, *, operation: str | None = None) -> str:
         if isinstance(detail, dict):
             payload["details"] = detail
         return json.dumps(payload, ensure_ascii=False, default=str)
-    payload = {"success": False, "error": str(error)}
+    payload = {"success": False, "error": sanitize_error_message(error)}
     if operation:
         payload["operation"] = operation
     return json.dumps(payload, ensure_ascii=False, default=str)

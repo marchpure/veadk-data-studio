@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from server.mcp import tool_wrappers
 from server.mcp import tools as mcp_tools
 from server.mcp.tool_wrappers import (
+    _json_error,
     create_dashboard_draft_wrapper,
     describe_dashboard_wrapper,
     explain_dashboard_tile_wrapper,
@@ -27,6 +28,29 @@ from server.models.tenant_member import TenantMember, TenantRole
 from server.models.user import User
 
 pytestmark = pytest.mark.asyncio
+
+
+def test_dashboard_mcp_json_error_redacts_sensitive_exception_values() -> None:
+    payload = json.loads(
+        _json_error(
+            RuntimeError(
+                "password=plain-password verifier=argon2id-verifier "
+                "token=raw-token credential=worker-credential "
+                "sql=select * from other_tenant.secret_orders"
+            ),
+            operation="query_dashboard",
+        )
+    )
+
+    assert payload["success"] is False
+    assert payload["operation"] == "query_dashboard"
+    serialized = json.dumps(payload)
+    assert "plain-password" not in serialized
+    assert "argon2id-verifier" not in serialized
+    assert "raw-token" not in serialized
+    assert "worker-credential" not in serialized
+    assert "select * from other_tenant.secret_orders" not in serialized
+    assert "[REDACTED]" in payload["error"]
 
 
 def _manifest_payload(query_id: str) -> dict:
