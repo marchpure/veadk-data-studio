@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 5 — canonical Sharing model/service foundation complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface, Phase 3/4 Human UI workspace and advisor verify/regress/review/apply REST surfaces, Phase 3/4 browser/MCP parity smoke, Phase 5 canonical Sharing grant/secret/viewer-session foundation. Current slice: Phase 5 canonical Sharing REST/MCP/Human compatibility. Next slice: port existing notebook/dashboard/folder share flows to canonical Sharing service while preserving redaction/authorization and legacy compatibility.
+CURRENT_PHASE: Phase 5 — folder dashboard share/viewer compatibility now uses canonical Sharing. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface, Phase 3/4 Human UI workspace and advisor verify/regress/review/apply REST surfaces, Phase 3/4 browser/MCP parity smoke, Phase 5 canonical Sharing grant/secret/viewer-session foundation, Phase 5 folder dashboard canonical compatibility. Current slice: Phase 5 worker-backed notebook share/export compatibility. Next slice: port notebook share create/list/delete/password-manage and export/import paths to canonical grants/secrets while preserving legacy responses.
 
 ## Phase 0 Slice Checklist
 
@@ -456,6 +456,32 @@ Remaining Phase 5 work:
 - Port worker-backed notebook share create/list/delete/password-manage and export/import paths to create/read canonical grants and secrets while continuing to redact password/verifier/raw token fields.
 - Port folder notebook/dashboard share and viewer session checks to canonical grants, compatibility links, and canonical viewer-session validation.
 - Add REST/MCP serializers for canonical Sharing evidence and retain legacy response compatibility for existing UI flows.
+- Run the final real `127.0.0.1:8080` Release Gate only after all Phase 5 local gates pass.
+
+## 2026-08-16 20:18 CST - Phase 5 Folder Dashboard Canonical Sharing Compatibility
+
+Scope:
+
+- Folder dashboard share creation and version updates now upsert a canonical `sharing_grants` row plus a `sharing_compatibility_links` row for the legacy `folder_dashboards.id`.
+- Canonical compatibility grants bind tenant, dashboard object type, dashboard asset/version identity, version digest when available, channel `folder`, audience `folder_member`, and active/revoked lifecycle state.
+- Viewer dashboard access now issues the `viewer_session` cookie through `SharingService`, storing a canonical `sharing_viewer_sessions` digest while preserving the existing signed viewer token format and cookie contract.
+- Viewer query/preflight validation now checks canonical viewer sessions first, including grant/object/version binding and database token digest; legacy token validation remains as a fallback for already-issued sessions.
+- Canonical validation also checks that the linked legacy `folder_dashboards` grant still exists and still points at the same dashboard version, so deleting/rotating the legacy share invalidates the canonical viewer session.
+- Existing Phase 0 object authorization and redaction behavior remains intact; worker-backed notebook sharing is not yet ported in this slice.
+
+Evidence:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_share_object_authorization.py::test_owner_can_folder_share_notebook_and_dashboard_after_dashboard_share_authorization tests/test_dashboard_security_regressions.py::test_viewer_session_accepts_canonical_folder_dashboard_grant_and_rejects_revoked_legacy tests/test_dashboard_security_regressions.py::test_viewer_session_rejects_token_for_different_dashboard tests/test_sharing_canonical_service.py -q` -> `7 passed, 9 warnings`.
+- `cd server && uv run ruff check services/sharing.py services/folder_service.py routers/folders.py tests/test_share_object_authorization.py tests/test_dashboard_security_regressions.py tests/test_sharing_canonical_service.py` -> passed with the existing removed-rule warning.
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_share_object_authorization.py tests/test_share_secret_redaction.py tests/test_dashboard_security_regressions.py tests/test_sharing_canonical_service.py tests/test_sharing_persistence_migration.py tests/test_migration_chain_hardening.py -q` -> `36 passed, 9 warnings`.
+- `cd server && PYTHONPATH=..:tests uv run alembic heads` -> `add_canonical_sharing_model (head)`.
+- `git diff --check` -> passed.
+
+Remaining Phase 5 work:
+
+- Port worker-backed notebook share create/list/delete/password-manage and export/import paths to canonical grants and secrets without changing existing response redaction.
+- Add canonical Sharing serializers/REST read surface for audit/debug evidence while retaining existing UI payload compatibility.
+- Port folder notebook shares or explicitly map their legacy rows into canonical compatibility links.
 - Run the final real `127.0.0.1:8080` Release Gate only after all Phase 5 local gates pass.
 
 ## 2026-08-16 19:17 CST - Phase 3/4 Evaluation Human UI And Advisor REST Lifecycle

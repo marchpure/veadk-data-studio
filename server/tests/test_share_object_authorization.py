@@ -12,6 +12,7 @@ from server.models.folder_member import FolderMember
 from server.models.folder_notebook import FolderNotebook
 from server.models.notebooks import Notebook
 from server.models.settings import Setting
+from server.models.sharing import SharingCompatibilityLink, SharingGrant
 from server.models.tenant import Tenant
 from server.models.tenant_member import TenantMember, TenantRole
 from server.models.user import User
@@ -365,3 +366,19 @@ async def test_owner_can_folder_share_notebook_and_dashboard_after_dashboard_sha
 
     assert notebook_response.status_code == 201
     assert dashboard_response.status_code == 201
+    folder_dashboard_id = dashboard_response.json()["data"]["id"]
+    compatibility = (
+        await test_session.execute(
+            select(SharingCompatibilityLink).where(
+                SharingCompatibilityLink.legacy_surface == "folder_dashboard",
+                SharingCompatibilityLink.legacy_id == folder_dashboard_id,
+            )
+        )
+    ).scalar_one()
+    grant = await test_session.get(SharingGrant, compatibility.grant_id)
+    assert grant is not None
+    assert grant.object_type == "dashboard"
+    assert str(grant.object_version_id) == dashboard_id
+    assert grant.channel == "folder"
+    assert grant.audience == "folder_member"
+    assert grant.status == "active"

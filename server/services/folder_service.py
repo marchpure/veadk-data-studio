@@ -29,6 +29,7 @@ from server.schemas.notebook_export import NotebookExport
 from server.services.agent_session_factory import create_agent_session
 from server.services.dataset import DatasetService
 from server.services.notebook_export_service import NotebookExportService
+from server.services.sharing import SharingService
 from server.utils.custom_logger import get_logger
 
 logger = get_logger(__name__)
@@ -421,6 +422,12 @@ class FolderService:
             existing_from_notebook.is_snapshot = is_snapshot
             await session.commit()
             await session.refresh(existing_from_notebook)
+            await SharingService(session).ensure_folder_dashboard_grant(
+                tenant_id=dashboard.tenant_id,
+                actor_id=shared_by,
+                folder_dashboard_id=existing_from_notebook.id,
+                dashboard_id=dashboard_id,
+            )
             logger.info(
                 f"Dashboard share updated from {old_dashboard_id} to {dashboard_id} "
                 f"in folder {folder_id} by user {shared_by}"
@@ -440,6 +447,12 @@ class FolderService:
         session.add(folder_dashboard)
         await session.commit()
         await session.refresh(folder_dashboard)
+        await SharingService(session).ensure_folder_dashboard_grant(
+            tenant_id=dashboard.tenant_id,
+            actor_id=shared_by,
+            folder_dashboard_id=folder_dashboard.id,
+            dashboard_id=dashboard_id,
+        )
 
         share_type = "snapshot" if is_snapshot else "live"
         logger.info(f"Dashboard {dashboard_id} shared ({share_type}) to folder {folder_id} by user {shared_by}")
@@ -595,6 +608,12 @@ class FolderService:
         folder_dashboard.dashboard_id = new_dashboard_id
         await session.commit()
         await session.refresh(folder_dashboard)
+        await SharingService(session).ensure_folder_dashboard_grant(
+            tenant_id=new_dashboard.tenant_id,
+            actor_id=user_id,
+            folder_dashboard_id=folder_dashboard.id,
+            dashboard_id=new_dashboard_id,
+        )
 
         logger.info(
             f"Dashboard version updated in folder {folder_id}: {old_dashboard_id} -> {new_dashboard_id} by user {user_id}"

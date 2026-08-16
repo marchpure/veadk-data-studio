@@ -13,10 +13,12 @@ from server.models.folder_dashboard import FolderDashboard
 from server.models.folder_member import FolderMember
 from server.models.notebooks import Notebook
 from server.models.queries import Query
+from server.models.sharing import SharingCompatibilityLink, SharingGrant, SharingViewerSession
 from server.models.tenant import Tenant
 from server.models.user import User
 from server.routers import folders
 from server.schemas.query import BatchExecuteSavedQueriesRequest, QueryWithFilters
+from server.services.sharing import SharingService
 from server.services.viewer_session_service import ViewerSessionService
 
 
@@ -350,6 +352,101 @@ async def test_viewer_session_rejects_token_for_different_dashboard(test_session
     grant = await test_session.get(FolderDashboard, grant_id)
     assert grant is not None
     await test_session.delete(grant)
+    await test_session.commit()
+
+    with pytest.raises(HTTPException) as revoked_exc:
+        await folders._require_viewer_session(dashboard_id, token, test_session)
+
+    assert revoked_exc.value.status_code == 403
+    assert "viewer session grant has been revoked or rotated" in str(revoked_exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_viewer_session_accepts_canonical_folder_dashboard_grant_and_rejects_revoked_legacy(
+    test_session: AsyncSession,
+) -> None:
+    user_id = uuid4()
+    tenant_id = uuid4()
+    dashboard_id = uuid4()
+    asset_id = uuid4()
+    folder_id = uuid4()
+    legacy_grant_id = uuid4()
+
+    user = User(
+        id=user_id,
+        email="canonical-viewer-session@example.test",
+        hashed_password="hash",
+        is_active=True,
+        is_verified=True,
+    )
+    test_session.add(user)
+    await test_session.flush()
+    test_session.add(Tenant(id=tenant_id, name="Canonical Viewer Tenant", slug=f"canonical-{tenant_id}", owner_id=user_id))
+    await test_session.flush()
+    test_session.add(Folder(id=folder_id, tenant_id=tenant_id, created_by=user_id, name="Canonical shared dashboards"))
+    notebook = Notebook(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        created_by=user_id,
+        notebook_name="Canonical viewer notebook",
+    )
+    test_session.add(notebook)
+    await test_session.flush()
+    test_session.add(
+        DashboardAsset(
+            id=asset_id,
+            tenant_id=tenant_id,
+            notebook_id=notebook.id,
+            slug="canonical-viewer-session-dashboard",
+            name="Canonical Viewer Session Dashboard",
+            owner_id=user_id,
+        )
+    )
+    test_session.add(FolderMember(folder_id=folder_id, user_id=user_id, added_by=user_id))
+    await test_session.flush()
+    test_session.add_all(
+        [
+            Dashboard(
+                id=dashboard_id,
+                tenant_id=tenant_id,
+                notebook_id=notebook.id,
+                asset_id=asset_id,
+                version_num=1,
+                html_content="<html></html>",
+            ),
+            FolderDashboard(
+                id=legacy_grant_id,
+                folder_id=folder_id,
+                dashboard_id=dashboard_id,
+                shared_by=user_id,
+            ),
+        ]
+    )
+    await test_session.commit()
+
+    canonical_grant = await SharingService(test_session).ensure_folder_dashboard_grant(
+        tenant_id=tenant_id,
+        actor_id=user_id,
+        folder_dashboard_id=legacy_grant_id,
+        dashboard_id=dashboard_id,
+    )
+    token, viewer_session = await SharingService(test_session).issue_viewer_session_for_grant(
+        grant=canonical_grant,
+        viewer_user_id=user_id,
+    )
+
+    assert await folders._require_viewer_session(dashboard_id, token, test_session) == user_id
+    assert (
+        await test_session.execute(
+            select(SharingCompatibilityLink).where(SharingCompatibilityLink.legacy_id == str(legacy_grant_id))
+        )
+    ).scalar_one()
+    assert await test_session.get(SharingGrant, canonical_grant.id) is not None
+    assert await test_session.get(SharingViewerSession, viewer_session.id) is not None
+
+    legacy_grant = await test_session.get(FolderDashboard, legacy_grant_id)
+    assert legacy_grant is not None
+    await test_session.delete(legacy_grant)
     await test_session.commit()
 
     with pytest.raises(HTTPException) as revoked_exc:

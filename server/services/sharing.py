@@ -11,7 +11,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.dashboard import Dashboard, DashboardAsset
-from server.models.sharing import SharingAuditEvent, SharingGrant, SharingSecret, SharingViewerSession
+from server.models.folder_dashboard import FolderDashboard
+from server.models.sharing import (
+    SharingAuditEvent,
+    SharingCompatibilityLink,
+    SharingGrant,
+    SharingSecret,
+    SharingViewerSession,
+)
 from server.services.viewer_session_service import ViewerSessionService
 from server.utils.error_sanitizer import sanitize_error_payload
 
@@ -73,6 +80,74 @@ class SharingService:
                 action="sharing.grant.create",
                 outcome="active",
                 details={"metadata": metadata or {}, "has_password": bool(password)},
+            )
+        )
+        await self._session.commit()
+        await self._session.refresh(grant)
+        return grant
+
+    async def ensure_folder_dashboard_grant(
+        self,
+        *,
+        tenant_id: str | UUID,
+        actor_id: str | UUID,
+        folder_dashboard_id: str | UUID,
+        dashboard_id: str | UUID,
+    ) -> SharingGrant:
+        tenant_uuid = _coerce_uuid(tenant_id)
+        actor_uuid = _coerce_uuid(actor_id)
+        folder_dashboard_uuid = _coerce_uuid(folder_dashboard_id)
+        legacy_id = str(folder_dashboard_uuid)
+        existing = await self._grant_for_legacy_link("folder_dashboard", legacy_id)
+        dashboard = await self._require_dashboard(tenant_id=tenant_uuid, dashboard_id=_coerce_uuid(dashboard_id))
+        asset_id = dashboard.asset_id or dashboard.id
+        version_digest = dashboard.content_hash or ""
+        if existing is not None:
+            existing.object_id = asset_id
+            existing.object_version_id = dashboard.id
+            existing.object_version_digest = version_digest
+            existing.status = "active"
+            existing.revoked_at = None
+            existing.revoked_by = None
+            existing.revocation_reason = None
+            existing.metadata_json = sanitize_error_payload(
+                {"legacy_surface": "folder_dashboard", "legacy_id": legacy_id, "dashboard_id": str(dashboard.id)}
+            )
+            await self._session.flush()
+            grant = existing
+        else:
+            grant = SharingGrant(
+                tenant_id=tenant_uuid,
+                object_type="dashboard",
+                object_id=asset_id,
+                object_version_id=dashboard.id,
+                object_version_digest=version_digest,
+                mode="immutable_version",
+                channel="folder",
+                audience="folder_member",
+                status="active",
+                created_by=actor_uuid,
+                metadata_json={"legacy_surface": "folder_dashboard", "legacy_id": legacy_id},
+            )
+            self._session.add(grant)
+            await self._session.flush()
+            self._session.add(
+                SharingCompatibilityLink(
+                    tenant_id=tenant_uuid,
+                    grant_id=grant.id,
+                    legacy_surface="folder_dashboard",
+                    legacy_id=legacy_id,
+                    metadata_json={"dashboard_id": str(dashboard.id)},
+                )
+            )
+        self._session.add(
+            self._audit_event(
+                tenant_id=tenant_uuid,
+                grant=grant,
+                actor_id=str(actor_uuid),
+                action="sharing.compat.folder_dashboard.upsert",
+                outcome="active",
+                details={"legacy_id": legacy_id, "dashboard_id": str(dashboard.id)},
             )
         )
         await self._session.commit()
@@ -147,6 +222,20 @@ class SharingService:
         await self._session.refresh(viewer_session)
         return token, viewer_session
 
+    async def issue_viewer_session_for_grant(
+        self,
+        *,
+        grant: SharingGrant,
+        viewer_user_id: str | UUID,
+        principal: dict[str, Any] | None = None,
+    ) -> tuple[str, SharingViewerSession]:
+        return await self.issue_viewer_session(
+            tenant_id=grant.tenant_id,
+            grant_id=grant.id,
+            viewer_user_id=viewer_user_id,
+            principal=principal,
+        )
+
     async def require_viewer_session(
         self,
         *,
@@ -183,6 +272,30 @@ class SharingService:
         )
         row = result.first()
         return row[0] if row else None
+
+    async def require_viewer_session_for_dashboard(
+        self,
+        *,
+        token: str,
+        dashboard_id: str | UUID,
+    ) -> tuple[UUID, SharingViewerSession] | None:
+        payload = ViewerSessionService.verify(token)
+        if payload is None or not payload.get("uid") or not payload.get("grant_id"):
+            return None
+        dashboard = await self._dashboard_for_viewer_payload(payload=payload, dashboard_id=_coerce_uuid(dashboard_id))
+        if dashboard is None:
+            return None
+        viewer_session = await self.require_viewer_session(
+            token=token,
+            grant_id=payload["grant_id"],
+            object_id=dashboard.asset_id or dashboard.id,
+            object_version_id=dashboard.id,
+        )
+        if viewer_session is None:
+            return None
+        if not await self._legacy_folder_dashboard_is_active(viewer_session=viewer_session):
+            return None
+        return _coerce_uuid(payload["uid"]), viewer_session
 
     async def revoke_grant(
         self,
@@ -246,6 +359,74 @@ class SharingService:
         if version.status != "published" or not version.is_published_immutable:
             raise ValueError("canonical sharing requires an immutable published dashboard version")
         return asset, version
+
+    async def _require_dashboard(self, *, tenant_id: UUID, dashboard_id: UUID) -> Dashboard:
+        result = await self._session.execute(
+            select(Dashboard).where(
+                Dashboard.tenant_id == tenant_id,
+                Dashboard.id == dashboard_id,
+            )
+        )
+        dashboard = result.scalars().first()
+        if dashboard is None:
+            raise ValueError("dashboard not found")
+        return dashboard
+
+    async def _grant_for_legacy_link(self, legacy_surface: str, legacy_id: str) -> SharingGrant | None:
+        result = await self._session.execute(
+            select(SharingGrant)
+            .join(SharingCompatibilityLink, SharingCompatibilityLink.grant_id == SharingGrant.id)
+            .where(
+                SharingCompatibilityLink.legacy_surface == legacy_surface,
+                SharingCompatibilityLink.legacy_id == legacy_id,
+            )
+        )
+        return result.scalars().first()
+
+    async def _dashboard_for_viewer_payload(self, *, payload: dict[str, Any], dashboard_id: UUID) -> Dashboard | None:
+        try:
+            tenant_id = _coerce_uuid(payload["tid"])
+            asset_id = _coerce_uuid(payload["asset_id"])
+            version_id = _coerce_uuid(payload["version_id"])
+        except (KeyError, ValueError):
+            return None
+        if version_id != dashboard_id:
+            return None
+        criteria = [Dashboard.tenant_id == tenant_id, Dashboard.id == dashboard_id]
+        if asset_id != dashboard_id:
+            criteria.append(Dashboard.asset_id == asset_id)
+        result = await self._session.execute(select(Dashboard).where(*criteria))
+        dashboard = result.scalars().first()
+        if dashboard is None and asset_id == dashboard_id:
+            result = await self._session.execute(
+                select(Dashboard).where(
+                    Dashboard.tenant_id == tenant_id,
+                    Dashboard.id == dashboard_id,
+                    Dashboard.asset_id.is_(None),
+                )
+            )
+            dashboard = result.scalars().first()
+        return dashboard
+
+    async def _legacy_folder_dashboard_is_active(self, *, viewer_session: SharingViewerSession) -> bool:
+        result = await self._session.execute(
+            select(SharingGrant, SharingCompatibilityLink)
+            .join(SharingCompatibilityLink, SharingCompatibilityLink.grant_id == SharingGrant.id)
+            .where(
+                SharingGrant.id == viewer_session.grant_id,
+                SharingCompatibilityLink.legacy_surface == "folder_dashboard",
+            )
+        )
+        row = result.first()
+        if row is None:
+            return True
+        _, link = row
+        try:
+            legacy_id = _coerce_uuid(link.legacy_id)
+        except ValueError:
+            return False
+        legacy = await self._session.get(FolderDashboard, legacy_id)
+        return legacy is not None and legacy.dashboard_id == viewer_session.object_version_id
 
     async def _require_active_grant(self, *, tenant_id: UUID, grant_id: UUID) -> SharingGrant:
         result = await self._session.execute(

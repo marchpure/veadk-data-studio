@@ -51,6 +51,7 @@ from server.services.filter_config_service import normalize_filters_for_client
 from server.services.folder_service import FolderService
 from server.services.notebook import NotebookService
 from server.services.query_service import QueryService
+from server.services.sharing import SharingService
 from server.services.viewer_session_service import VIEWER_SESSION_MINUTES, ViewerSessionService
 from server.utils.config_loader import is_self_hosted
 from server.utils.custom_logger import get_logger
@@ -67,6 +68,13 @@ async def _require_viewer_session(
 ) -> UUID:
     if not viewer_session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing viewer session")
+
+    canonical = await SharingService(session).require_viewer_session_for_dashboard(
+        token=viewer_session,
+        dashboard_id=dashboard_id,
+    )
+    if canonical is not None:
+        return canonical[0]
 
     payload = ViewerSessionService.verify(viewer_session)
     if not payload:
@@ -1132,12 +1140,16 @@ async def get_viewer_dashboard(
 
         from server.utils.deployment import should_use_secure_cookie
 
-        viewer_token = ViewerSessionService.generate_token(
-            user_id=auth.user_id,
-            tenant_id=auth.tenant_id,
-            grant_id=folder_grant.id,
-            asset_id=dashboard.asset_id or dashboard.id,
-            version_id=dashboard.id,
+        canonical_grant = await SharingService(session).ensure_folder_dashboard_grant(
+            tenant_id=dashboard.tenant_id,
+            actor_id=folder_grant.shared_by or auth.user_id,
+            folder_dashboard_id=folder_grant.id,
+            dashboard_id=dashboard.id,
+        )
+        viewer_token, _ = await SharingService(session).issue_viewer_session_for_grant(
+            grant=canonical_grant,
+            viewer_user_id=auth.user_id,
+            principal={"surface": "folder_dashboard", "legacy_grant_id": str(folder_grant.id)},
         )
 
         response.set_cookie(
