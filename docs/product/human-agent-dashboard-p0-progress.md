@@ -408,6 +408,35 @@ Commit:
 
 - `817fca6` `dashboard: backfill legacy dashboard assets`
 
+### Phase 6 Acceptance Slice: REST/MCP Query Parity
+
+Status: implemented; pending commit/push.
+
+Allowlist:
+
+- `server/services/dashboard.py`
+- `server/mcp/tool_wrappers.py` - conditional shared MCP wrapper; compact run serialization only.
+- `server/tests/test_dashboard_rest_api.py`
+- `server/tests/test_dashboard_mcp_contract.py`
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Behavior:
+
+- Preserved `as_of`/`cached_at` from the underlying saved-query execution result in canonical Dashboard run view results, falling back to run time only when the query executor does not provide freshness metadata.
+- Extended compact MCP query responses with canonical run fields needed for Human/MCP parity: actor/correlation/idempotency/mode, normalized filters, and execution plan digest.
+- Added REST-to-MCP parity coverage for the same tenant principal, dashboard version, filters, data view, run digests, pinned versions, freshness, values, schema, warnings, and `as_of`.
+- Added MCP query guard coverage proving unknown data views and unsupported cursor pagination fail before saved-query execution.
+
+Tests:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py` -> passed, `6 passed`.
+- `cd server && uv run ruff check services/dashboard.py mcp/tool_wrappers.py tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py` -> passed.
+- `git diff --check` -> passed.
+
+Commit:
+
+- Pending `dashboard: add rest mcp query parity`
+
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
@@ -424,6 +453,7 @@ Commit:
 | `d9ac360` | `dashboard: add review reload workflow` | Phase 4 review/preview/publish/reload slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> 5 passed; `ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `77bfd98` | `dashboard: preserve share export compatibility` | Phase 4 share/export/legacy compatibility slice | `pytest tests/test_dashboard_rest_api.py` -> 2 passed; `ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `817fca6` | `dashboard: backfill legacy dashboard assets` | Phase 5 legacy asset backfill slice | `pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> 7 passed; `ruff check migrations/versions/backfill_legacy_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with existing 355 warnings; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| Pending | `dashboard: add rest mcp query parity` | Phase 6 REST/MCP query parity slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py` -> 6 passed; `ruff check services/dashboard.py mcp/tool_wrappers.py tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py` -> passed; `git diff --check` -> passed | Pending push |
 
 ## Acceptance Evidence
 

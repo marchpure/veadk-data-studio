@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from server.models.dashboard import DashboardRun
 from server.models.notebooks import Notebook
 from server.models.tenant import Tenant
+from server.models.user import User
 
 pytestmark = pytest.mark.asyncio
 
@@ -95,6 +98,23 @@ async def _seed_notebook(test_session) -> Notebook:
     await test_session.commit()
     await test_session.refresh(notebook)
     return notebook
+
+
+async def _seed_owned_notebook(test_session) -> tuple[Tenant, User, Notebook]:
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+    owner = await test_session.get(User, tenant.owner_id)
+    assert owner is not None
+    notebook = Notebook(
+        id=uuid4(),
+        tenant_id=tenant.id,
+        created_by=tenant.owner_id,
+        notebook_name="Dashboard REST parity notebook",
+    )
+    test_session.add(notebook)
+    await test_session.commit()
+    await test_session.refresh(notebook)
+    return tenant, owner, notebook
 
 
 async def test_dashboard_asset_rest_lifecycle_query_state_lineage_and_audit(
@@ -190,6 +210,7 @@ async def test_dashboard_asset_rest_lifecycle_query_state_lineage_and_audit(
             "query_id": query_id_arg,
             "cached": True,
             "stale": False,
+            "as_of": "2026-08-16T00:00:00",
         }
 
     monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
@@ -250,6 +271,7 @@ async def test_dashboard_asset_rest_lifecycle_query_state_lineage_and_audit(
     assert run["dashboard_id"] == asset["id"]
     assert run["views"][0]["result"] == [{"revenue": 42}]
     assert run["views"][0]["cached"] is True
+    assert run["views"][0]["as_of"] == "2026-08-16T00:00:00"
 
     saved_run = await test_session.get(DashboardRun, run["run_id"])
     assert saved_run is not None
@@ -310,3 +332,93 @@ async def test_dashboard_asset_rest_enforces_tenant_and_notebook_boundaries(test
     response = await test_client.get(f"/api/dashboard-assets/{uuid4()}")
     assert response.status_code == 404
     assert response.json()["message"] == "Dashboard asset not found"
+
+
+async def test_dashboard_rest_query_matches_mcp_contract_for_same_principal(
+    test_client,
+    test_session,
+    test_engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.mcp import tool_wrappers
+    from server.mcp.tool_wrappers import query_dashboard_wrapper
+
+    tenant, owner, notebook = await _seed_owned_notebook(test_session)
+    query_id = str(uuid4())
+    manifest = _manifest_payload(query_id, dashboard_id="dash-rest-mcp-parity")
+    create_response = await test_client.post(
+        "/api/dashboard-assets",
+        json={
+            "slug": "rest-mcp-parity-dashboard",
+            "notebook_id": str(notebook.id),
+            "manifest": manifest,
+            "change_summary": "create parity dashboard",
+        },
+    )
+    assert create_response.status_code == 201
+    asset = create_response.json()["data"]
+    publish_response = await test_client.post(
+        f"/api/dashboard-assets/{asset['id']}/publish",
+        json={"base_etag": asset["etag"], "change_summary": "publish parity dashboard"},
+    )
+    assert publish_response.status_code == 200
+
+    async def fake_execute_saved_query(session, query_id_arg, filters=None, viewer_user_id=None):
+        return {
+            "success": True,
+            "data": [{"revenue": 42, "region": "AMER"}],
+            "query_name": "Parity query",
+            "query_id": query_id_arg,
+            "cached": True,
+            "stale": False,
+            "as_of": "2026-08-16T12:34:56",
+        }
+
+    monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
+
+    rest_response = await test_client.post(
+        f"/api/dashboard-assets/{asset['id']}/query",
+        json={
+            "filters": {"region": "AMER"},
+            "data_view_ids": ["dv-saved-revenue"],
+            "correlation_id": "parity",
+            "idempotency_key": "rest-parity",
+        },
+    )
+    assert rest_response.status_code == 200
+    rest_run = rest_response.json()["data"]
+
+    monkeypatch.setattr(
+        tool_wrappers,
+        "AsyncSessionFactory",
+        async_sessionmaker(bind=test_engine, class_=AsyncSession, expire_on_commit=False),
+    )
+    mcp_payload = json.loads(
+        await query_dashboard_wrapper(
+            asset["id"],
+            ["dv-saved-revenue"],
+            {"region": "AMER"},
+            "",
+            20,
+            tenant.id,
+            owner.id,
+        )
+    )
+    assert mcp_payload["success"] is True
+    mcp_run = mcp_payload["run"]
+
+    assert mcp_run["dashboard_id"] == rest_run["dashboard_id"]
+    assert mcp_run["dashboard_version_id"] == rest_run["dashboard_version_id"]
+    assert mcp_run["mode"] == rest_run["mode"] == "live"
+    assert mcp_run["normalized_filters"] == rest_run["normalized_filters"] == {"region": "AMER"}
+    assert mcp_run["filter_digest"] == rest_run["filter_digest"]
+    assert mcp_run["execution_plan_digest"] == rest_run["execution_plan_digest"]
+    assert mcp_run["pinned_versions"] == rest_run["pinned_versions"]
+    assert mcp_run["overall_freshness"] == rest_run["overall_freshness"]
+    assert mcp_run["warnings"] == rest_run["warnings"]
+    assert mcp_run["views"][0]["data_view_id"] == rest_run["views"][0]["data_view_id"]
+    assert mcp_run["views"][0]["result"] == rest_run["views"][0]["result"]
+    assert mcp_run["views"][0]["schema"] == rest_run["views"][0]["schema"]
+    assert mcp_run["views"][0]["cached"] == rest_run["views"][0]["cached"] is True
+    assert mcp_run["views"][0]["stale"] == rest_run["views"][0]["stale"] is False
+    assert mcp_run["views"][0]["as_of"] == rest_run["views"][0]["as_of"] == "2026-08-16T12:34:56"

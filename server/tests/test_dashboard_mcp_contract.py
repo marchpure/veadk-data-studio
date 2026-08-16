@@ -226,6 +226,7 @@ async def test_dashboard_mcp_contract_lifecycle_query_and_explain(
             "data": [{"revenue": 42}, {"revenue": 43}],
             "cached": True,
             "stale": False,
+            "as_of": "2026-08-16T12:34:56",
         }
 
     monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
@@ -244,9 +245,14 @@ async def test_dashboard_mcp_contract_lifecycle_query_and_explain(
     assert query_payload["success"] is True
     run = query_payload["run"]
     assert run["actor_type"] == "agent"
+    assert run["mode"] == "live"
+    assert run["normalized_filters"] == {"region": "AMER"}
     assert run["filter_digest"].startswith("sha256:")
+    assert run["execution_plan_digest"].startswith("sha256:")
+    assert run["pinned_versions"] == {"semantic_models": {"sales": "v1"}, "source_snapshots": ["snapshot-1"]}
     assert run["views"][0]["result"] == [{"revenue": 42}]
     assert run["views"][0]["pagination"]["has_more"] is True
+    assert run["views"][0]["as_of"] == "2026-08-16T12:34:56"
     assert captured["query_id"] == query_id
     assert captured["viewer_user_id"] is None
 
@@ -308,3 +314,70 @@ async def test_dashboard_mcp_publish_requires_publish_scope(test_session: AsyncS
     assert publish_payload["success"] is False
     assert publish_payload["status_code"] == 403
     assert "dashboard.publish" in publish_payload["error"]
+
+
+async def test_dashboard_mcp_query_rejects_unknown_view_and_cursor_before_execution(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ids = await _seed_owner_notebook(test_session)
+    query_id = str(uuid4())
+    create_payload = json.loads(
+        await create_dashboard_draft_wrapper(
+            "mcp-query-guard-dashboard",
+            str(ids["notebook_id"]),
+            json.dumps(_manifest_payload(query_id)),
+            ids["tenant_id"],
+            ids["user_id"],
+        )
+    )
+    dashboard = create_payload["dashboard"]
+    publish_payload = json.loads(
+        await publish_dashboard_wrapper(
+            dashboard["id"],
+            dashboard["etag"],
+            "publish for query guard",
+            ids["tenant_id"],
+            ids["user_id"],
+        )
+    )
+    assert publish_payload["success"] is True
+
+    executed = False
+
+    async def fake_execute_saved_query(*_args, **_kwargs):
+        nonlocal executed
+        executed = True
+        return {"success": True, "data": [{"revenue": 42}]}
+
+    monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
+
+    unknown_view_payload = json.loads(
+        await query_dashboard_wrapper(
+            dashboard["id"],
+            ["missing-view"],
+            {},
+            "",
+            20,
+            ids["tenant_id"],
+            ids["user_id"],
+        )
+    )
+    assert unknown_view_payload["success"] is False
+    assert unknown_view_payload["status_code"] == 403
+    assert executed is False
+
+    cursor_payload = json.loads(
+        await query_dashboard_wrapper(
+            dashboard["id"],
+            ["dv-saved-revenue"],
+            {},
+            "opaque-cursor",
+            20,
+            ids["tenant_id"],
+            ids["user_id"],
+        )
+    )
+    assert cursor_payload["success"] is False
+    assert cursor_payload["status_code"] == 400
+    assert executed is False

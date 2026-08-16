@@ -822,7 +822,7 @@ class DashboardService:
             "row_count": row_count,
             "cached": bool(result.get("cached", False)),
             "stale": bool(result.get("stale", False)),
-            "as_of": datetime.utcnow().isoformat(),
+            "as_of": result.get("as_of") or result.get("cached_at") or datetime.utcnow().isoformat(),
             "warnings": [f"saved_query compatibility binding: {saved_query['compatibility_reason']}"],
             "evidence": data_view.get("evidence", []),
             "lineage": data_view.get("lineage") or saved_query.get("lineage", []),
