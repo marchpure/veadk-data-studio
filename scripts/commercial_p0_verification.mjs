@@ -36,6 +36,8 @@ const evidenceDir = resolve(
     || join(process.env.HOME || root, '.codex', 'data-studio-commercial-p0-evidence', `run-${timestamp}`),
 )
 const selectedAssetPath = process.env.COMMERCIAL_P0_ASSET_PATH || '/dashboard-assets/commercial-verification-asset'
+const authEmail = process.env.E2E_EMAIL || process.env.MASTER_USER_EMAIL || ''
+const authPassword = process.env.E2E_PASSWORD || process.env.MASTER_USER_PASSWORD || ''
 
 mkdirSync(evidenceDir, { recursive: true })
 mkdirSync(join(evidenceDir, 'screenshots'), { recursive: true })
@@ -96,7 +98,7 @@ function slug(input) {
 async function probeApi(probe) {
   const startedAt = Date.now()
   const url = toURL(apiURL, probe.path)
-  const headers = {}
+  const headers = authState.accessToken ? { authorization: `Bearer ${authState.accessToken}` } : {}
   const options = { method: probe.method || 'GET', headers }
   if (probe.body) {
     headers['content-type'] = 'application/json'
@@ -132,6 +134,46 @@ async function probeApi(probe) {
       elapsed_ms: Date.now() - startedAt,
       error: error.message,
     }
+  }
+}
+
+const authState = {
+  attempted: false,
+  ok: false,
+  accessToken: '',
+  status: null,
+  error: null,
+}
+
+async function authenticateApiIfConfigured() {
+  if (!authEmail || !authPassword) {
+    authState.error = 'E2E_EMAIL/E2E_PASSWORD or MASTER_USER_EMAIL/MASTER_USER_PASSWORD not set'
+    return
+  }
+  authState.attempted = true
+  const body = new URLSearchParams()
+  body.set('username', authEmail)
+  body.set('password', authPassword)
+  try {
+    const response = await fetch(toURL(apiURL, '/api/auth/login'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+    authState.status = response.status
+    const text = await response.text()
+    if (!response.ok) {
+      authState.error = redact(text)
+      return
+    }
+    const json = JSON.parse(text)
+    authState.accessToken = json?.data?.access_token || json?.access_token || ''
+    authState.ok = Boolean(authState.accessToken)
+    if (!authState.ok) {
+      authState.error = 'login response did not contain access_token'
+    }
+  } catch (error) {
+    authState.error = error.message
   }
 }
 
@@ -321,6 +363,7 @@ function provenance() {
 async function main() {
   const apiResults = []
   if (!args['skip-api']) {
+    await authenticateApiIfConfigured()
     for (const probe of matrix.api_probes) {
       apiResults.push(await probeApi(probe))
     }
@@ -359,6 +402,13 @@ async function main() {
     base_url: baseURL,
     api_url: apiURL,
     evidence_dir: evidenceDir,
+    auth: {
+      attempted: authState.attempted,
+      ok: authState.ok,
+      status: authState.status,
+      error: authState.error,
+      email: authEmail ? authEmail.replace(/^(.).+(@.+)$/, '$1***$2') : null,
+    },
     matrix,
     provenance: provenance(),
     static_surface: staticSurfaceEvidence(),

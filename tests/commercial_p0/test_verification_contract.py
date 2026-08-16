@@ -93,9 +93,19 @@ def test_runner_documents_isolated_runtime_without_touching_8080() -> None:
     assert "BACKEND_PORT=\"${BACKEND_PORT:-18123}\"" in runner
     assert "FRONTEND_PORT=\"${FRONTEND_PORT:-15179}\"" in runner
     assert "byaan-commercial-p0-postgres-data" in runner
+    assert "SQLITE_DB=\"${SQLITE_DB:-$APP_DATA_DIR/sqlite/app.db}\"" in runner
     assert "sqlite+aiosqlite:///$SQLITE_DB" in runner
     assert "iTCP:8080" not in runner
     assert "kill 8080" not in runner
+
+
+def test_verifier_supports_self_hosted_auth_probe() -> None:
+    verifier = SCRIPT_PATH.read_text()
+
+    assert "/api/auth/login" in verifier
+    assert "MASTER_USER_EMAIL" in verifier
+    assert "MASTER_USER_PASSWORD" in verifier
+    assert "Bearer ${authState.accessToken}" in verifier
 
 
 def test_report_contains_all_required_evidence_sections() -> None:
