@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 3 — Evaluation REST runner and promotion API slice complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API. Current slice: ready for Phase 3 feedback-to-case/advisor review wiring. Next slice: expose feedback-to-evaluation-case and advisor review surfaces, then add MCP/Human UI integration.
+CURRENT_PHASE: Phase 3 — Evaluation feedback/advisor compatibility API slice complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API. Current slice: ready for Phase 3 MCP/Human UI and verification/regression review surfaces. Next slice: expose MCP wrappers and Human UI for suites/cases/runs/advisor review using the same service/auth serializers.
 
 ## Phase 0 Slice Checklist
 
@@ -356,3 +356,27 @@ Remaining Phase 3 work:
 - Add feedback-to-evaluation-case REST adapter and compatibility hooks for `ConversationEvaluation` / `SkillSuggestion`.
 - Add advisor change-set review/apply surfaces that expose typed patch evidence while preserving Evaluation gate requirements.
 - Add MCP wrapper and Human UI wiring against the same service/auth serializers.
+
+## 2026-08-16 19:05 CST - Phase 3 Feedback-To-Case And Advisor Draft Compatibility API
+
+Scope:
+
+- Added compatibility service flows that keep legacy `ConversationEvaluation` and `SkillSuggestion` intact while creating authoritative Evaluation objects.
+- Added a tenant-scoped feedback endpoint that promotes mistake/ambiguous legacy conversation evaluations into draft `EvaluationCase` rows with provenance, taxonomy/missed-instruction metadata, trace/principal fields, and idempotent case-key dedupe.
+- Draft feedback cases update the target draft suite version manifest/count and write append-only Evaluation audit events; published suite versions remain immutable.
+- Added a tenant-scoped advisor endpoint that converts pending legacy skill suggestions into draft-only `AdvisorChangeSet` plus typed `AdvisorSuggestion` patch rows.
+- Advisor compatibility pins stable target refs, base version refs, base etags, evidence, and affected case IDs without mutating the target skill or legacy suggestion.
+- Response payloads and stored draft evidence/patches are sanitized through the existing error redaction utility so tokens, passwords, credentials, and SQL do not leak through Evaluation APIs.
+
+Evidence:
+
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_evaluation_feedback_advisor_api.py -q` -> `2 passed, 8 warnings`.
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_evaluation_runner_service.py tests/test_evaluation_rest_api.py tests/test_evaluation_feedback_advisor_api.py tests/test_migration_chain_hardening.py -q` -> `23 passed, 18 warnings`.
+- `cd server && PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check repositories/evaluation.py services/evaluation.py routers/evaluation.py tests/test_evaluation_feedback_advisor_api.py tests/test_evaluation_rest_api.py` -> passed with the existing removed-rule warning.
+- `git diff --check` -> passed.
+
+Remaining Phase 3/4 work:
+
+- Add explicit advisor verify/regress/review endpoints and MCP wrappers around the same service calls.
+- Add Human UI surfaces for suite/case/run/advisor/feedback review.
+- Add end-to-end tests proving failed-set verification and full-suite regression are required before advisor apply/promotion.

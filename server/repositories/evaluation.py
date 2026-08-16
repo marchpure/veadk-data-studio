@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.evaluation import (
     AdvisorChangeSet,
+    AdvisorSuggestion,
     EvaluationArtifact,
     EvaluationAssessment,
     EvaluationAuditEvent,
@@ -66,6 +67,42 @@ class EvaluationRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_change_set_for_legacy_skill_suggestion(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_version_id: str | UUID,
+        suggestion_id: str | UUID,
+        target_ref: str,
+    ) -> AdvisorChangeSet | None:
+        result = await self._session.execute(
+            select(AdvisorChangeSet).where(
+                AdvisorChangeSet.tenant_id == tenant_id,
+                AdvisorChangeSet.suite_version_id == suite_version_id,
+                AdvisorChangeSet.target_ref == target_ref,
+            )
+        )
+        for change_set in result.scalars().all():
+            if str((change_set.evidence_json or {}).get("legacy_skill_suggestion_id")) == str(suggestion_id):
+                return change_set
+        return None
+
+    async def list_advisor_suggestions_for_change_set(
+        self,
+        *,
+        tenant_id: str | UUID,
+        change_set_id: str | UUID,
+    ) -> list[AdvisorSuggestion]:
+        result = await self._session.execute(
+            select(AdvisorSuggestion)
+            .where(
+                AdvisorSuggestion.tenant_id == tenant_id,
+                AdvisorSuggestion.change_set_id == change_set_id,
+            )
+            .order_by(AdvisorSuggestion.created_at, AdvisorSuggestion.id)
+        )
+        return list(result.scalars().all())
+
     async def get_run_by_idempotency_key(
         self,
         *,
@@ -118,6 +155,74 @@ class EvaluationRepository:
             .order_by(EvaluationCase.case_key)
         )
         return list(result.scalars().all())
+
+    async def get_case_by_key(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_version_id: str | UUID,
+        case_key: str,
+    ) -> EvaluationCase | None:
+        result = await self._session.execute(
+            select(EvaluationCase).where(
+                EvaluationCase.tenant_id == tenant_id,
+                EvaluationCase.suite_version_id == suite_version_id,
+                EvaluationCase.case_key == case_key,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_cases_by_ids(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_version_id: str | UUID,
+        case_ids: list[str | UUID],
+    ) -> list[EvaluationCase]:
+        if not case_ids:
+            return []
+        result = await self._session.execute(
+            select(EvaluationCase).where(
+                EvaluationCase.tenant_id == tenant_id,
+                EvaluationCase.suite_version_id == suite_version_id,
+                EvaluationCase.id.in_(case_ids),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def create_case(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_version_id: str | UUID,
+        case_key: str,
+        title: str,
+        target_kinds_json: list[str],
+        operation: str,
+        question: str,
+        expected_contract_json: dict,
+        provenance_json: dict,
+        tags_json: list[str],
+        content_hash: str,
+        immutable: bool,
+    ) -> EvaluationCase:
+        case = EvaluationCase(
+            tenant_id=tenant_id,
+            suite_version_id=suite_version_id,
+            case_key=case_key,
+            title=title,
+            target_kinds_json=target_kinds_json,
+            operation=operation,
+            question=question,
+            expected_contract_json=expected_contract_json,
+            provenance_json=provenance_json,
+            tags_json=tags_json,
+            content_hash=content_hash,
+            immutable=immutable,
+        )
+        self._session.add(case)
+        await self._session.flush()
+        return case
 
     async def create_target_snapshot(
         self,
@@ -278,6 +383,54 @@ class EvaluationRepository:
         self._session.add(promotion)
         await self._session.flush()
         return promotion
+
+    async def create_advisor_change_set(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_version_id: str | UUID | None,
+        target_ref: str,
+        base_version_ref: str,
+        base_etag: str,
+        status: str,
+        evidence_json: dict,
+        created_by: str,
+    ) -> AdvisorChangeSet:
+        change_set = AdvisorChangeSet(
+            tenant_id=tenant_id,
+            suite_version_id=suite_version_id,
+            target_ref=target_ref,
+            base_version_ref=base_version_ref,
+            base_etag=base_etag,
+            status=status,
+            evidence_json=evidence_json,
+            created_by=created_by,
+        )
+        self._session.add(change_set)
+        await self._session.flush()
+        return change_set
+
+    async def create_advisor_suggestion(
+        self,
+        *,
+        tenant_id: str | UUID,
+        change_set_id: str | UUID,
+        suggestion_type: str,
+        patch_json: dict,
+        affected_case_ids_json: list[str],
+        status: str,
+    ) -> AdvisorSuggestion:
+        suggestion = AdvisorSuggestion(
+            tenant_id=tenant_id,
+            change_set_id=change_set_id,
+            suggestion_type=suggestion_type,
+            patch_json=patch_json,
+            affected_case_ids_json=affected_case_ids_json,
+            status=status,
+        )
+        self._session.add(suggestion)
+        await self._session.flush()
+        return suggestion
 
     async def create_audit_event(
         self,
