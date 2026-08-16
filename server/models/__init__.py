@@ -14,6 +14,21 @@ from server.models.custom_skill import CustomSkill
 from server.models.dashboard import Dashboard, DashboardAsset, DashboardAuditEvent, DashboardRun
 from server.models.datasets import Dataset
 from server.models.datasource_annotations import DatasourceAnnotation
+from server.models.evaluation import (
+    AdvisorChangeSet,
+    AdvisorSuggestion,
+    EvaluationArtifact,
+    EvaluationAssessment,
+    EvaluationAuditEvent,
+    EvaluationCase,
+    EvaluationCaseRun,
+    EvaluationOverride,
+    EvaluationRun,
+    EvaluationSuite,
+    EvaluationSuiteVersion,
+    EvaluationTargetSnapshot,
+    PromotionDecision,
+)
 from server.models.files import File
 from server.models.folder import Folder
 from server.models.folder_dashboard import FolderDashboard
@@ -84,6 +99,19 @@ __all__ = [
     "DashboardRun",
     "DatasourceAnnotation",
     "Dataset",
+    "AdvisorChangeSet",
+    "AdvisorSuggestion",
+    "EvaluationArtifact",
+    "EvaluationAssessment",
+    "EvaluationAuditEvent",
+    "EvaluationCase",
+    "EvaluationCaseRun",
+    "EvaluationOverride",
+    "EvaluationRun",
+    "EvaluationSuite",
+    "EvaluationSuiteVersion",
+    "EvaluationTargetSnapshot",
+    "PromotionDecision",
     "File",
     "Folder",
     "GitHubRepository",

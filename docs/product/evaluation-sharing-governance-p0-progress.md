@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration worktree init, dashboard merge integration gates, focused migration/security gates, share/manage secret redaction, worker-backed notebook share/export object authorization, folder-backed notebook/dashboard share authorization, viewer session governed-asset binding, structured dashboard manifest data-view/filter validation, share/MCP error redaction. Next slice: Phase 0 completion audit, then Phase 1 Evaluation authoritative model.
+CURRENT_PHASE: Phase 1 — Evaluation 权威模型 complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型. Current slice: ready to enter Phase 2. Next slice: Phase 2 DB-backed Evaluation runner and grader gate.
 
 ## Phase 0 Slice Checklist
 
@@ -240,3 +240,31 @@ Evidence:
 - `cd client && pnpm lint` -> passed with existing `0 errors, 357 warnings`.
 - `cd client && pnpm build:check` -> passed with existing CSS/chunk warnings.
 - `git diff --check` -> passed.
+
+## 2026-08-16 17:34 CST - Phase 1 Evaluation Authoritative Model
+
+Commit:
+
+- Atomic Phase 1 commit message: `governance: add evaluation authoritative model`.
+- Commit SHA authority after push: `git log -1 --format=%H` for the above commit. A commit cannot contain its own final SHA without changing that SHA; the session handoff records the pushed SHA after commit creation.
+
+Scope:
+
+- Added strict Evaluation contract schemas for case manifests and target snapshots, including read-only ground-truth SQL validation and required pin blocker reporting.
+- Added registered SQLAlchemy models for the authoritative Evaluation domain: suites, suite versions, cases, target snapshots, runs, case runs, assessments, overrides, artifacts, advisor change sets, advisor suggestions, promotion decisions, and audit events.
+- Added additive Alembic revision `add_evaluation_authoritative_model` after `backfill_legacy_dashboard_assets`; it creates only new Evaluation tables/indexes and leaves `conversation_evaluations` and `skill_suggestions` untouched.
+- Added repository/service primitives for Phase 2 runner work: target snapshot persistence, preflight run creation, audit event persistence, suite version publish, and immutable published manifest enforcement.
+- Updated migration-chain hardening so the single Alembic head is now `add_evaluation_authoritative_model`.
+
+Evidence:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_migration_chain_hardening.py -q` -> `14 passed, 9 warnings`.
+- `cd server && uv run ruff check schemas/evaluation.py models/evaluation.py repositories/evaluation.py services/evaluation.py migrations/versions/add_evaluation_authoritative_model.py tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_migration_chain_hardening.py` -> passed with the existing removed-rule warning.
+- `cd server && PYTHONPATH=..:tests uv run alembic heads` -> `add_evaluation_authoritative_model (head)`.
+- `cd server && uv run python - <<'PY' ... import server.models ...` -> confirmed `evaluation_suites` and `evaluation_audit_events` are registered in `Base.metadata`.
+
+Phase 2 next steps:
+
+- Implement DB-backed Evaluation runner leasing, run/case-run execution state transitions, heartbeat/stop behavior, idempotency, artifact capture, and resumability.
+- Wire grader gate evaluation over stored case results with security hard-fail semantics from `gate_policy_json`.
+- Add regression coverage for runner retry/idempotency, immutable suite version execution, and promotion blocking when verification/regression gates fail.
