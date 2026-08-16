@@ -576,9 +576,9 @@ Browser workspace evidence captured under `docs/product/dashboard-browser-smoke/
 
 ## Final Integration Handoff
 
-Status: final handoff recorded and pushed in `1b5a348`.
+Status: final handoff ledger cleanup was recorded and pushed in `59de702`.
 
-Final branch state before this handoff doc commit:
+Final branch/evidence state recorded by the handoff ledger before this doc-only correction:
 
 - Base SHA: `24c6b69a1f816a831ee6ce94d8515817b4752913`
 - Dashboard evidence HEAD: `98adf4db32de12582824b887c89c66c68cc7bd27`
@@ -586,7 +586,7 @@ Final branch state before this handoff doc commit:
 - Integration source observed only: `veadk-data-studio/agent/data-studio-p0` at `9718bf6431c177c0b48e6fc21c36626a9057c47a`
 - Merge base with integration source: `24c6b69a1f816a831ee6ce94d8515817b4752913`
 - Migration head on Dashboard branch: `backfill_legacy_dashboard_assets`
-- Final handoff SHA: `1b5a34835c163b03228721cc3a28c07f86075745`
+- Final handoff SHA before this doc-only correction: `59de7027f40b2122d4a27b1382ddccb299873ffa`
 
 Ordered Dashboard commits:
 
@@ -623,6 +623,8 @@ b5c679e dashboard: add browser smoke evidence
 0cddb90 dashboard: record browser evidence
 3e39d3d dashboard: record backend acceptance evidence
 98adf4d dashboard: record backend evidence sha
+1b5a348 dashboard: document integration handoff
+59de702 dashboard: finalize handoff ledger
 ```
 
 `git diff --name-status 24c6b69a1f816a831ee6ce94d8515817b4752913..HEAD`:
