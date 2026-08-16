@@ -376,7 +376,7 @@ Commit:
 
 ### Phase 5 Migration Slice: Legacy Asset Backfill
 
-Status: implemented; pending commit/push.
+Status: implemented and pushed.
 
 Allowlist:
 
@@ -406,7 +406,7 @@ Tests:
 
 Commit:
 
-- Pending `dashboard: backfill legacy dashboard assets`
+- `817fca6` `dashboard: backfill legacy dashboard assets`
 
 ## Commit Ledger
 
@@ -423,7 +423,7 @@ Commit:
 | `33130f5` | `dashboard: render structured dashboard workspace` | Phase 4 human workspace inventory/view slice | `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `d9ac360` | `dashboard: add review reload workflow` | Phase 4 review/preview/publish/reload slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> 5 passed; `ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `77bfd98` | `dashboard: preserve share export compatibility` | Phase 4 share/export/legacy compatibility slice | `pytest tests/test_dashboard_rest_api.py` -> 2 passed; `ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
-| Pending | `dashboard: backfill legacy dashboard assets` | Phase 5 legacy asset backfill slice | `pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> 7 passed; `ruff check migrations/versions/backfill_legacy_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with existing 355 warnings | Pending push |
+| `817fca6` | `dashboard: backfill legacy dashboard assets` | Phase 5 legacy asset backfill slice | `pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> 7 passed; `ruff check migrations/versions/backfill_legacy_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with existing 355 warnings; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 
 ## Acceptance Evidence
 
