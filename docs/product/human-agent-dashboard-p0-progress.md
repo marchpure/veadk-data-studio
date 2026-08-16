@@ -212,6 +212,37 @@ Commit:
 
 - `0d05215` `dashboard: bind dashboard run execution`
 
+### Phase 3 REST Slice: Governed Dashboard Asset API
+
+Status: implemented.
+
+Allowlist:
+
+- `server/routers/dashboard.py`
+- `server/main.py` - conditional shared API registration; additive import and router include only.
+- `server/repositories/dashboard.py` - conditional shared repository file; additive asset version/audit read helpers for REST state, version, lineage, and audit endpoints.
+- `server/auth/scopes.py` - conditional shared auth file; additive governed Dashboard create/edit/publish/query scopes so REST mutations do not reuse unrelated permissions.
+- `server/tests/test_dashboard_rest_api.py`
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Behavior:
+
+- Added `/api/dashboard-assets` REST endpoints for list, create draft, get asset, get version, patch draft, validate, publish, query, state, lineage, and audit.
+- REST delegates lifecycle and execution behavior to `DashboardService` and accepts `data_view_ids` for query execution, not raw saved query IDs.
+- Create and patch verify the bound notebook belongs to the active tenant and follows existing own-notebook access rules.
+- Governed asset REST endpoints reject viewer-role access in this slice; legacy shared viewer access remains through existing folder/viewer routes until governed share policy is wired.
+- Added explicit role scopes for dashboard create/edit/publish/query. Owners/admins can publish; members can create/edit/query/read; viewers remain on viewer-specific routes.
+
+Tests:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_rest_api.py` -> passed, `2 passed`.
+- `cd server && uv run ruff check routers/dashboard.py main.py repositories/dashboard.py auth/scopes.py tests/test_dashboard_rest_api.py` -> passed.
+- `git diff --check` -> passed.
+
+Commit:
+
+- pending `dashboard: expose dashboard rest contract`
+
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
@@ -222,6 +253,7 @@ Commit:
 | `ad4f6f3` | `dashboard: persist governed asset foundation` | Phase 1 persistence slice | `pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> 6 passed; `ruff check models/dashboard.py models/__init__.py migrations/versions/add_governed_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed; `alembic heads` -> `add_governed_dashboard_assets` | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `da3b2d2` | `dashboard: add lifecycle service primitives` | Phase 1 lifecycle slice | `pytest tests/test_dashboard_lifecycle_service.py` -> 3 passed; `ruff check repositories/dashboard.py services/dashboard.py tests/test_dashboard_lifecycle_service.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `0d05215` | `dashboard: bind dashboard run execution` | Phase 2 execution slice | `pytest tests/test_dashboard_execution_service.py` -> 3 passed; `ruff check services/dashboard.py tests/test_dashboard_execution_service.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| pending | `dashboard: expose dashboard rest contract` | Phase 3 REST slice | `pytest tests/test_dashboard_rest_api.py` -> 2 passed; `ruff check routers/dashboard.py main.py repositories/dashboard.py auth/scopes.py tests/test_dashboard_rest_api.py` -> passed; `git diff --check` -> passed | Pending push |
 
 ## Acceptance Evidence
 
