@@ -572,4 +572,140 @@ Commit:
 
 ## Acceptance Evidence
 
-Browser workspace evidence captured under `docs/product/dashboard-browser-smoke/` for structured data, lineage/evidence, permission-denied policy guard, legacy fallback, and mobile layout. Current branch is not ready for integration and has not verified real `8080`.
+Browser workspace evidence captured under `docs/product/dashboard-browser-smoke/` for structured data, lineage/evidence, permission-denied policy guard, legacy fallback, and mobile layout. Backend/MCP/security/migration evidence is recorded above. Real `8080` has not been verified in this isolated Dashboard worktree.
+
+## Final Integration Handoff
+
+Status: final handoff recorded, commit pending.
+
+Final branch state before this handoff doc commit:
+
+- Base SHA: `24c6b69a1f816a831ee6ce94d8515817b4752913`
+- Dashboard evidence HEAD: `98adf4db32de12582824b887c89c66c68cc7bd27`
+- Remote branch: `veadk-data-studio/agent/dashboard-human-agent-p0`
+- Integration source observed only: `veadk-data-studio/agent/data-studio-p0` at `9718bf6431c177c0b48e6fc21c36626a9057c47a`
+- Merge base with integration source: `24c6b69a1f816a831ee6ce94d8515817b4752913`
+- Migration head on Dashboard branch: `backfill_legacy_dashboard_assets`
+- Final handoff SHA: pending
+
+Ordered Dashboard commits:
+
+```text
+4a4f4e1 dashboard: audit human agent contract
+2049aa9 dashboard: record audit evidence
+033b526 dashboard: enforce viewer query binding
+0d7eaec dashboard: record query binding evidence
+be5e4a7 dashboard: add manifest run schemas
+43a9594 dashboard: record schema evidence
+ad4f6f3 dashboard: persist governed asset foundation
+a87a0b0 dashboard: record persistence evidence
+da3b2d2 dashboard: add lifecycle service primitives
+a3c9937 dashboard: record lifecycle evidence
+0d05215 dashboard: bind dashboard run execution
+2916b2c dashboard: record execution evidence
+4de07e7 dashboard: expose dashboard rest contract
+bd34e77 dashboard: record rest evidence
+c3e28b1 dashboard: expose dashboard mcp contract
+04452a0 dashboard: record mcp evidence
+33130f5 dashboard: render structured dashboard workspace
+e534f14 dashboard: record workspace evidence
+d9ac360 dashboard: add review reload workflow
+f90531a dashboard: record workflow evidence
+77bfd98 dashboard: preserve share export compatibility
+00daa29 dashboard: record compatibility evidence
+817fca6 dashboard: backfill legacy dashboard assets
+bfc075a dashboard: record backfill evidence
+17588a6 dashboard: add rest mcp query parity
+904f83c dashboard: record parity evidence
+6e0decc dashboard: guard unresolved policy refs
+642b0ae dashboard: record policy guard evidence
+b5c679e dashboard: add browser smoke evidence
+0cddb90 dashboard: record browser evidence
+3e39d3d dashboard: record backend acceptance evidence
+98adf4d dashboard: record backend evidence sha
+```
+
+`git diff --name-status 24c6b69a1f816a831ee6ce94d8515817b4752913..HEAD`:
+
+```text
+M	client/package.json
+M	client/pnpm-lock.yaml
+A	client/scripts/dashboard-workspace-smoke.mjs
+M	client/src/App.tsx
+M	client/src/components/CollapsibleSidebar.tsx
+M	client/src/constants/scopes.ts
+A	client/src/features/dashboard/pages/DashboardWorkspacePage.tsx
+A	client/src/services/dashboard.ts
+A	client/src/types/dashboard.ts
+A	docs/product/dashboard-browser-smoke/dashboard-data-1440.png
+A	docs/product/dashboard-browser-smoke/dashboard-legacy-1440.png
+A	docs/product/dashboard-browser-smoke/dashboard-lineage-1440.png
+A	docs/product/dashboard-browser-smoke/dashboard-mobile-390.png
+A	docs/product/dashboard-browser-smoke/dashboard-permission-denied-1440.png
+A	docs/product/human-agent-dashboard-p0-progress.md
+A	docs/product/human-agent-dashboard-p0.md
+M	server/auth/scopes.py
+M	server/main.py
+M	server/mcp/tool_wrappers.py
+M	server/mcp/tools.py
+A	server/migrations/versions/add_governed_dashboard_assets.py
+A	server/migrations/versions/backfill_legacy_dashboard_assets.py
+M	server/models/__init__.py
+M	server/models/dashboard.py
+M	server/repositories/dashboard.py
+A	server/routers/dashboard.py
+M	server/routers/folders.py
+A	server/schemas/dashboard.py
+A	server/services/dashboard.py
+A	server/tests/test_dashboard_contract_schemas.py
+A	server/tests/test_dashboard_execution_service.py
+A	server/tests/test_dashboard_lifecycle_service.py
+A	server/tests/test_dashboard_mcp_contract.py
+A	server/tests/test_dashboard_persistence_migration.py
+A	server/tests/test_dashboard_rest_api.py
+A	server/tests/test_dashboard_security_regressions.py
+M	server/tests/test_migration_chain_hardening.py
+```
+
+Conditional shared files and reasons:
+
+- `server/main.py`: additive governed Dashboard REST router registration.
+- `server/auth/scopes.py`: additive Dashboard read/query/create/edit/publish/export scope constants.
+- `server/models/__init__.py`: additive Dashboard model registration.
+- `server/models/dashboard.py` and `server/repositories/dashboard.py`: existing Dashboard persistence evolved additively to stable asset/version/run/audit semantics.
+- `server/routers/folders.py`: minimal viewer batch/preflight query binding guard and legacy folder/share compatibility.
+- `server/mcp/tool_wrappers.py` and `server/mcp/tools.py`: additive governed Dashboard MCP wrappers/tool registrations that call shared `DashboardService`.
+- `client/src/App.tsx`, `client/src/components/CollapsibleSidebar.tsx`, `client/src/constants/scopes.ts`: additive route/navigation/scope registration for the governed Dashboard workspace.
+- `client/package.json`, `client/pnpm-lock.yaml`: added reproducible `smoke:dashboard` script and local Playwright dev dependency.
+- `server/tests/test_migration_chain_hardening.py`: expected Alembic head updated to Dashboard head and Dashboard migration chain assertions added.
+
+Acceptance evidence summary:
+
+- Contract schemas: `dashboard.manifest.v1` and `dashboard.run.v1` covered by `tests/test_dashboard_contract_schemas.py`.
+- Security: viewer arbitrary saved-query ID execution blocked for other notebook/cross-tenant/filter cases; unresolved row/column/redaction policy refs return auditable `permission_denied` without saved-query execution.
+- REST/MCP parity: same tenant principal, dashboard version, filters, digests, values, schema, cache/freshness, `as_of`, warnings, evidence, and lineage covered in `tests/test_dashboard_rest_api.py` and `tests/test_dashboard_mcp_contract.py`.
+- Lifecycle: draft creation, JSON Patch allowlist, stale ETag `409`, validate, preview, publish, reload review draft, export, audit, lineage, and state covered by focused tests.
+- Migration/legacy: additive Dashboard tables/columns, legacy HTML preservation, backfill/downgrade, and SQLite Dashboard upgrade/downgrade evidence recorded above.
+- UI/browser: real API/UI smoke on `8123`/`5179`, screenshots at `1440x900` and `390x844`, and zero page errors/console errors/request failures/HTTP 5xx.
+- Frontend: `pnpm lint` passed with existing 355 warnings; `pnpm build:check` passed with existing CSS/chunk warnings.
+
+Integration drift against `veadk-data-studio/agent/data-studio-p0`:
+
+- Shared modified file: `server/tests/test_migration_chain_hardening.py`.
+- Integration source also modifies `server/migrations/versions/add_file_source_resource_type.py` to make the source-resource SQLite constraint update idempotent by inspecting SQL text and using `op.f(...)`.
+- Dashboard branch currently documents a source-resource stamp workaround for disposable fresh SQLite evidence because it intentionally did not modify source-resource internals. Integration should take the `agent/data-studio-p0` source-resource migration fix before/with Dashboard migrations, then remove the need for that workaround and keep/adjust the fresh SQLite chain test.
+- Suggested merge order: first merge the latest `agent/data-studio-p0` source-resource/self-hosted hardening, then merge Dashboard; resolve `server/tests/test_migration_chain_hardening.py` by keeping the fresh SQLite chain test from integration source and updating expected heads/lineage to `backfill_legacy_dashboard_assets`.
+- No Alembic merge migration should be needed if the integration source keeps `add_file_source_resource_type` as the parent of `add_governed_dashboard_assets`; verify with `cd server && uv run alembic heads`.
+
+Known residual risks and dependencies:
+
+- `pinned_snapshot` mode remains intentionally blocked until immutable run result artifacts exist.
+- Real `8080` target was not touched or verified by this isolated Dashboard session.
+- Source-resource migration freshness is owned by the integration/source session; Dashboard evidence used a disposable DB stamp workaround only for the pre-existing source-resource constraint state.
+- Existing frontend lint warnings and build CSS/chunk warnings remain outside Dashboard scope.
+
+Final status after final handoff commit is pushed and `HEAD == @{upstream}`:
+
+```text
+DASHBOARD_BRANCH_READY_FOR_INTEGRATION / 8080_PENDING_INTEGRATION
+```
