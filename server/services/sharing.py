@@ -452,7 +452,7 @@ class SharingService:
         if payload is None:
             raise ValueError("viewer session token could not be verified")
         now = self._now()
-        expires_at = datetime.fromtimestamp(int(payload["exp"]), UTC)
+        expires_at = datetime.fromtimestamp(int(payload["exp"]), UTC).replace(tzinfo=None)
         viewer_session = SharingViewerSession(
             tenant_id=tenant_uuid,
             grant_id=grant.id,
@@ -789,7 +789,7 @@ class SharingService:
 
     @staticmethod
     def _now() -> datetime:
-        return datetime.now(UTC)
+        return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _coerce_uuid(value: str | UUID) -> UUID:

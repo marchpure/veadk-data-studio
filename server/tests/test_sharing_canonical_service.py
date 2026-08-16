@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC
 from uuid import UUID, uuid4
 
 import pytest
@@ -149,6 +148,8 @@ async def test_viewer_session_binds_grant_object_version_and_revocation(test_ses
     assert viewer_session.object_type == "dashboard"
     assert viewer_session.object_id == asset_id
     assert viewer_session.object_version_id == version_id
+    assert viewer_session.issued_at.tzinfo is None
+    assert viewer_session.expires_at.tzinfo is None
     assert viewer_session.token_digest.startswith("sha256:")
     assert token not in viewer_session.token_digest
     assert "raw-token" not in json.dumps(viewer_session.viewer_principal_json)
@@ -178,6 +179,7 @@ async def test_viewer_session_binds_grant_object_version_and_revocation(test_ses
     revoked = await test_session.get(SharingGrant, grant.id)
     assert revoked is not None and revoked.status == "revoked"
     assert revoked.revoked_at is not None
+    assert revoked.revoked_at.tzinfo is None
     assert await service.require_viewer_session(
         token=token,
         grant_id=grant.id,
@@ -211,5 +213,5 @@ async def test_canonical_share_requires_immutable_dashboard_version(test_session
         )
 
 
-def test_sharing_service_uses_timezone_aware_now() -> None:
-    assert SharingService._now().tzinfo is UTC
+def test_sharing_service_uses_naive_utc_timestamps_for_database_columns() -> None:
+    assert SharingService._now().tzinfo is None
