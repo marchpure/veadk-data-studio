@@ -4,14 +4,16 @@ import hashlib
 import json
 from datetime import datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.models.dashboard import Dashboard, DashboardAsset, DashboardAuditEvent
+from server.models.dashboard import Dashboard, DashboardAsset, DashboardAuditEvent, DashboardRun
 from server.repositories.dashboard import DashboardRepository
 from server.schemas.dashboard import DashboardManifest
+from server.schemas.query import QueryFilter as SavedQueryFilter
+from server.services.query_service import QueryService
 from server.utils.custom_logger import get_logger
 
 logger = get_logger(__name__)
@@ -249,6 +251,126 @@ class DashboardService:
         await session.refresh(draft)
         return draft
 
+    async def query_dashboard(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        asset_id: UUID,
+        actor_id: str,
+        actor_type: str,
+        filters: dict[str, Any] | None = None,
+        data_view_ids: list[str] | None = None,
+        mode: str = "live",
+        correlation_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        if mode != "live":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="pinned_snapshot artifacts are not available")
+
+        repo = DashboardRepository(session)
+        asset = await repo.get_asset(asset_id, tenant_id)
+        if not asset:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard asset not found")
+        if not asset.published_version_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Dashboard has no published version")
+
+        version = await repo.get_asset_version(
+            tenant_id=tenant_id,
+            asset_id=asset_id,
+            version_id=asset.published_version_id,
+        )
+        if not version or not version.manifest_json:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Published dashboard version not found")
+
+        manifest = self.validate_manifest_payload(version.manifest_json)
+        selected_data_views = self._select_data_views(manifest, data_view_ids)
+        normalized_filters = self._normalize_filters(filters or {})
+        filter_digest = self.digest_payload(normalized_filters)
+        execution_plan_digest = self.digest_payload(
+            {
+                "dashboard_version_id": str(version.id),
+                "data_view_ids": [view["id"] for view in selected_data_views],
+                "pinned_versions": {
+                    "semantic_models": version.pinned_model_versions_json,
+                    "source_snapshots": version.pinned_source_snapshots_json,
+                },
+            }
+        )
+        started_at = datetime.utcnow()
+        view_results = []
+        for data_view in selected_data_views:
+            view_results.append(
+                await self._execute_data_view(
+                    session=session,
+                    data_view=data_view,
+                    normalized_filters=normalized_filters,
+                )
+            )
+
+        completed_at = datetime.utcnow()
+        overall_freshness = self._overall_freshness(view_results)
+        run_payload = {
+            "contract_version": "dashboard.run.v1",
+            "run_id": str(uuid4()),
+            "dashboard_id": str(asset.id),
+            "dashboard_version_id": str(version.id),
+            "actor_type": actor_type,
+            "actor_id": actor_id,
+            "correlation_id": correlation_id,
+            "idempotency_key": idempotency_key,
+            "mode": mode,
+            "normalized_filters": normalized_filters,
+            "filter_digest": filter_digest,
+            "pinned_versions": {
+                "semantic_models": version.pinned_model_versions_json,
+                "source_snapshots": version.pinned_source_snapshots_json,
+            },
+            "execution_plan_digest": execution_plan_digest,
+            "started_at": started_at.isoformat(),
+            "completed_at": completed_at.isoformat(),
+            "overall_freshness": overall_freshness,
+            "views": view_results,
+            "warnings": self._run_warnings(view_results),
+            "errors": [view["error"] for view in view_results if view.get("error")],
+        }
+        run = DashboardRun(
+            id=UUID(run_payload["run_id"]),
+            tenant_id=tenant_id,
+            asset_id=asset.id,
+            version_id=version.id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            correlation_id=correlation_id,
+            idempotency_key=idempotency_key,
+            mode=mode,
+            normalized_filters_json=normalized_filters,
+            filter_digest=filter_digest,
+            pinned_versions_json=run_payload["pinned_versions"],
+            execution_plan_digest=execution_plan_digest,
+            overall_freshness=overall_freshness,
+            result_manifest_json=run_payload,
+            warnings_json=run_payload["warnings"],
+            errors_json=run_payload["errors"],
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+        session.add(run)
+        await self._audit(
+            session=session,
+            tenant_id=tenant_id,
+            asset_id=asset.id,
+            version_id=version.id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            action="dashboard.query",
+            outcome="success" if not run_payload["errors"] else "partial",
+            correlation_id=correlation_id,
+            details={"run_id": str(run.id), "data_view_ids": [view["data_view_id"] for view in view_results]},
+        )
+        await session.commit()
+        return run_payload
+
     @staticmethod
     def validation_summary(manifest: dict[str, Any]) -> dict[str, Any]:
         blockers: list[str] = []
@@ -267,6 +389,117 @@ class DashboardService:
         if saved_query_views:
             warnings.append(f"saved_query compatibility views require lineage review: {', '.join(saved_query_views)}")
         return {"valid": not blockers, "blockers": blockers, "warnings": warnings, "validated_at": datetime.utcnow().isoformat()}
+
+    def _select_data_views(self, manifest: dict[str, Any], data_view_ids: list[str] | None) -> list[dict[str, Any]]:
+        views_by_id = {data_view["id"]: data_view for data_view in manifest.get("data_views", [])}
+        if not data_view_ids:
+            return list(views_by_id.values())
+        missing = [data_view_id for data_view_id in data_view_ids if data_view_id not in views_by_id]
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="One or more data views are not available for this dashboard",
+            )
+        return [views_by_id[data_view_id] for data_view_id in data_view_ids]
+
+    @staticmethod
+    def _normalize_filters(filters: dict[str, Any]) -> dict[str, Any]:
+        return {key: filters[key] for key in sorted(filters)}
+
+    async def _execute_data_view(
+        self,
+        *,
+        session: AsyncSession,
+        data_view: dict[str, Any],
+        normalized_filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        if data_view["kind"] == "saved_query":
+            return await self._execute_saved_query_view(
+                session=session,
+                data_view=data_view,
+                normalized_filters=normalized_filters,
+            )
+        return {
+            "data_view_id": data_view["id"],
+            "status": "blocked",
+            "result": None,
+            "schema": data_view.get("output_schema", []),
+            "row_count": 0,
+            "cached": False,
+            "stale": False,
+            "warnings": [f"{data_view['kind']} execution is not wired in this slice"],
+            "error": {
+                "code": "execution_not_wired",
+                "message": "Data view execution is not available yet",
+                "retryable": False,
+            },
+            "evidence": data_view.get("evidence", []),
+            "lineage": data_view.get("lineage", []),
+        }
+
+    async def _execute_saved_query_view(
+        self,
+        *,
+        session: AsyncSession,
+        data_view: dict[str, Any],
+        normalized_filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        saved_query = data_view["saved_query"]
+        filter_payload = self._filters_for_data_view(data_view, normalized_filters)
+        result = await QueryService.execute_saved_query(
+            session,
+            saved_query["query_id"],
+            filters=filter_payload,
+        )
+        success = bool(result.get("success"))
+        rows = result.get("data") if success else None
+        row_count = len(rows) if isinstance(rows, list) else (1 if isinstance(rows, dict) else 0)
+        view_result = {
+            "data_view_id": data_view["id"],
+            "status": "success" if success and row_count > 0 else "empty" if success else "error",
+            "result": rows,
+            "schema": data_view.get("output_schema", []),
+            "row_count": row_count,
+            "cached": bool(result.get("cached", False)),
+            "stale": bool(result.get("stale", False)),
+            "as_of": datetime.utcnow().isoformat(),
+            "warnings": [f"saved_query compatibility binding: {saved_query['compatibility_reason']}"],
+            "evidence": data_view.get("evidence", []),
+            "lineage": data_view.get("lineage") or saved_query.get("lineage", []),
+        }
+        if not success:
+            view_result["error"] = {
+                "code": "saved_query_failed",
+                "message": "Dashboard data view execution failed",
+                "retryable": True,
+            }
+        return view_result
+
+    @staticmethod
+    def _filters_for_data_view(data_view: dict[str, Any], normalized_filters: dict[str, Any]) -> list[SavedQueryFilter] | None:
+        filter_fields = set(data_view.get("filter_fields") or [])
+        if not filter_fields:
+            return None
+        filters: list[SavedQueryFilter] = []
+        for field in sorted(filter_fields):
+            if field in normalized_filters:
+                filters.append(SavedQueryFilter(field=field, operator="eq", value=normalized_filters[field]))
+        return filters or None
+
+    @staticmethod
+    def _overall_freshness(view_results: list[dict[str, Any]]) -> str:
+        if any(view.get("status") in {"error", "blocked", "permission_denied"} for view in view_results):
+            return "partial" if any(view.get("status") in {"success", "empty", "stale"} for view in view_results) else "blocked"
+        if any(view.get("stale") for view in view_results):
+            return "stale"
+        return "fresh"
+
+    @staticmethod
+    def _run_warnings(view_results: list[dict[str, Any]]) -> list[str]:
+        warnings: list[str] = []
+        for view in view_results:
+            warnings.extend(str(warning) for warning in view.get("warnings", []))
+        return warnings
 
     @staticmethod
     def _manifest_model_versions(manifest: dict[str, Any]) -> dict[str, str]:

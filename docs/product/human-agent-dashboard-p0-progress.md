@@ -184,6 +184,34 @@ Commit:
 
 - `da3b2d2` `dashboard: add lifecycle service primitives`
 
+### Phase 2 Execution Slice: Manifest-Bound DashboardRun Query
+
+Status: implemented for governed `saved_query` compatibility views.
+
+Allowlist:
+
+- `server/services/dashboard.py`
+- `server/tests/test_dashboard_execution_service.py`
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Behavior:
+
+- Added `DashboardService.query_dashboard` as the canonical execution entry point for later REST/MCP wrappers.
+- Query accepts `data_view_ids`, not arbitrary query IDs; the service resolves selected views from the published manifest.
+- Supported P0 execution in this slice is reviewed `saved_query` compatibility binding; unsupported semantic/context views return blocked in the run contract.
+- Persists `DashboardRun` with filter digest, pinned versions, execution plan digest, cache/stale/as_of, warnings/errors, and audit event.
+- `pinned_snapshot` requests are honestly blocked until immutable result artifacts exist.
+
+Tests:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_execution_service.py` -> passed, `3 passed`.
+- `cd server && uv run ruff check services/dashboard.py tests/test_dashboard_execution_service.py` -> passed.
+- `git diff --check` -> passed.
+
+Commit:
+
+- Pending.
+
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
@@ -193,6 +221,7 @@ Commit:
 | `be5e4a7` | `dashboard: add manifest run schemas` | Phase 1 schema slice | `pytest tests/test_dashboard_contract_schemas.py` -> 7 passed; `ruff check schemas/dashboard.py tests/test_dashboard_contract_schemas.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `ad4f6f3` | `dashboard: persist governed asset foundation` | Phase 1 persistence slice | `pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> 6 passed; `ruff check models/dashboard.py models/__init__.py migrations/versions/add_governed_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed; `alembic heads` -> `add_governed_dashboard_assets` | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `da3b2d2` | `dashboard: add lifecycle service primitives` | Phase 1 lifecycle slice | `pytest tests/test_dashboard_lifecycle_service.py` -> 3 passed; `ruff check repositories/dashboard.py services/dashboard.py tests/test_dashboard_lifecycle_service.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| Pending | `dashboard: bind dashboard run execution` | Phase 2 execution slice | `pytest tests/test_dashboard_execution_service.py` -> 3 passed; `ruff check services/dashboard.py tests/test_dashboard_execution_service.py` -> passed | Pending |
 
 ## Acceptance Evidence
 
