@@ -672,6 +672,7 @@ export default function ChatPreview() {
   // Check if this is a new notebook (not created yet)
   // Use pathname check instead of parameter since /notebook/new has no :id parameter
   const isNewNotebook = location.pathname === '/notebook/new'
+  const isPreviewRoute = /^\/notebook\/[^/]+\/preview\/?$/.test(location.pathname)
   const { isSelfHosted, features } = useAppConfig()
 
   // State for new notebook datasource selection
@@ -813,6 +814,7 @@ export default function ChatPreview() {
   const [isNotebookFolderModalOpen, setIsNotebookFolderModalOpen] = useState(false)
   const [isPreviewOpen, setIsPreviewOpen] = useState(() => {
     if (typeof window === 'undefined' || !notebookId) return false
+    if (/^\/notebook\/[^/]+\/preview\/?$/.test(window.location.pathname)) return true
     return localStorage.getItem(ACTIVE_PREVIEW_NOTEBOOK_KEY) === notebookId
   })
   const userClosedPreviewRef = useRef(false)
@@ -883,9 +885,15 @@ export default function ChatPreview() {
       setIsPreviewOpen(false)
       return
     }
+    if (isPreviewRoute) {
+      setIsPreviewOpen(true)
+      userClosedPreviewRef.current = false
+      localStorage.setItem(ACTIVE_PREVIEW_NOTEBOOK_KEY, notebookId)
+      return
+    }
     const stored = localStorage.getItem(ACTIVE_PREVIEW_NOTEBOOK_KEY)
     setIsPreviewOpen(stored === notebookId)
-  }, [notebookId])
+  }, [notebookId, isPreviewRoute])
 
   const clearStoredPreviewIfCurrent = useCallback(() => {
     if (!notebookId) return
@@ -3577,8 +3585,9 @@ Can you help me fix this query?`
     )
   }
 
-  // Empty state: centered text + input until first chat message
-  if (messages.length === 0) {
+  // Empty state: centered text + input until first chat message.
+  // A direct /preview URL still needs the split layout so the dashboard pane is visible.
+  if (messages.length === 0 && !isPreviewOpen) {
     return (
       <React.Fragment>
         <div className="flex h-screen bg-[#1a1a1a] text-white">

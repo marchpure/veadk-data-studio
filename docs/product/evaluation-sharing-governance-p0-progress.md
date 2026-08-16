@@ -133,7 +133,7 @@ Evidence:
 
 ## 2026-08-16 14:43 CST - Phase 0 Viewer Session Governed-Asset Binding
 
-Commit: pending at time of entry.
+Commit: `a48a18ab5cab7a68a9b2c41df993412a12d2ed9d`.
 
 Scope:
 
@@ -145,3 +145,25 @@ Evidence:
 
 - `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest server/tests/test_dashboard_security_regressions.py server/tests/test_share_object_authorization.py server/tests/test_share_secret_redaction.py -q` -> `17 passed, 7 warnings`.
 - `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check server/services/viewer_session_service.py server/routers/folders.py server/tests/test_dashboard_security_regressions.py` -> passed with existing removed-rule warning.
+
+## 2026-08-16 14:58 CST - Dashboard Full Validation And Preview Route Fix
+
+Commit: pending at time of entry.
+
+Scope:
+
+- Ran dashboard backend, filter/share adjacent, migration, frontend build, and browser smoke validation from the integration worktree without touching the existing `127.0.0.1:8080` runtime.
+- Reproduced a direct `/notebook/{id}/preview` browser bug: notebooks with zero chat messages rendered the empty chat state instead of the split dashboard preview panel.
+- Fixed `ChatPreview.tsx` so the `/notebook/:id/preview` route explicitly opens the dashboard preview panel and bypasses the centered empty chat branch.
+- Fixed `DashboardPreviewPanel.tsx` so version `1` is not automatically treated as blank; only the actual default placeholder content is hidden from iframe preview.
+- Extended `client/scripts/dashboard-workspace-smoke.mjs` to cover direct notebook preview routes before dashboard asset pages.
+
+Evidence:
+
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest server/tests/test_dashboard_contract_schemas.py server/tests/test_dashboard_execution_service.py server/tests/test_dashboard_legacy_tool_gating.py server/tests/test_dashboard_lifecycle_service.py server/tests/test_dashboard_mcp_contract.py server/tests/test_dashboard_persistence_migration.py server/tests/test_dashboard_rest_api.py server/tests/test_dashboard_security_regressions.py server/tests/test_filter_bootstrap.py server/tests/test_filter_pipeline.py server/tests/test_filter_tools_config_merge.py server/tests/test_share_object_authorization.py server/tests/test_share_secret_redaction.py -q` -> `92 passed, 68 warnings`.
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest server/tests/test_migration_chain_hardening.py -q` -> `5 passed, 7 warnings`.
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest server/tests/test_dashboard_contract_schemas.py server/tests/test_dashboard_execution_service.py server/tests/test_dashboard_legacy_tool_gating.py server/tests/test_dashboard_lifecycle_service.py server/tests/test_dashboard_mcp_contract.py server/tests/test_dashboard_persistence_migration.py server/tests/test_dashboard_rest_api.py server/tests/test_dashboard_security_regressions.py -q` -> `39 passed, 68 warnings`.
+- `cd client && pnpm lint` -> passed with existing `0 errors, 357 warnings`.
+- `cd client && pnpm build:check` -> passed with existing CSS/chunk warnings.
+- Temporary full browser smoke on `127.0.0.1:15173` frontend + `127.0.0.1:18080` backend + fresh SQLite DB -> `ok: true`, `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`; screenshots retained under `/tmp/byaan-dashboard-full-verify-1786862803/screens-after-fix-4`.
+- `git diff --check` -> passed.

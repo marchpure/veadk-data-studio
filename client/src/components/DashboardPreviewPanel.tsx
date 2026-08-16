@@ -285,9 +285,11 @@ export function DashboardPreviewPanel({
     }
   }, [iframeRef, onElementGrabbed, isGrabMode, isSelecting])
 
-  const currentVersion = selectedVersion || latestVersionNum
-  const isDefaultVersion = currentVersion === 1
-  const isBlankCanvas = !processedHtmlContent || processedHtmlContent.trim().length < 200 || isDefaultVersion
+  const normalizedPreview = processedHtmlContent.trim()
+  const isDefaultPlaceholder =
+    normalizedPreview.includes('Data Here') &&
+    normalizedPreview.includes('Your dashboard content will appear here once you add visualizations')
+  const isBlankCanvas = !normalizedPreview || normalizedPreview.length < 200 || isDefaultPlaceholder
   const hasPreview = !!processedHtmlContent && !isBlankCanvas
   const hasCode = !!codeForDisplay
 

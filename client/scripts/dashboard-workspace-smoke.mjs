@@ -211,6 +211,7 @@ async function seedDashboardFixtures() {
 
   return {
     tenantId: bootstrap.tenant_id,
+    notebookId: notebook.id,
     structuredAssetId: draftAsset.id,
     structuredVersionNum: publishedVersion.version_num,
     policyAssetId: policyAsset.id,
@@ -292,6 +293,12 @@ async function assertNoOverlaps(page) {
 
 async function runDashboardJourney(fixtures) {
   const desktop = await makePage({ width: 1440, height: 900 }, fixtures.tenantId)
+  await desktop.goto(`${baseURL}/notebook/${fixtures.notebookId}/preview`, { waitUntil: 'networkidle' })
+  await desktop.getByTitle('Close preview (Esc)').waitFor()
+  await desktop.getByRole('button', { name: /Code/i }).click()
+  await desktop.getByText('Dashboard HTML').waitFor()
+  await desktop.screenshot({ path: `${screenDir}/notebook-preview-route-1440.png`, fullPage: true })
+
   await desktop.goto(`${baseURL}/dashboard-assets/${fixtures.structuredAssetId}`, { waitUntil: 'networkidle' })
   await desktop.getByRole('heading', { name: /Browser Structured Revenue/i }).waitFor()
   await desktop.getByRole('button', { name: /Data/i }).click()
