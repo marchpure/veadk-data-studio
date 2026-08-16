@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 5 — local end-to-end Sharing smoke is implemented and passing. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface, Phase 3/4 Human UI workspace and advisor verify/regress/review/apply REST surfaces, Phase 3/4 browser/MCP parity smoke, Phase 5 canonical Sharing grant/secret/viewer-session foundation, Phase 5 folder dashboard canonical compatibility, Phase 5 worker-backed notebook share canonical compatibility, Phase 5 canonical Sharing read surface and folder notebook compatibility, Phase 5 local canonical Sharing integration smoke. Current slice: final real `127.0.0.1:8080` Release Gate preparation. Next slice: verify the current 8080 runtime, exercise the canonical Sharing flows on the real instance, and clean up the previously registered test folder only during that Release Gate.
+CURRENT_PHASE: Complete — real `127.0.0.1:8080` Release Gate passed on the current governance integration branch. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface, Phase 3/4 Human UI workspace and advisor verify/regress/review/apply REST surfaces, Phase 3/4 browser/MCP parity smoke, Phase 5 canonical Sharing grant/secret/viewer-session foundation, Phase 5 folder dashboard canonical compatibility, Phase 5 worker-backed notebook share canonical compatibility, Phase 5 canonical Sharing read surface and folder notebook compatibility, Phase 5 local canonical Sharing integration smoke, migration bridge for the inherited 8080 database, canonical Sharing timestamp compatibility, and final real 8080 Release Gate. Next slice: release handoff only; no implementation work remains in this P0 branch.
 
 ## Phase 0 Slice Checklist
 
@@ -17,8 +17,8 @@ CURRENT_PHASE: Phase 5 — local end-to-end Sharing smoke is implemented and pas
 - Created folder: ID `b268fd5a-8bb4-4ee6-9447-03edc9c142f0`; name not confirmed from read-only evidence and must be verified during the Release Gate.
 - Shared dashboard: ID `9775fc11-8891-493d-8715-ee6dfbc31cbc`; selected dashboard notebook ID `1acfaeff-4dae-434f-aa0b-eba828c18669`.
 - Reason: temporary validation data for dashboard sharing behavior on the active 8080 instance.
-- Current state: data is still present in the 8080 runtime and has not been cleaned up.
-- Cleanup owner/timing: this governance integration session should verify and clean up the test folder during the final 8080 Release Gate, after Phase 0-5 implementation and local gates pass. Do not delete it earlier because 8080 is read-only for this goal until Release Gate.
+- Current state: cleaned during the final `127.0.0.1:8080` Release Gate; `REGISTERED_FOLDER_ID=b268fd5a-8bb4-4ee6-9447-03edc9c142f0` was present before cleanup, delete returned `204`, and post-delete lookup returned `404`.
+- Cleanup owner/timing: completed by this governance integration session during the final Release Gate after Phase 0-5 implementation and local gates passed.
 
 ## 2026-08-16 13:22 CST - Integration Worktree Initialized
 
@@ -403,6 +403,46 @@ Remaining Phase 3/4 work:
 - Add Human UI surfaces for suite inventory/detail, case editor, run compare, failure drawer, feedback review, and advisor staged patch review.
 - Add explicit REST review/apply endpoints for advisor verification/regression lifecycle if the UI needs review-specific shapes beyond the existing runner/promotion endpoints.
 - Add end-to-end browser/MCP parity tests showing failed-set verification plus full-suite regression evidence is visible before promotion/apply.
+
+## 2026-08-16 21:08 CST - Final Real 8080 Release Gate
+
+Scope:
+
+- Fixed the canonical Sharing timestamp compatibility issue found during the first real 8080 gate attempt.
+- `SharingService` now writes naive UTC timestamps for `sharing_grants.revoked_at`, `sharing_viewer_sessions.issued_at`, `sharing_viewer_sessions.expires_at`, and `sharing_secrets.rotated_at`, matching the canonical Sharing models' `TIMESTAMP(timezone=False)` columns and the existing server pattern for DB timestamps.
+- Added regression assertions proving issued, expiry, revoke, and `_now()` timestamps are naive UTC for DB writes.
+- Built and deployed current integration commit `28813672936f417c23cf2e9ada3b76af031055e9` to the real 8080 runtime as image `byaan:selfhosted-governance-p0-2881367`.
+- Replaced the previous 8080 container `byaan-governance-p0-976c5cf-8080` with `byaan-governance-p0-2881367-8080`, preserving the existing persistent volume `byaan_data_studio_p0_9718bf6_8080`.
+- Added `server/scripts/sharing_release_gate_8080.py`, a real 8080 gate script that logs in as the self-hosted admin, discovers the tenant, creates a temporary folder/notebook/dashboard fixture, verifies canonical folder notebook and folder dashboard Sharing evidence through real REST, verifies worker-backed notebook sharing is safely gated when external sharing is disabled, deletes the temporary fixture, and cleans the previously registered dashboard test folder.
+
+Evidence:
+
+- Timestamp fix commit: `28813672936f417c23cf2e9ada3b76af031055e9` (`governance: use naive utc sharing timestamps`), pushed to `veadk-data-studio/integration/evaluation-sharing-governance-p0`.
+- `cd server && uv run ruff check services/sharing.py tests/test_sharing_canonical_service.py scripts/sharing_release_gate_8080.py` -> passed with the existing removed-rule warning.
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_sharing_canonical_service.py tests/test_share_object_authorization.py tests/test_sharing_read_surface.py tests/test_dashboard_security_regressions.py -q` -> `29 passed, 9 warnings`.
+- `PYTHONPATH=. uv run python server/scripts/sharing_governance_smoke.py` -> `ok: true`; canonical notebook surfaces `folder_notebook`, `html_notebook_share`, and `json_notebook_share`; canonical dashboard grant count `1`; revoked notebook surface statuses all `revoked`.
+- `cd server && PYTHONPATH=..:tests uv run alembic heads` -> `add_canonical_sharing_model (head)`.
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_share_secret_redaction.py tests/test_share_object_authorization.py tests/test_dashboard_security_regressions.py tests/test_sharing_canonical_service.py tests/test_sharing_read_surface.py tests/test_sharing_persistence_migration.py tests/test_migration_chain_hardening.py -q` -> `39 passed, 9 warnings`.
+- `DOCKER_BUILDKIT=1 docker build -f Dockerfile.self-hosted -t byaan:selfhosted-governance-p0-2881367 .` -> image built successfully with only existing frontend CSS/chunk warnings.
+- Current 8080 container: `b4906e451416 byaan:selfhosted-governance-p0-2881367 byaan-governance-p0-2881367-8080`, port mapping `0.0.0.0:8080->80/tcp`.
+- Runtime env check: `APP_MODE=self-hosted`, `BYAAN_VERSION=governance-p0-2881367`, `DATA_DIR=/data`, `FRONTEND_URL=http://127.0.0.1:8080`, `PUBLIC_BASE_URL=http://127.0.0.1:8080`, `MASTER_USER_EMAIL=admin@example.com`, `MASTER_USER_PASSWORD=password`.
+- Container Alembic current with explicit PostgreSQL `DATABASE_URL` -> `add_canonical_sharing_model (head)`.
+- `GET http://127.0.0.1:8080/api/sharing/grants` without auth -> `401`, proving the canonical Sharing route is mounted and protected.
+- `POST /api/auth/login` with `admin@example.com / password` -> `200` and bearer token.
+- `BASE_URL=http://127.0.0.1:8080 CONTAINER=byaan-governance-p0-2881367-8080 RUN_ID=2881367 PYTHONPATH=. uv run python server/scripts/sharing_release_gate_8080.py` -> `ok: true`.
+- Release gate fixture: folder `e0211fe6-47c5-4d8d-9be3-5c4e7fdba471`, notebook `3d20213d-7468-4f45-b967-b01d19d84dbc`, dashboard `82496518-f364-4a34-9f19-125326989165`.
+- Canonical folder evidence: folder notebook surface `folder_notebook`, folder dashboard surface `folder_dashboard`, folder notebook revoked status `revoked`.
+- Worker-backed notebook share gate: `403`, message `External sharing is not available in this deployment mode`, which is expected for this self-hosted runtime with external sharing disabled.
+- Temporary fixture cleanup: folder delete `204`; notebook delete `204`; subsequent folder lookup `404`; notebook no longer appears in `GET /api/notebooks`.
+- Registered historical folder cleanup: folder `b268fd5a-8bb4-4ee6-9447-03edc9c142f0` was present before cleanup, delete returned `204`, post-delete lookup returned `404`.
+- Container logs since the gate contain no `Traceback`, `ERROR`, `500`, `invalid input`, `offset-naive`, or `offset-aware` matches.
+
+Final status:
+
+- Phase 0-5 implementation and local gates are complete.
+- Real `127.0.0.1:8080` Release Gate is complete.
+- The previously registered 8080 side-effect folder is cleaned.
+- No further implementation slice remains for Governance Integration P0.
 
 ## 2026-08-16 19:47 CST - Phase 3/4 Evaluation Browser And MCP Parity Smoke
 
