@@ -1439,6 +1439,75 @@ async def test_local_parquet_source_upload_creates_governed_snapshot_evidence_an
     assert query_result["result"][0]["total_revenue"] == 200
 
 
+async def test_projection_review_api_records_current_review_and_lineage(test_client):
+    uploaded = await test_client.post(
+        "/api/source-resources/files",
+        files={"file": ("revenue.csv", b"region,revenue\nEast,120\nWest,80\n", "text/csv")},
+        data={"name": "reviewed revenue"},
+    )
+    assert uploaded.status_code == 201
+    resource = uploaded.json()["data"]
+    assert resource["projected_dataset_id"]
+
+    reviewed = await test_client.post(
+        f"/api/source-resources/{resource['id']}/projection/review",
+        json={"status": "verified", "reviewed_by": "analytics-owner", "note": "Header and totals verified."},
+    )
+    assert reviewed.status_code == 200
+    review = reviewed.json()["data"]
+    assert review["status"] == "verified"
+    assert review["reviewed_by"] == "analytics-owner"
+    assert review["note"] == "Header and totals verified."
+    assert review["source_snapshot_id"] == resource["latest_snapshot_id"]
+    assert review["projected_dataset_id"] == resource["projected_dataset_id"]
+    assert review["projection_manifest_hash"]
+    assert review["current"] is True
+    assert review["evidence_locator"]["source_resource_id"] == resource["id"]
+    assert review["evidence_locator"]["projected_dataset_id"] == resource["projected_dataset_id"]
+
+    fetched = await test_client.get(f"/api/source-resources/{resource['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["data"]["projection_review"]["status"] == "verified"
+
+    parsed_assets = await test_client.get(f"/api/source-resources/{resource['id']}/parsed-assets")
+    assert parsed_assets.status_code == 200
+    assert (
+        parsed_assets.json()["data"]["projection_review"]["projection_manifest_hash"]
+        == review["projection_manifest_hash"]
+    )
+
+    lineage = await test_client.get(f"/api/source-resources/{resource['id']}/lineage")
+    assert lineage.status_code == 200
+    lineage_nodes = lineage.json()["data"]["nodes"]
+    review_node = next(node for node in lineage_nodes if node["node_type"] == "projection_review")
+    dataset_node = next(node for node in lineage_nodes if node["node_type"] == "projected_dataset")
+    assert review_node["status"] == "verified"
+    assert review_node["metadata"]["current"] is True
+    assert dataset_node["status"] == "verified"
+
+
+async def test_projection_review_api_rejects_sources_without_projected_dataset(test_client):
+    created = await test_client.post(
+        "/api/source-resources",
+        json={
+            "resource_type": "web",
+            "name": "Context-only page",
+            "source_url": "https://example.com",
+            "content": "Context text only",
+        },
+    )
+    assert created.status_code == 201
+    resource = created.json()["data"]
+    assert resource["projected_dataset_id"] is None
+
+    reviewed = await test_client.post(
+        f"/api/source-resources/{resource['id']}/projection/review",
+        json={"status": "verified"},
+    )
+    assert reviewed.status_code == 400
+    assert "projected dataset" in json.dumps(reviewed.json())
+
+
 async def test_sync_failure_keeps_previous_successful_snapshot(test_session):
     tenant = await _tenant(test_session)
     connection_service = SourceConnectionService()

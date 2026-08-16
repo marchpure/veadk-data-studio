@@ -872,6 +872,27 @@ export type SourceOverviewModelingStatus =
   | 'unsupported'
 export type SourceOverviewModelingMode = 'relational' | 'warehouse' | 'projection' | 'document_projection' | 'context_assisted' | 'business_object' | 'event' | 'semantic_import'
 
+export type SourceProjectionReviewStatus = 'verified' | 'needs_changes' | 'rejected'
+
+export interface SourceProjectionReview {
+  status: SourceProjectionReviewStatus
+  reviewed_by?: string | null
+  reviewed_at: string
+  note?: string | null
+  source_snapshot_id?: string | null
+  projected_dataset_id: string
+  projection_manifest_hash: string
+  evidence_locator: Record<string, any>
+  current: boolean
+  stale_reason?: string | null
+}
+
+export interface SourceProjectionReviewRequest {
+  status?: SourceProjectionReviewStatus
+  reviewed_by?: string | null
+  note?: string | null
+}
+
 export interface SourceOverviewItem {
   id: string
   source_kind: 'connection' | 'dataset' | 'source_resource'
@@ -887,6 +908,7 @@ export interface SourceOverviewItem {
   latest_snapshot_id?: string | null
   raw_artifact_uri?: string | null
   projected_dataset_id?: string | null
+  projection_review?: SourceProjectionReview | null
   context_index_status: SourceOverviewContextIndexStatus
   parse_status: SourceOverviewParseStatus
   parsed_asset_counts: {
@@ -979,6 +1001,7 @@ export interface SourceResource {
   status: string
   latest_snapshot_id?: string | null
   projected_dataset_id?: string | null
+  projection_review?: SourceProjectionReview | null
   created_at: string
   updated_at: string
   latest_snapshot?: SourceSnapshot | null
@@ -1016,6 +1039,7 @@ export interface SourceParsedAssetsResponse {
   resource_id: string
   latest_snapshot_id?: string | null
   projected_dataset_id?: string | null
+  projection_review?: SourceProjectionReview | null
   parse_status: string
   parser_version?: string | null
   parser_warnings: unknown[]
@@ -3317,6 +3341,25 @@ export class ApiService {
       return extractData<SourceParsedAssetsResponse>(responseData)
     } catch (error) {
       console.error('Error fetching source resource parsed assets:', error)
+      throw error
+    }
+  }
+
+  static async reviewSourceResourceProjection(resourceId: string, payload: SourceProjectionReviewRequest = { status: 'verified' }): Promise<SourceProjectionReview> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/source-resources/${resourceId}/projection/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
+      }
+      const responseData = await response.json()
+      return extractData<SourceProjectionReview>(responseData)
+    } catch (error) {
+      console.error('Error reviewing source resource projection:', error)
       throw error
     }
   }

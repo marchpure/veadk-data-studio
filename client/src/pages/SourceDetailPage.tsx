@@ -11,6 +11,7 @@ import {
   useFeishuOAuthResult,
   useKnowledgeSearch,
   useRefreshSourceOverviewConnectionSchema,
+  useReviewSourceResourceProjection,
   useSourceResource,
   useSourceResourceConsumers,
   useSourceResourceLineage,
@@ -23,7 +24,7 @@ import {
   sourceConnectorKeys,
   sourceOverviewKeys,
 } from '../hooks/useDBConnections'
-import { ApiService, isMultiDatabaseSchema, type DatabaseSchemaResponse, type EvidenceReadResponse, type SourceConsumerItem, type SourceEvidence, type SourceLineageEdge, type SourceLineageNode, type SourceOverviewItem, type SourceParsedAssetItem, type SourceResource, type SourceResourceProcessing, type SourceSnapshot } from '../services/api'
+import { ApiService, isMultiDatabaseSchema, type DatabaseSchemaResponse, type EvidenceReadResponse, type SourceConsumerItem, type SourceEvidence, type SourceLineageEdge, type SourceLineageNode, type SourceOverviewItem, type SourceParsedAssetItem, type SourceProjectionReview, type SourceResource, type SourceResourceProcessing, type SourceSnapshot } from '../services/api'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 const sourceDetailSteps = [
@@ -270,6 +271,7 @@ export default function SourceDetailPage() {
   const startFeishuOAuth = useStartFeishuOAuth()
   const pollFeishuOAuth = useFeishuOAuthResult()
   const refreshConnectionSchemaMutation = useRefreshSourceOverviewConnectionSchema()
+  const reviewProjectionMutation = useReviewSourceResourceProjection()
   const overview = overviewQuery.data
   const isSourceResource = overview?.source_kind === 'source_resource'
   const resourceQuery = useSourceResource(isSourceResource ? sourceId : undefined)
@@ -500,6 +502,7 @@ export default function SourceDetailPage() {
   const canReconnectFeishu = needsFeishuReauthorization(overview)
   const feishuReconnectLabel = waitingForFeishuOAuth || startFeishuOAuth.isPending ? 'Authorizing...' : 'Reconnect Feishu'
   const sourceConnection = sourceResource.source_connection
+  const projectionReview = parsedAssets?.projection_review || sourceResource.projection_review || overview.projection_review || null
   const grantedScopes = stringListValue(sourceConnection?.scopes || sourceConnection?.capabilities?.scopes || sourceConnection?.capabilities?.scope)
   const handleRetrySync = () => {
     syncResourceMutation.mutate({
@@ -517,6 +520,15 @@ export default function SourceDetailPage() {
     })
   }
   const handleDisconnectConnection = () => disconnectSourceConnection(sourceResource.source_connection_id)
+  const handleReviewProjection = (status: SourceProjectionReview['status']) => {
+    reviewProjectionMutation.mutate({
+      resourceId: sourceResource.id,
+      payload: {
+        status,
+        reviewed_by: 'source-detail',
+      },
+    })
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] p-8 text-white">
@@ -673,6 +685,13 @@ export default function SourceDetailPage() {
           </Section>
 
           <Section id="tables" title="Tables" icon={<Database className="h-4 w-4" />}>
+            {(parsedAssets?.projected_dataset_id || sourceResource.projected_dataset_id) && (
+              <ProjectionReviewPanel
+                review={projectionReview}
+                disabled={reviewProjectionMutation.isPending}
+                onReview={handleReviewProjection}
+              />
+            )}
             {parsedAssetsQuery.isLoading ? (
               <LoadingRow label="Loading tables..." />
             ) : parsedAssets?.tables.length ? (
@@ -1546,6 +1565,64 @@ function ParsedAssetRow({ item }: { item: SourceParsedAssetItem }) {
       )}
     </div>
   )
+}
+
+function ProjectionReviewPanel({
+  review,
+  disabled,
+  onReview,
+}: {
+  review: SourceProjectionReview | null
+  disabled: boolean
+  onReview: (status: SourceProjectionReview['status']) => void
+}) {
+  const current = review?.current !== false
+  const tone = review?.status === 'verified' && current
+    ? 'border-green-700/40 bg-green-950/20 text-green-100'
+    : review?.status === 'rejected'
+      ? 'border-red-700/40 bg-red-950/20 text-red-100'
+      : 'border-amber-700/40 bg-amber-950/20 text-amber-100'
+  return (
+    <div className={`mb-4 rounded border p-3 text-sm ${tone}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-xs uppercase opacity-70">Projection review</div>
+          <div className="mt-1 font-medium">{projectionReviewLabel(review)}</div>
+          {review?.reviewed_at && (
+            <div className="mt-1 text-xs opacity-70">
+              {formatDate(review.reviewed_at)}{review.reviewed_by ? ` · ${review.reviewed_by}` : ''}
+            </div>
+          )}
+          {review?.stale_reason && <div className="mt-1 text-xs opacity-80">Stale: {typeLabel(review.stale_reason)}</div>}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onReview('verified')}>
+            {disabled ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            Verify
+          </Button>
+          <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onReview('needs_changes')}>
+            Needs changes
+          </Button>
+          <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => onReview('rejected')}>
+            Reject
+          </Button>
+        </div>
+      </div>
+      {review?.note && <div className="mt-2 text-xs opacity-80">{review.note}</div>}
+    </div>
+  )
+}
+
+function projectionReviewLabel(review: SourceProjectionReview | null): string {
+  if (!review) return 'Not reviewed'
+  if (review.current === false) return `${reviewStatusLabel(review.status)} stale`
+  return reviewStatusLabel(review.status)
+}
+
+function reviewStatusLabel(status: SourceProjectionReview['status']): string {
+  if (status === 'verified') return 'Verified'
+  if (status === 'rejected') return 'Rejected'
+  return 'Needs changes'
 }
 
 function LineageList({ nodes, edges }: { nodes: SourceLineageNode[]; edges: SourceLineageEdge[] }) {

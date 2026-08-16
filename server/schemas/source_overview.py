@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -69,6 +69,7 @@ class SourceOverviewItem(BaseModel):
     latest_snapshot_id: str | None = None
     raw_artifact_uri: str | None = None
     projected_dataset_id: str | None = None
+    projection_review: dict[str, Any] | None = None
     context_index_status: ContextIndexStatus = "unavailable"
     parse_status: ParseStatus = "pending"
     parsed_asset_counts: ParsedAssetCounts = Field(default_factory=ParsedAssetCounts)

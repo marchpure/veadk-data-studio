@@ -24,6 +24,8 @@ import {
   type SourceConsumersResponse,
   type SourceLineageResponse,
   type SourceParsedAssetsResponse,
+  type SourceProjectionReview,
+  type SourceProjectionReviewRequest,
   type SourceResourcePickerResponse,
   type SourceResourceProcessing,
   type SourceResourceQuickLocateResponse,
@@ -528,6 +530,29 @@ export function useSyncSourceResource() {
     },
     onError: (error: Error) => {
       showToast.error(`Failed to sync source: ${error.message}`)
+    },
+  })
+}
+
+export function useReviewSourceResourceProjection() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ resourceId, payload = { status: 'verified' } }: { resourceId: string; payload?: SourceProjectionReviewRequest }): Promise<SourceProjectionReview> => {
+      return ApiService.reviewSourceResourceProjection(resourceId, payload)
+    },
+    onSuccess: (_data, variables) => {
+      const resourceId = variables.resourceId
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.sourceResource(resourceId) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.processing(resourceId) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.parsedAssets(resourceId) })
+      queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.lineage(resourceId) })
+      queryClient.invalidateQueries({ queryKey: ['datasources'] })
+      queryClient.invalidateQueries({ queryKey: sourceOverviewKeys.all })
+      showToast.success('Projection review saved')
+    },
+    onError: (error: Error) => {
+      showToast.error(`Failed to review projection: ${error.message}`)
     },
   })
 }

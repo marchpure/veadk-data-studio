@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from dataclasses import dataclass, field
@@ -421,6 +422,12 @@ class SourceOverviewService:
             "projected_dataset_id"
         )
         projection = self._projection_payload(resource=resource, snapshot_metadata=snapshot_metadata)
+        projection_review = self._projection_review_payload(
+            resource=resource,
+            latest_snapshot=latest_snapshot,
+            projected_dataset_id=str(projected_dataset_id) if projected_dataset_id else None,
+            projection=projection,
+        )
         notebooks = set()
         if knowledge_resource:
             notebooks.update(consumer_index.notebooks_by_knowledge_id.get(str(knowledge_resource.id), set()))
@@ -450,6 +457,7 @@ class SourceOverviewService:
             latest_snapshot_id=str(resource.latest_snapshot_id) if resource.latest_snapshot_id else None,
             raw_artifact_uri=latest_snapshot.raw_storage_uri if latest_snapshot else None,
             projected_dataset_id=str(projected_dataset_id) if projected_dataset_id else None,
+            projection_review=projection_review,
             context_index_status=self._context_index_status(status=status, knowledge_resource=knowledge_resource),
             parse_status=self._parse_status(latest_snapshot=latest_snapshot, knowledge_resource=knowledge_resource),
             parsed_asset_counts={
@@ -466,6 +474,7 @@ class SourceOverviewService:
                 family=self._resource_family(resource.resource_type),
                 has_snapshot=latest_snapshot is not None,
                 projected_dataset_id=str(projected_dataset_id) if projected_dataset_id else None,
+                projection_review=projection_review,
                 knowledge_resource=knowledge_resource,
                 semantic_count=consumer_counts["semantic_models"],
             ),
@@ -736,6 +745,7 @@ class SourceOverviewService:
         projected_dataset_id: str | None,
         knowledge_resource: KnowledgeResource | None,
         semantic_count: int,
+        projection_review: dict[str, Any] | None = None,
     ) -> list[str]:
         if status in {"authorization_required", "reauthorization_required", "disconnected"}:
             return ["Reauthorize source"]
@@ -759,6 +769,12 @@ class SourceOverviewService:
             return ["Capture snapshot"]
         if family == "object_storage":
             if projected_dataset_id and semantic_count == 0:
+                if projection_review and projection_review.get("status") == "rejected":
+                    return ["Revise projection", "Review projection"]
+                if projection_review and projection_review.get("current") is False:
+                    return ["Review stale projection", "Generate semantic model"]
+                if self._projection_review_is_verified(projection_review):
+                    return ["Review semantic handoff", "Generate semantic model"]
                 return ["Review projection", "Generate semantic model"]
             if knowledge_resource and knowledge_resource.index_status == "indexed":
                 return ["Search evidence", "Review projection"]
@@ -769,10 +785,22 @@ class SourceOverviewService:
             return ["Browse bucket or prefix"]
         if family == "databases":
             if projected_dataset_id and semantic_count == 0:
-                return ["Generate semantic model"]
+                if projection_review and projection_review.get("status") == "rejected":
+                    return ["Revise projection", "Review projection"]
+                if projection_review and projection_review.get("current") is False:
+                    return ["Review stale projection", "Generate semantic model"]
+                if self._projection_review_is_verified(projection_review):
+                    return ["Review semantic handoff", "Generate semantic model"]
+                return ["Review projection", "Generate semantic model"]
             return ["Review schema profile"]
         if projected_dataset_id and semantic_count == 0:
-            return ["Generate semantic model"]
+            if projection_review and projection_review.get("status") == "rejected":
+                return ["Revise projection", "Review projection"]
+            if projection_review and projection_review.get("current") is False:
+                return ["Review stale projection", "Generate semantic model"]
+            if self._projection_review_is_verified(projection_review):
+                return ["Review semantic handoff", "Generate semantic model"]
+            return ["Review projection", "Generate semantic model"]
         if has_snapshot:
             return ["Open source detail"]
         return ["Capture snapshot"]
@@ -836,6 +864,62 @@ class SourceOverviewService:
             projection = {**manifest, **projection}
         return projection
 
+    def _projection_review_payload(
+        self,
+        *,
+        resource: SourceResource,
+        latest_snapshot: SourceSnapshot | None,
+        projected_dataset_id: str | None,
+        projection: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        snapshot_metadata = (
+            latest_snapshot.metadata_json if latest_snapshot and isinstance(latest_snapshot.metadata_json, dict) else {}
+        )
+        review = (resource.sync_config_json or {}).get("projection_review") or snapshot_metadata.get(
+            "projection_review"
+        )
+        if not isinstance(review, dict):
+            return None
+        current_hash = self._projection_manifest_hash(projection)
+        stale_reasons: list[str] = []
+        if latest_snapshot and str(review.get("source_snapshot_id") or "") != str(latest_snapshot.id):
+            stale_reasons.append("source_snapshot_changed")
+        if projected_dataset_id and str(review.get("projected_dataset_id") or "") != str(projected_dataset_id):
+            stale_reasons.append("projected_dataset_changed")
+        if str(review.get("projection_manifest_hash") or "") != current_hash:
+            stale_reasons.append("projection_manifest_changed")
+        status = str(review.get("status") or "needs_changes")
+        if status not in {"verified", "needs_changes", "rejected"}:
+            status = "needs_changes"
+        return {
+            "status": status,
+            "reviewed_by": review.get("reviewed_by"),
+            "reviewed_at": str(review.get("reviewed_at") or ""),
+            "note": review.get("note"),
+            "source_snapshot_id": review.get("source_snapshot_id"),
+            "projected_dataset_id": str(projected_dataset_id or review.get("projected_dataset_id") or ""),
+            "projection_manifest_hash": str(review.get("projection_manifest_hash") or current_hash),
+            "evidence_locator": review.get("evidence_locator")
+            if isinstance(review.get("evidence_locator"), dict)
+            else {},
+            "current": not stale_reasons,
+            "stale_reason": ",".join(stale_reasons) if stale_reasons else None,
+        }
+
+    def _projection_review_is_verified(self, review: dict[str, Any] | None) -> bool:
+        return bool(review and review.get("status") == "verified" and review.get("current") is not False)
+
+    def _projection_manifest_hash(self, projection: dict[str, Any]) -> str:
+        manifest = {
+            "dataset_id": projection.get("dataset_id"),
+            "source_snapshot_id": projection.get("source_snapshot_id"),
+            "files": projection.get("files") or [],
+            "schema_tables": projection.get("schema_tables") or [],
+            "tables": projection.get("tables") or [],
+        }
+        encoded = json.dumps(manifest, sort_keys=True, default=str, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
     def _with_modeling_handoff(self, item: SourceOverviewItem) -> SourceOverviewItem:
         handoff = self._modeling_handoff(item)
         return item.model_copy(
@@ -882,14 +966,31 @@ class SourceOverviewService:
                 can_load_profile=True,
             )
         if self._is_projection_source(item):
-            return _ModelingHandoff(
-                status="needs_projection",
-                mode="projection",
-                reason=(
+            if self._projection_review_is_verified(item.projection_review):
+                return _ModelingHandoff(
+                    status="needs_projection",
+                    mode="projection",
+                    reason="The projection is reviewed, but projected-dataset semantic draft generation still needs a dedicated handoff contract.",
+                    next_action=item.next_actions[0] if item.next_actions else "Review semantic handoff",
+                    evidence_summary=self._modeling_evidence_summary(item),
+                    can_load_profile=True,
+                )
+            if item.projection_review and item.projection_review.get("status") == "rejected":
+                reason = (
+                    "The current projection was rejected. Revise the projection before production semantic modeling."
+                )
+            elif item.projection_review and item.projection_review.get("current") is False:
+                reason = "The projection review is stale. Re-review the latest projection before production semantic modeling."
+            else:
+                reason = (
                     "Review and confirm the projected dataset before production semantic modeling."
                     if item.projected_dataset_id
                     else "Detect and confirm a tabular projection before production semantic modeling."
-                ),
+                )
+            return _ModelingHandoff(
+                status="needs_projection",
+                mode="projection",
+                reason=reason,
                 next_action=item.next_actions[0] if item.next_actions else "Review projection",
                 evidence_summary=self._modeling_evidence_summary(item),
                 can_load_profile=False,

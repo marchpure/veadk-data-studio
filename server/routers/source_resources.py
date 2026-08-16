@@ -15,6 +15,8 @@ from server.schemas.source_resources import (
     SourceConsumersRead,
     SourceLineageRead,
     SourceParsedAssetsRead,
+    SourceProjectionReviewRead,
+    SourceProjectionReviewRequest,
     SourceResourceCreate,
     SourceResourceImportRequest,
     SourceResourceProcessingRead,
@@ -34,7 +36,9 @@ def _bad_request_or_not_found(error: ValueError) -> HTTPException:
     return HTTPException(status_code=code, detail=message)
 
 
-@router.post("/source-resources", response_model=StandardResponse[SourceResourceRead], status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/source-resources", response_model=StandardResponse[SourceResourceRead], status_code=status.HTTP_201_CREATED
+)
 async def create_source_resource(
     payload: SourceResourceCreate,
     auth: AuthContext = Depends(require_scope(Scope.DATASET_CREATE)),
@@ -49,7 +53,9 @@ async def create_source_resource(
     return success_response(data=data, message="Source resource created")
 
 
-@router.post("/source-resources/pdf", response_model=StandardResponse[SourceResourceRead], status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/source-resources/pdf", response_model=StandardResponse[SourceResourceRead], status_code=status.HTTP_201_CREATED
+)
 async def create_pdf_source_resource(
     file: UploadFile = File(...),
     name: str | None = Form(None),
@@ -73,7 +79,9 @@ async def create_pdf_source_resource(
         raise _bad_request_or_not_found(error)
 
 
-@router.post("/source-resources/files", response_model=StandardResponse[SourceResourceRead], status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/source-resources/files", response_model=StandardResponse[SourceResourceRead], status_code=status.HTTP_201_CREATED
+)
 async def create_file_source_resource(
     file: UploadFile = File(...),
     name: str | None = Form(None),
@@ -154,6 +162,29 @@ async def get_source_resource_parsed_assets(
             resource_id=resource_id,
         )
         return success_response(data=data, message="Retrieved source resource parsed assets")
+    except ValueError as error:
+        raise _bad_request_or_not_found(error)
+
+
+@router.post(
+    "/source-resources/{resource_id}/projection/review",
+    response_model=StandardResponse[SourceProjectionReviewRead],
+)
+async def review_source_resource_projection(
+    resource_id: str,
+    payload: SourceProjectionReviewRequest,
+    auth: AuthContext = Depends(require_any_scope(Scope.DATASET_UPDATE, Scope.DATASET_UPDATE_OWN)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        data = await source_resource_service.review_projection(
+            session=session,
+            tenant_id=auth.tenant_id,
+            resource_id=resource_id,
+            user_id=auth.user_id,
+            payload=payload,
+        )
+        return success_response(data=data, message="Source projection review recorded")
     except ValueError as error:
         raise _bad_request_or_not_found(error)
 

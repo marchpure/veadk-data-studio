@@ -42,6 +42,7 @@ SourceProcessingStepId = Literal[
     "ready",
 ]
 SourceProcessingStepStatus = Literal["pending", "running", "succeeded", "skipped", "failed"]
+SourceProjectionReviewStatus = Literal["verified", "needs_changes", "rejected"]
 
 
 class SourceResourceCreate(BaseModel):
@@ -84,6 +85,25 @@ class SourceResourceSyncRequest(BaseModel):
     external_revision: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     provider: str | None = None
+
+
+class SourceProjectionReviewRequest(BaseModel):
+    status: SourceProjectionReviewStatus = "verified"
+    reviewed_by: str | None = None
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class SourceProjectionReviewRead(BaseModel):
+    status: SourceProjectionReviewStatus
+    reviewed_by: str | None = None
+    reviewed_at: str
+    note: str | None = None
+    source_snapshot_id: UUID | None = None
+    projected_dataset_id: UUID
+    projection_manifest_hash: str
+    evidence_locator: dict[str, Any] = Field(default_factory=dict)
+    current: bool = True
+    stale_reason: str | None = None
 
 
 class SourceSnapshotRead(BaseModel):
@@ -148,6 +168,7 @@ class SourceResourceRead(BaseModel):
     status: SourceResourceStatus
     latest_snapshot_id: UUID | None = None
     projected_dataset_id: UUID | None = None
+    projection_review: SourceProjectionReviewRead | None = None
     created_at: datetime
     updated_at: datetime
     latest_snapshot: SourceSnapshotRead | None = None
@@ -187,6 +208,7 @@ class SourceParsedAssetsRead(BaseModel):
     resource_id: UUID
     latest_snapshot_id: UUID | None = None
     projected_dataset_id: UUID | None = None
+    projection_review: SourceProjectionReviewRead | None = None
     parse_status: str
     parser_version: str | None = None
     parser_warnings: list[Any] = Field(default_factory=list)

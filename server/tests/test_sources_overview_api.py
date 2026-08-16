@@ -841,6 +841,47 @@ async def test_sources_overview_uses_snapshot_projection_manifest_for_asset_coun
     assert item["parsed_asset_counts"]["tables"] == 2
     assert item["parsed_asset_counts"]["files"] == 1
     assert item["next_actions"] == ["Review projection", "Generate semantic model"]
+    assert item["projection_review"] is None
+    assert item["modeling_status"] == "needs_projection"
+    assert item["modeling_can_load_profile"] is False
+
+
+async def test_sources_overview_marks_verified_projection_review_without_semantic_draft_handoff(test_client):
+    uploaded = await test_client.post(
+        "/api/source-resources/files",
+        files={"file": ("revenue.csv", b"region,revenue\nEast,120\nWest,80\n", "text/csv")},
+        data={"name": "reviewed revenue"},
+    )
+    assert uploaded.status_code == 201
+    resource = uploaded.json()["data"]
+
+    before = await test_client.get("/api/sources/overview")
+    assert before.status_code == 200
+    before_item = next(item for item in before.json()["data"]["items"] if item["id"] == resource["id"])
+    assert before_item["projection_review"] is None
+    assert before_item["next_actions"] == ["Review projection", "Generate semantic model"]
+    assert before_item["modeling_status"] == "needs_projection"
+    assert before_item["modeling_mode"] == "projection"
+    assert before_item["modeling_can_load_profile"] is False
+
+    reviewed = await test_client.post(
+        f"/api/source-resources/{resource['id']}/projection/review",
+        json={"status": "verified", "reviewed_by": "model-owner"},
+    )
+    assert reviewed.status_code == 200
+
+    overview = await test_client.get("/api/sources/overview")
+    assert overview.status_code == 200
+    item = next(item for item in overview.json()["data"]["items"] if item["id"] == resource["id"])
+
+    assert item["projection_review"]["status"] == "verified"
+    assert item["projection_review"]["current"] is True
+    assert item["next_actions"] == ["Review semantic handoff", "Generate semantic model"]
+    assert item["modeling_status"] == "needs_projection"
+    assert item["modeling_mode"] == "projection"
+    assert item["modeling_next_action"] == "Review semantic handoff"
+    assert item["modeling_can_load_profile"] is True
+    assert "dedicated handoff contract" in item["modeling_reason"]
 
 
 async def test_sources_overview_counts_tos_prefix_manifest_files(test_client, test_session):

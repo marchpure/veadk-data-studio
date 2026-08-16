@@ -27,7 +27,12 @@ from server.models.semantic_models import SemanticModel
 from server.models.source_connections import SourceConnection
 from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
-from server.schemas.source_resources import SourceResourceCreate, SourceResourceImportRequest, SourceResourceSyncRequest
+from server.schemas.source_resources import (
+    SourceProjectionReviewRequest,
+    SourceResourceCreate,
+    SourceResourceImportRequest,
+    SourceResourceSyncRequest,
+)
 from server.services.dataset_storage import DatasetStorageService
 from server.services.file_operations import DataFrameFileService
 from server.services.knowledge_provider import (
@@ -290,6 +295,65 @@ class SourceResourceService:
         await session.refresh(resource)
         return await self.resource_payload(session=session, resource=resource)
 
+    async def review_projection(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        resource_id: str | UUID,
+        user_id: UUID | None,
+        payload: SourceProjectionReviewRequest,
+    ) -> dict[str, Any]:
+        resource = await self.get_resource(session=session, tenant_id=tenant_id, resource_id=resource_id)
+        if resource is None:
+            raise ValueError("Source resource not found")
+        latest_snapshot = (
+            await session.get(SourceSnapshot, resource.latest_snapshot_id) if resource.latest_snapshot_id else None
+        )
+        projected_dataset_id = self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot)
+        if not projected_dataset_id:
+            raise ValueError("Source resource does not have a projected dataset to review")
+
+        projection = self._projection_payload(resource=resource, latest_snapshot=latest_snapshot)
+        if not projection:
+            raise ValueError("Source resource does not have a projection manifest to review")
+
+        review = {
+            "status": payload.status,
+            "reviewed_by": payload.reviewed_by or str(user_id) if user_id else payload.reviewed_by,
+            "reviewed_at": datetime.utcnow().isoformat(),
+            "note": payload.note,
+            "source_snapshot_id": str(latest_snapshot.id) if latest_snapshot else None,
+            "projected_dataset_id": str(projected_dataset_id),
+            "projection_manifest_hash": self._projection_manifest_hash(projection),
+            "evidence_locator": self._projection_evidence_locator(
+                resource=resource,
+                latest_snapshot=latest_snapshot,
+                projected_dataset_id=projected_dataset_id,
+                projection=projection,
+            ),
+        }
+        resource.sync_config_json = {
+            **(resource.sync_config_json or {}),
+            "projection_review": review,
+        }
+        if latest_snapshot is not None:
+            latest_snapshot.metadata_json = {
+                **(latest_snapshot.metadata_json or {}),
+                "projection_review": review,
+            }
+        await session.commit()
+        await session.refresh(resource)
+        return (
+            self._projection_review_payload(
+                resource=resource,
+                latest_snapshot=latest_snapshot,
+                projected_dataset_id=projected_dataset_id,
+                projection=projection,
+            )
+            or review
+        )
+
     async def create_file_resource_from_upload(
         self,
         *,
@@ -514,6 +578,10 @@ class SourceResourceService:
             "status": status,
             "latest_snapshot_id": resource.latest_snapshot_id,
             "projected_dataset_id": self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot),
+            "projection_review": self._projection_review_payload(
+                resource=resource,
+                latest_snapshot=latest_snapshot,
+            ),
             "created_at": resource.created_at,
             "updated_at": resource.updated_at,
             "latest_snapshot": self._snapshot_payload(latest_snapshot) if latest_snapshot else None,
@@ -902,6 +970,7 @@ class SourceResourceService:
             )
         metadata = self._snapshot_metadata(latest_snapshot)
         projection = self._projection_payload(resource=resource, latest_snapshot=latest_snapshot)
+        projected_dataset_id = self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot)
         files = self._parsed_asset_items_from_projection(projection, key="files", asset_type="file")
         tables = (
             self._parsed_asset_items_from_projection(projection, key="schema_tables", asset_type="table")
@@ -911,7 +980,13 @@ class SourceResourceService:
         return {
             "resource_id": resource.id,
             "latest_snapshot_id": resource.latest_snapshot_id,
-            "projected_dataset_id": self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot),
+            "projected_dataset_id": projected_dataset_id,
+            "projection_review": self._projection_review_payload(
+                resource=resource,
+                latest_snapshot=latest_snapshot,
+                projected_dataset_id=projected_dataset_id,
+                projection=projection,
+            ),
             "parse_status": knowledge_resource.parse_status
             if knowledge_resource
             else self._parse_status_for_snapshot(latest_snapshot),
@@ -947,6 +1022,13 @@ class SourceResourceService:
             resource_id=resource.id,
         )
         projected_dataset_id = self._projected_dataset_id(resource=resource, latest_snapshot=latest_snapshot)
+        projection = self._projection_payload(resource=resource, latest_snapshot=latest_snapshot)
+        projection_review = self._projection_review_payload(
+            resource=resource,
+            latest_snapshot=latest_snapshot,
+            projected_dataset_id=projected_dataset_id,
+            projection=projection,
+        )
         nodes = [
             {
                 "id": f"source:{resource.id}",
@@ -1034,8 +1116,10 @@ class SourceResourceService:
                     "id": f"dataset:{projected_dataset_id}",
                     "node_type": "projected_dataset",
                     "label": str(projected_dataset_id),
-                    "status": "projected",
-                    "metadata": {},
+                    "status": (projection_review or {}).get("status") or "projected",
+                    "metadata": {
+                        **({"projection_review": projection_review} if projection_review else {}),
+                    },
                 }
             )
             if latest_snapshot:
@@ -1044,7 +1128,29 @@ class SourceResourceService:
                         "from_id": f"snapshot:{latest_snapshot.id}",
                         "to_id": f"dataset:{projected_dataset_id}",
                         "relationship": "projected_to",
-                        "metadata": {},
+                        "metadata": {
+                            **({"projection_review": projection_review} if projection_review else {}),
+                        },
+                    }
+                )
+        if projection_review:
+            review_id = f"projection_review:{resource.id}:{projection_review['projection_manifest_hash']}"
+            nodes.append(
+                {
+                    "id": review_id,
+                    "node_type": "projection_review",
+                    "label": "Projection review",
+                    "status": projection_review["status"],
+                    "metadata": projection_review,
+                }
+            )
+            if projected_dataset_id:
+                edges.append(
+                    {
+                        "from_id": f"dataset:{projected_dataset_id}",
+                        "to_id": review_id,
+                        "relationship": "reviewed_as",
+                        "metadata": {"current": projection_review["current"]},
                     }
                 )
         return {"resource_id": resource.id, "nodes": nodes, "edges": edges}
@@ -2501,6 +2607,95 @@ class SourceResourceService:
         if isinstance(manifest, dict):
             projection = {**manifest, **projection}
         return projection
+
+    def _projection_review_payload(
+        self,
+        *,
+        resource: SourceResource,
+        latest_snapshot: SourceSnapshot | None,
+        projected_dataset_id: str | None = None,
+        projection: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        metadata = self._snapshot_metadata(latest_snapshot)
+        review = (resource.sync_config_json or {}).get("projection_review") or metadata.get("projection_review")
+        if not isinstance(review, dict):
+            return None
+        projected_dataset_id = projected_dataset_id or self._projected_dataset_id(
+            resource=resource,
+            latest_snapshot=latest_snapshot,
+        )
+        projection = (
+            projection
+            if projection is not None
+            else self._projection_payload(
+                resource=resource,
+                latest_snapshot=latest_snapshot,
+            )
+        )
+        current_hash = self._projection_manifest_hash(projection)
+        stale_reasons: list[str] = []
+        if latest_snapshot and str(review.get("source_snapshot_id") or "") != str(latest_snapshot.id):
+            stale_reasons.append("source_snapshot_changed")
+        if projected_dataset_id and str(review.get("projected_dataset_id") or "") != str(projected_dataset_id):
+            stale_reasons.append("projected_dataset_changed")
+        if str(review.get("projection_manifest_hash") or "") != current_hash:
+            stale_reasons.append("projection_manifest_changed")
+        status = str(review.get("status") or "needs_changes")
+        if status not in {"verified", "needs_changes", "rejected"}:
+            status = "needs_changes"
+        return {
+            "status": status,
+            "reviewed_by": review.get("reviewed_by"),
+            "reviewed_at": str(review.get("reviewed_at") or ""),
+            "note": review.get("note"),
+            "source_snapshot_id": review.get("source_snapshot_id"),
+            "projected_dataset_id": str(projected_dataset_id or review.get("projected_dataset_id") or ""),
+            "projection_manifest_hash": str(review.get("projection_manifest_hash") or current_hash),
+            "evidence_locator": review.get("evidence_locator")
+            if isinstance(review.get("evidence_locator"), dict)
+            else {},
+            "current": not stale_reasons,
+            "stale_reason": ",".join(stale_reasons) if stale_reasons else None,
+        }
+
+    def _projection_manifest_hash(self, projection: dict[str, Any]) -> str:
+        manifest = {
+            "dataset_id": projection.get("dataset_id"),
+            "source_snapshot_id": projection.get("source_snapshot_id"),
+            "files": projection.get("files") or [],
+            "schema_tables": projection.get("schema_tables") or [],
+            "tables": projection.get("tables") or [],
+        }
+        encoded = json.dumps(manifest, sort_keys=True, default=str, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def _projection_evidence_locator(
+        self,
+        *,
+        resource: SourceResource,
+        latest_snapshot: SourceSnapshot | None,
+        projected_dataset_id: str,
+        projection: dict[str, Any],
+    ) -> dict[str, Any]:
+        files = projection.get("files") if isinstance(projection.get("files"), list) else []
+        return {
+            "source_resource_id": str(resource.id),
+            "source_snapshot_id": str(latest_snapshot.id) if latest_snapshot else None,
+            "raw_artifact_uri": latest_snapshot.raw_storage_uri if latest_snapshot else None,
+            "projected_dataset_id": str(projected_dataset_id),
+            "projection_manifest_hash": self._projection_manifest_hash(projection),
+            "projection_files": [
+                {
+                    "filename": file.get("filename"),
+                    "file_type": file.get("file_type"),
+                    "source_locator": file.get("source_locator")
+                    if isinstance(file.get("source_locator"), dict)
+                    else {},
+                }
+                for file in files
+                if isinstance(file, dict)
+            ],
+        }
 
     def _parsed_asset_items_from_projection(
         self,
