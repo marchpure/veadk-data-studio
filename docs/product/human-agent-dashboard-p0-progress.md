@@ -98,12 +98,41 @@ Commit:
 
 - `033b526` `dashboard: enforce viewer query binding`
 
+### Phase 1 Schema Slice: Manifest And Run Contracts
+
+Status: implemented.
+
+Allowlist:
+
+- `server/schemas/dashboard.py`
+- `server/tests/test_dashboard_contract_schemas.py`
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Behavior:
+
+- Added strict Pydantic contracts for `dashboard.manifest.v1` and `dashboard.run.v1`.
+- Manifest requires the product-mandated top-level sections and validates stable data-view/tile/filter references.
+- Data views require exactly one matching binding for `semantic_metric`, `saved_query`, or `context_search`.
+- Semantic bindings must pin published model versions.
+- `pinned_snapshot` runs require immutable result artifact IDs for successful views.
+
+Tests:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_contract_schemas.py` -> passed, `7 passed`.
+- `cd server && uv run ruff check schemas/dashboard.py tests/test_dashboard_contract_schemas.py` -> passed.
+- `git diff --check` -> passed.
+
+Commit:
+
+- Pending.
+
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
 | --- | --- | --- | --- | --- |
 | `4a4f4e1` | `dashboard: audit human agent contract` | Phase 0 | `pytest tests/test_dashboard_security_regressions.py` -> 1 strict xfail; `ruff check tests/test_dashboard_security_regressions.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `033b526` | `dashboard: enforce viewer query binding` | Phase 2 security slice | `pytest tests/test_dashboard_security_regressions.py` -> 5 passed; `ruff check routers/folders.py tests/test_dashboard_security_regressions.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| Pending | `dashboard: add manifest run schemas` | Phase 1 schema slice | `pytest tests/test_dashboard_contract_schemas.py` -> 7 passed; `ruff check schemas/dashboard.py tests/test_dashboard_contract_schemas.py` -> passed | Pending |
 
 ## Acceptance Evidence
 
