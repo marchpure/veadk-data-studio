@@ -4,6 +4,8 @@ import { mkdirSync } from 'node:fs'
 const baseURL = process.env.BASE_URL || 'http://127.0.0.1:5173'
 const apiURL = process.env.API_URL || 'http://127.0.0.1:8000'
 const screenDir = process.env.SCREEN_DIR || './tmp-dashboard-screens'
+const adminEmail = process.env.BYAAN_ADMIN_EMAIL || 'admin@example.com'
+const adminPassword = process.env.BYAAN_ADMIN_PASSWORD || 'password'
 mkdirSync(screenDir, { recursive: true })
 
 const stats = {
@@ -30,6 +32,38 @@ async function api(path, options = {}) {
     throw new Error(`API ${path} failed ${response.status}: ${JSON.stringify(payload)}`)
   }
   return payload?.data ?? payload
+}
+
+async function loginForSelfHostedAuth() {
+  const response = await fetch(`${apiURL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ username: adminEmail, password: adminPassword }),
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(`Dashboard smoke login failed ${response.status}: ${JSON.stringify(payload)}`)
+  }
+  const token = payload?.data?.access_token
+  if (!token) {
+    throw new Error(`Dashboard smoke login did not return an access token: ${JSON.stringify(payload)}`)
+  }
+  const authHeaders = { Authorization: `Bearer ${token}` }
+  const scopes = await api('/api/scopes/all', { headers: authHeaders })
+  const tenantId = scopes.tenants?.[0]?.tenant_id
+  if (!tenantId) {
+    throw new Error(`Dashboard smoke login did not expose a tenant: ${JSON.stringify(scopes)}`)
+  }
+  return { tenantId, headers: { ...authHeaders, 'X-Tenant-ID': tenantId } }
+}
+
+async function resolveDashboardAuth() {
+  const config = await api('/api/app/config')
+  const bootstrap = config.local_bootstrap || config.community_bootstrap
+  if (bootstrap?.tenant_id) {
+    return { tenantId: bootstrap.tenant_id, headers: { 'X-Tenant-ID': bootstrap.tenant_id } }
+  }
+  return loginForSelfHostedAuth()
 }
 
 async function uploadCsvDataset(headers, notebookId) {
@@ -273,12 +307,7 @@ async function createDashboard(headers, notebookId, slugPrefix, manifestPayload,
 }
 
 async function seedDashboardFixtures() {
-  const config = await api('/api/app/config')
-  const bootstrap = config.local_bootstrap || config.community_bootstrap
-  if (!bootstrap?.tenant_id) {
-    throw new Error('Local bootstrap tenant was not available')
-  }
-  const headers = { 'X-Tenant-ID': bootstrap.tenant_id }
+  const { tenantId, headers } = await resolveDashboardAuth()
   const notebook = await api('/api/notebooks', {
     method: 'POST',
     headers,
@@ -388,7 +417,7 @@ async function seedDashboardFixtures() {
   const staleDetail = await api(`/api/dashboard-assets/${stalePartial.asset.id}`, { headers })
 
   return {
-    tenantId: bootstrap.tenant_id,
+    tenantId,
     notebookId: notebook.id,
     headers,
     structuredSlug: structured.asset.slug,
@@ -439,6 +468,12 @@ async function makePage(viewport, tenantId) {
       console.error('http5xx:', response.status(), response.url())
     }
   })
+  const loginResponse = await page.request.post(`${apiURL}/api/auth/login`, {
+    form: { username: adminEmail, password: adminPassword },
+  })
+  if (!loginResponse.ok()) {
+    throw new Error(`Browser login failed ${loginResponse.status()}: ${await loginResponse.text()}`)
+  }
   await page.addInitScript(id => {
     localStorage.setItem('byaan_active_tenant', id)
   }, tenantId)
