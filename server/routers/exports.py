@@ -20,6 +20,24 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
+def _dashboard_share_response(notebook_id: str, worker_data: dict) -> dict:
+    return {
+        "id": notebook_id,
+        "share_url": f"https://www.byaan.ai/share/{notebook_id}",
+        "created_at": worker_data.get("created_at"),
+        "updated_at": worker_data.get("updated_at"),
+        "has_password": worker_data.get("has_password", False),
+    }
+
+
+def _notebook_json_share_response(worker_share: dict) -> dict:
+    return {
+        "id": worker_share["id"],
+        "created_at": worker_share["created_at"],
+        "has_password": worker_share.get("has_password", False),
+    }
+
+
 def get_worker_url() -> str:
     """Get worker URL from env config. Callers must ensure worker features are enabled first."""
     config = get_waitlist_config()
@@ -274,16 +292,7 @@ async def get_notebook_share(
             logger.error(f"Worker returned error: {response.status_code} - {response.text}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get share")
 
-        data = response.json()
-        share = {
-            "id": notebook_id,
-            "share_url": f"https://www.byaan.ai/share/{notebook_id}",
-            "created_at": data.get("created_at"),
-            "updated_at": data.get("updated_at"),
-            "has_password": data.get("has_password", False),
-            "password": data.get("password"),
-        }
-
+        share = _dashboard_share_response(notebook_id, response.json())
         return success_response(data={"share": share}, message="Share retrieved")
 
     except httpx.ConnectError as e:
@@ -515,16 +524,7 @@ async def list_notebook_json_shares(
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list shares")
 
         data = response.json()
-        # Transform shares list
-        shares = [
-            {
-                "id": share["id"],
-                "created_at": share["created_at"],
-                "has_password": share.get("has_password", False),
-                "password": share.get("password"),
-            }
-            for share in data.get("shares", [])
-        ]
+        shares = [_notebook_json_share_response(share) for share in data.get("shares", [])]
 
         return success_response(data={"shares": shares}, message="Shares retrieved")
 

@@ -1,11 +1,11 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration worktree init, dashboard merge integration gates, focused migration/security gates. Next slice: failing regression tests and fix for share/manage responses that must not expose password, verifier, or raw token.
+CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration worktree init, dashboard merge integration gates, focused migration/security gates, share/manage secret redaction. Next slice: enforce share/create/delete/rotate/export object authorization and action scopes.
 
 ## Phase 0 Slice Checklist
 
-- [ ] `GET /notebooks/{id}/share`, JSON share list, and manage endpoints never return `password`, `verifier`, or raw token.
-- [ ] `ShareModal.tsx` removes display/copy of saved passwords; password is input-only during create/rotate and is never read back.
+- [x] `GET /notebooks/{id}/share`, JSON share list, and manage endpoints never return `password`, `verifier`, or raw token.
+- [x] `ShareModal.tsx` removes display/copy of saved passwords; password is input-only during create/rotate and is never read back.
 - [ ] share/create/delete/rotate/export use correct share/export action scope and unified object authorization for tenant, owner/grant, asset, version, and action.
 - [ ] viewer sessions bind and validate issuer, audience, user, tenant, grant, asset, version, token id, issued-at, not-before, expiry, and revocation/rotation identity.
 - [ ] structured dashboard query only accepts immutable manifest `data_view_id` plus validated filters; legacy path is tenant/dashboard-version/notebook bound.
@@ -98,3 +98,19 @@ Security/compatibility evidence:
 - `tests/test_dashboard_security_regressions.py tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py tests/test_source_connectors_api.py::test_feishu_admin_config_status_is_admin_only_and_never_returns_secret tests/test_source_connectors_api.py::test_source_connection_encrypts_credentials_and_redacts_secret` -> `15 passed, 37 warnings`.
 
 Current status: `THREE_LAYER_INTEGRATION_GATE_FOCUSED_PASS`.
+
+## 2026-08-16 14:24 CST - Phase 0 Share Secret Redaction
+
+Commit: pending at time of entry.
+
+Scope:
+
+- Added focused regression coverage for worker-backed share management endpoints using a fake worker response that includes `password`, `verifier`, and raw token fields.
+- Changed dashboard share and notebook JSON share serializers so manage/list responses expose only safe metadata: IDs, URLs where applicable, timestamps, and `has_password`.
+- Updated `ShareModal.tsx` and API typings so saved passwords are never displayed, copied, or read back; password remains write-only during create/change/remove flows.
+
+Evidence:
+
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest server/tests/test_share_secret_redaction.py -q` -> `1 passed, 7 warnings`.
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check server/routers/exports.py server/tests/test_share_secret_redaction.py` -> passed with existing removed-rule warning.
+- `cd client && pnpm build:check` -> passed with existing CSS/chunk warnings.

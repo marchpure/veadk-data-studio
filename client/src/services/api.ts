@@ -4408,7 +4408,7 @@ export class ApiService {
   }
 
   static async getNotebookShare(notebookId: string): Promise<StandardResponse<{
-    share: { id: string; share_url: string; created_at: string; updated_at?: string; has_password?: boolean; password?: string | null } | null
+    share: { id: string; share_url: string; created_at: string; updated_at?: string; has_password?: boolean } | null
   }>> {
     try {
       const response = await apiFetch(`${API_BASE_URL}/notebooks/${notebookId}/share`)

@@ -34,7 +34,6 @@ interface Share {
   created_at: string
   updated_at?: string
   has_password?: boolean
-  password?: string | null
 }
 
 type TabType = 'dashboard' | 'notebook'
@@ -60,8 +59,6 @@ export default function ShareModal({ open, onOpenChange, notebookId, dashboardId
   const [isCreatingDashboard, setIsCreatingDashboard] = useState(false)
   const [isDeletingDashboard, setIsDeletingDashboard] = useState(false)
   const [isDashboardCopied, setIsDashboardCopied] = useState(false)
-  const [isDashboardPasswordCopied, setIsDashboardPasswordCopied] = useState(false)
-  const [showDashboardSharePassword, setShowDashboardSharePassword] = useState(false)
   const [editingDashboardPassword, setEditingDashboardPassword] = useState(false)
   const [dashboardEditPassword, setDashboardEditPassword] = useState('')
   const [isUpdatingDashboardPassword, setIsUpdatingDashboardPassword] = useState(false)
@@ -72,8 +69,6 @@ export default function ShareModal({ open, onOpenChange, notebookId, dashboardId
   const [isCreatingNotebook, setIsCreatingNotebook] = useState(false)
   const [deletingNotebookId, setDeletingNotebookId] = useState<string | null>(null)
   const [copiedNotebookId, setCopiedNotebookId] = useState<string | null>(null)
-  const [copiedNotebookPasswordId, setCopiedNotebookPasswordId] = useState<string | null>(null)
-  const [visiblePasswordIds, setVisiblePasswordIds] = useState<Set<string>>(new Set())
   const [editingPasswordShareId, setEditingPasswordShareId] = useState<string | null>(null)
   const [editPassword, setEditPassword] = useState('')
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false)
@@ -166,24 +161,12 @@ export default function ShareModal({ open, onOpenChange, notebookId, dashboardId
     }
   }
 
-  const handleCopyDashboardPassword = async () => {
-    if (!dashboardShare?.password) return
-    try {
-      await copyToClipboard(dashboardShare.password)
-      setIsDashboardPasswordCopied(true)
-      setTimeout(() => setIsDashboardPasswordCopied(false), 2000)
-    } catch (err) {
-      console.error('Failed to copy password:', err)
-    }
-  }
-
   const handleDeleteDashboardShare = async () => {
     setIsDeletingDashboard(true)
     setError(null)
     try {
       await ApiService.deleteShare(notebookId)
       setDashboardShare(null)
-      setShowDashboardSharePassword(false)
     } catch (err) {
       setError('Failed to delete share')
       console.error('Error deleting share:', err)
@@ -324,29 +307,6 @@ export default function ShareModal({ open, onOpenChange, notebookId, dashboardId
     } catch (err) {
       console.error('Failed to copy:', err)
     }
-  }
-
-  const handleCopyNotebookPassword = async (share: Share) => {
-    if (!share.password) return
-    try {
-      await copyToClipboard(share.password)
-      setCopiedNotebookPasswordId(share.id)
-      setTimeout(() => setCopiedNotebookPasswordId(null), 2000)
-    } catch (err) {
-      console.error('Failed to copy password:', err)
-    }
-  }
-
-  const toggleNotebookPasswordVisibility = (shareId: string) => {
-    setVisiblePasswordIds((prev) => {
-      const newSet = new Set(prev)
-      if (newSet.has(shareId)) {
-        newSet.delete(shareId)
-      } else {
-        newSet.add(shareId)
-      }
-      return newSet
-    })
   }
 
   const handleOpenPasswordEdit = (shareId: string) => {
@@ -538,37 +498,9 @@ export default function ShareModal({ open, onOpenChange, notebookId, dashboardId
                           </button>
                         </div>
                       </div>
-                    ) : dashboardShare.has_password && dashboardShare.password ? (
-                      // Password display with edit/remove buttons
+                    ) : dashboardShare.has_password ? (
+                      // Password is write-only after creation/rotation.
                       <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500">Password:</span>
-                          <code className="flex-1 text-xs text-gray-300 bg-[#1a1a1a] px-2 py-1 rounded font-mono">
-                            {showDashboardSharePassword ? dashboardShare.password : '••••••••'}
-                          </code>
-                          <button
-                            onClick={() => setShowDashboardSharePassword(!showDashboardSharePassword)}
-                            className="p-1 text-gray-400 hover:text-white hover:bg-[#333] rounded transition-colors"
-                            title={showDashboardSharePassword ? 'Hide password' : 'Show password'}
-                          >
-                            {showDashboardSharePassword ? (
-                              <EyeOff className="w-3.5 h-3.5" />
-                            ) : (
-                              <Eye className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                          <button
-                            onClick={handleCopyDashboardPassword}
-                            className="p-1 text-gray-400 hover:text-white hover:bg-[#333] rounded transition-colors"
-                            title="Copy password"
-                          >
-                            {isDashboardPasswordCopied ? (
-                              <Check className="w-3.5 h-3.5 text-green-400" />
-                            ) : (
-                              <Copy className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                        </div>
                         <div className="flex gap-2">
                           <button
                             onClick={handleOpenDashboardPasswordEdit}
@@ -962,37 +894,9 @@ export default function ShareModal({ open, onOpenChange, notebookId, dashboardId
                               </button>
                             </div>
                           </div>
-                        ) : share.has_password && share.password ? (
-                          // Password display with edit/remove buttons
+                        ) : share.has_password ? (
+                          // Password is write-only after creation/rotation.
                           <div className="space-y-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-gray-500">Password:</span>
-                              <code className="flex-1 text-xs text-gray-300 bg-[#1a1a1a] px-2 py-1 rounded font-mono">
-                                {visiblePasswordIds.has(share.id) ? share.password : '••••••••'}
-                              </code>
-                              <button
-                                onClick={() => toggleNotebookPasswordVisibility(share.id)}
-                                className="p-1 text-gray-400 hover:text-white hover:bg-[#333] rounded transition-colors"
-                                title={visiblePasswordIds.has(share.id) ? 'Hide password' : 'Show password'}
-                              >
-                                {visiblePasswordIds.has(share.id) ? (
-                                  <EyeOff className="w-3.5 h-3.5" />
-                                ) : (
-                                  <Eye className="w-3.5 h-3.5" />
-                                )}
-                              </button>
-                              <button
-                                onClick={() => handleCopyNotebookPassword(share)}
-                                className="p-1 text-gray-400 hover:text-white hover:bg-[#333] rounded transition-colors"
-                                title="Copy password"
-                              >
-                                {copiedNotebookPasswordId === share.id ? (
-                                  <Check className="w-3.5 h-3.5 text-green-400" />
-                                ) : (
-                                  <Copy className="w-3.5 h-3.5" />
-                                )}
-                              </button>
-                            </div>
                             <div className="flex gap-2">
                               <button
                                 onClick={() => handleOpenPasswordEdit(share.id)}
