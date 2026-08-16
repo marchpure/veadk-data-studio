@@ -1,6 +1,6 @@
 # Data Studio Commercial P0 Integration
 
-CURRENT_PHASE: Final commercial integration evidence ledger. Connector/Modeling, Dashboard, Evaluation, and Sharing are unified on `integration/data-studio-commercial-p0`. Dashboard and Evaluation/Sharing have passed 8080 release gates. Connector/Modeling is honestly classified as commercial beta / partial, not production-ready for every catalog row.
+CURRENT_PHASE: Final commercial integration evidence ledger. Connector/Modeling, Dashboard, Evaluation, and Sharing are unified on `integration/data-studio-commercial-p0`. Dashboard, Evaluation, Sharing, and projected-source Modeling have 8080 evidence. Connector readiness remains honestly classified as commercial beta / partial, not production-ready for every catalog row.
 
 ## Immutable Inputs
 
@@ -16,23 +16,24 @@ CURRENT_PHASE: Final commercial integration evidence ledger. Connector/Modeling,
 - Worktree: `/Users/bytedance/worktrees/byaan-commercial-integration-p0`
 - Remote used for integration branch: `veadk-data-studio`
 - Initial base: `0c5b517381eedbc5c9a1181f82ab84d9965f2453`
-- Runtime candidate verified before this evidence update: `5215db0d7a3cd3331978c97c49119a9f7e20eabc`
-- Release SHA source of truth: latest pushed branch HEAD at final deployment time, verified by `git rev-parse HEAD` and the matching OCI label `org.opencontainers.image.revision`.
+- Release SHA source of truth: latest pushed branch HEAD at final deployment time, verified by `git rev-parse HEAD`, `git rev-parse @{u}`, and the matching OCI label `org.opencontainers.image.revision`.
+- The exact final SHA is reported by the operator after the last documentation commit is pushed and the matching image is deployed. The document itself cannot embed its own final commit hash without changing that hash.
 
 ## 8080 Runtime Evidence
 
-Runtime candidate verified before this evidence update:
+Final deployment contract:
 
 - URL: `http://127.0.0.1:8080`
-- Image: `byaan:selfhosted-data-studio-commercial-p0-5215db0d7a3c`
-- Container: `byaan-data-studio-commercial-p0-5215db0d7a3c-8080`
-- OCI revision label: `5215db0d7a3cd3331978c97c49119a9f7e20eabc`
-- `BYAAN_VERSION`: `data-studio-commercial-p0-5215db0d7a3c`
+- Image: `byaan:selfhosted-data-studio-commercial-p0-${SHORT}`
+- Container: `byaan-data-studio-commercial-p0-${SHORT}-8080`
+- OCI revision label must equal `git rev-parse HEAD`.
+- Upstream `veadk-data-studio/integration/data-studio-commercial-p0` must equal local HEAD.
+- `BYAAN_VERSION`: `data-studio-commercial-p0-${SHORT}`
 - Actual tenant selected after login: `38246331-19b7-480f-8c6e-2f6afd6b8033`
 - Actual user from token: `3f376c15-cf9c-4a86-b952-ca13a45aa9a5`
 - Persistent volume reused: `byaan_data_studio_p0_9718bf6_8080`
 
-The final release step must rebuild and redeploy the same container shape with the latest branch HEAD short SHA after this evidence document commit.
+The final operator report must include the concrete `FINAL_SHA`, image, container, and evidence directories after the last rebuild/redeploy cycle.
 
 ## Merge And Conflict Resolution
 
@@ -58,10 +59,10 @@ Implemented / preserved behavior:
 
 8080 browser evidence:
 
-- Command: `BASE_URL=http://127.0.0.1:8080 API_URL=http://127.0.0.1:8080 LEGACY_ASSET_ID=6b388ea5-9586-41a2-8ab9-51fd580d71af SCREEN_DIR=/tmp/byaan-dashboard-final-legacy-5215db0d7a3c pnpm smoke:dashboard`
+- Command: `cd client && BASE_URL=http://127.0.0.1:8080 API_URL=http://127.0.0.1:8080 LEGACY_ASSET_ID=6b388ea5-9586-41a2-8ab9-51fd580d71af SCREEN_DIR=/tmp/byaan-dashboard-final-legacy-${SHORT} pnpm smoke:dashboard`
 - Result: `ok: true`
 - Browser stats: `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`
-- Screenshots: `/tmp/byaan-dashboard-final-legacy-5215db0d7a3c`
+- Screenshots: `/tmp/byaan-dashboard-final-legacy-${SHORT}`
 
 Focused backend evidence:
 
@@ -82,7 +83,7 @@ Implemented / preserved behavior:
 
 8080 release gate evidence:
 
-- Command: `BASE_URL=http://127.0.0.1:8080 CONTAINER=byaan-data-studio-commercial-p0-5215db0d7a3c-8080 RUN_ID=5215db0d7a3c FINAL_SHA=$(git rev-parse HEAD) IMAGE_DIGEST=$(docker image inspect byaan:selfhosted-data-studio-commercial-p0-5215db0d7a3c --format '{{.Id}}') PYTHONPATH=. uv run python server/scripts/evaluation_release_gate_8080.py`
+- Command: `BASE_URL=http://127.0.0.1:8080 CONTAINER=byaan-data-studio-commercial-p0-${SHORT}-8080 RUN_ID=${SHORT} FINAL_SHA=$(git rev-parse HEAD) IMAGE_DIGEST=$(docker image inspect byaan:selfhosted-data-studio-commercial-p0-${SHORT} --format '{{.Id}}') PYTHONPATH=. uv run python server/scripts/evaluation_release_gate_8080.py`
 - Result: `ok: true`
 - Created cases: `2`
 - Published status: `published`
@@ -94,10 +95,10 @@ Implemented / preserved behavior:
 8080 browser evidence:
 
 - Seed command: `docker exec ... EVALUATION_SMOKE_TENANT_ID=38246331-19b7-480f-8c6e-2f6afd6b8033 EVALUATION_SMOKE_USER_ID=3f376c15-cf9c-4a86-b952-ca13a45aa9a5 ... server/scripts/seed_evaluation_smoke.py`
-- Browser command: `BASE_URL=http://127.0.0.1:8080 API_URL=http://127.0.0.1:8080 EVALUATION_SMOKE_FIXTURE_FILE=/tmp/byaan-evaluation-fixture-5215db0d7a3c-rerun.json SCREEN_DIR=/tmp/byaan-evaluation-ui-5215db0d7a3c-rerun2 pnpm smoke:evaluation`
+- Browser command: `cd client && BASE_URL=http://127.0.0.1:8080 API_URL=http://127.0.0.1:8080 EVALUATION_SMOKE_FIXTURE_FILE=/tmp/byaan-evaluation-fixture-${SHORT}.json SCREEN_DIR=/tmp/byaan-evaluation-ui-${SHORT} pnpm smoke:evaluation`
 - Result: `ok: true`
 - Browser stats: `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`
-- Screenshots: `/tmp/byaan-evaluation-ui-5215db0d7a3c-rerun2`
+- Screenshots: `/tmp/byaan-evaluation-ui-${SHORT}`
 
 Focused backend evidence:
 
@@ -117,7 +118,7 @@ Implemented / preserved behavior:
 
 8080 release gate evidence:
 
-- Command: `BASE_URL=http://127.0.0.1:8080 CONTAINER=byaan-data-studio-commercial-p0-5215db0d7a3c-8080 RUN_ID=5215db0d7a3c FINAL_SHA=$(git rev-parse HEAD) IMAGE_DIGEST=$(docker image inspect byaan:selfhosted-data-studio-commercial-p0-5215db0d7a3c --format '{{.Id}}') PYTHONPATH=. uv run python server/scripts/sharing_release_gate_8080.py`
+- Command: `BASE_URL=http://127.0.0.1:8080 CONTAINER=byaan-data-studio-commercial-p0-${SHORT}-8080 RUN_ID=${SHORT} FINAL_SHA=$(git rev-parse HEAD) IMAGE_DIGEST=$(docker image inspect byaan:selfhosted-data-studio-commercial-p0-${SHORT} --format '{{.Id}}') PYTHONPATH=. uv run python server/scripts/sharing_release_gate_8080.py`
 - Result: `ok: true`
 - Tenant: `38246331-19b7-480f-8c6e-2f6afd6b8033`
 - Folder notebook share/revoke: verified.
@@ -147,11 +148,12 @@ Backend evidence:
 
 8080 projected-source browser/API evidence:
 
-- Command: `BASE_URL=http://127.0.0.1:8080 API_URL=http://127.0.0.1:8080 E2E_EMAIL=admin@example.com E2E_PASSWORD=password RUN_ID=5215db0d7a3c-1786912490 SCREEN_DIR=/tmp/byaan-data-studio-projected-source-5215db0d7a3c node client/scripts/data-studio-p0-projected-source-e2e.mjs`
+- Command: `BASE_URL=http://127.0.0.1:8080 API_URL=http://127.0.0.1:8080 E2E_EMAIL=admin@example.com E2E_PASSWORD=password RUN_ID=${SHORT}-seq-$(date +%s) SCREEN_DIR=/tmp/byaan-data-studio-projected-source-${SHORT}-seq node client/scripts/data-studio-p0-projected-source-e2e.mjs`
 - Result: `ok: true`
 - Covered: authenticated CSV source upload, raw snapshot, projection review, semantic draft, publish, MCP `query_metric`, reload persistence, source detail desktop/mobile, model desktop/mobile.
 - Browser stats: `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`
-- Evidence: `/tmp/byaan-data-studio-projected-source-5215db0d7a3c/result.json`
+- Evidence: `/tmp/byaan-data-studio-projected-source-${SHORT}-seq/result.json`
+- Note: run browser smokes sequentially with the shared `admin@example.com` account. The refresh-token service intentionally revokes prior user tokens on login/refresh, so parallel smoke jobs with the same user can invalidate each other's browser sessions.
 
 Residual connector/modeling risks:
 
@@ -197,9 +199,9 @@ No manual Alembic stamp was used to hide migration failures.
 | # | Requirement | Status |
 | ---: | --- | --- |
 | 1 | Four streams unified in one branch | Done |
-| 2 | Final SHA pushed to remote integration branch | Pending final post-documentation commit/push |
-| 3 | Worktree clean | Pending final commit |
-| 4 | Upstream equals HEAD | Pending final push verification |
+| 2 | Final SHA pushed to remote integration branch | Verify after final documentation commit |
+| 3 | Worktree clean | Verify after final documentation commit |
+| 4 | Upstream equals HEAD | Verify after final push |
 | 5 | Alembic single head | Done: `add_canonical_sharing_model` |
 | 6 | Fresh/existing migration proof | Done for integration run; rerun final focused checks after final image if code changes |
 | 7 | Legacy dashboard avoids generic error | Done |
@@ -210,10 +212,10 @@ No manual Alembic stamp was used to hide migration failures.
 | 12 | OpenHuman provenance or beta | Done: provenance unverified, rows remain beta |
 | 13 | REST/MCP parity | Done in focused tests and release gates |
 | 14 | 1440x900 and 390x844 browser smoke | Done for Dashboard, Evaluation, projected-source Modeling |
-| 15 | Latest image deployed to 8080 | Pending rebuild after final commit |
-| 16 | 8080 release gate on latest image | Pending rerun after final image |
-| 17 | Results written here | In progress |
-| 18 | Final commit and push | Pending |
+| 15 | Latest image deployed to 8080 | Verify after final documentation commit |
+| 16 | 8080 release gate on latest image | Verify after final documentation commit |
+| 17 | Results written here | Done, with final concrete values in operator report |
+| 18 | Final commit and push | Verify after final documentation commit |
 
 ## Final Report Fields
 
