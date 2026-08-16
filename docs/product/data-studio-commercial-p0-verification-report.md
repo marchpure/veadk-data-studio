@@ -12,9 +12,11 @@ branch was created from Coordinator BASE_SHA
 Status: `PARTIAL`.
 
 Reason: `e9358ea` contains real dashboard and evaluation UI/backend surfaces,
-and isolated runtime proved self-hosted auth plus all configured commercial API
-probes on fresh SQLite, existing SQLite, and PostgreSQL. The route matrix still
-has failing Playwright evidence: `/data-modeling` is not registered, the default
+isolated runtime proved self-hosted auth plus all configured commercial API
+probes on fresh SQLite, existing SQLite, and PostgreSQL, and focused
+backend/MCP/smoke contracts now pass for migration, connector/modeling,
+dashboard, evaluation, and sharing gates. The required route matrix still has
+failing Playwright evidence: `/data-modeling` is not registered, the default
 specified dashboard asset path is not a UUID-backed seeded asset, and PostgreSQL
 with seeded legacy dashboard assets triggers a dashboard React error. No
 whole-product READY claim is made here.
@@ -43,8 +45,8 @@ whole-product READY claim is made here.
 | Fresh SQLite | `/Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-sqlite-fresh/result.json`; DB at `runtime/sqlite/app.db`; backend/frontend logs under `logs/`. | `PARTIAL`: startup and all API probes passed; browser route matrix has known failures. |
 | Existing SQLite | `/Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-sqlite-existing/result.json`; reused fresh SQLite DB path. | `PARTIAL`: idempotent startup and all API probes passed; same browser route failures as fresh SQLite. |
 | PostgreSQL | `/Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-postgres/result.json`; container `byaan-commercial-p0-postgres`; volume `byaan-commercial-p0-postgres-data`; port `15432`. | `PARTIAL`: startup and all API probes passed; dashboard browser route also hit a React error with seeded legacy assets. |
-| Single Alembic head | Contracted by existing `server/tests/test_migration_chain_hardening.py`; not rerun in this verification commit. | Not independently rerun here. |
-| Upgrade / downgrade | Existing self-hosted entrypoint tests cover command contract; runtime startup exercised upgrade path on isolated DBs. | Downgrade not independently rerun here. |
+| Single Alembic head | `uv run pytest server/tests/test_migration_chain_hardening.py server/tests/test_dashboard_persistence_migration.py server/tests/test_sharing_persistence_migration.py server/tests/test_evaluation_persistence_migration.py -q` | Passed: `12 passed`, covering migration chain hardening and dashboard/sharing/evaluation persistence registration plus SQLite upgrade/downgrade SQL contracts. |
+| Upgrade / downgrade | Same focused migration command; runtime startup also exercised upgrade path on isolated SQLite and PostgreSQL DBs. | Passed for focused migration contracts; PostgreSQL downgrade was not separately run as a live DB downgrade. |
 | Persistent Docker volume | `docker volume inspect byaan-commercial-p0-postgres-data` returned mountpoint `/var/lib/docker/volumes/byaan-commercial-p0-postgres-data/_data`. | Proven for dedicated volume creation/persistence during run. |
 
 ## Connector Evidence Matrix
@@ -74,6 +76,16 @@ Runtime API evidence: all three runs passed `connector_definitions`,
 `semantic_models`, `folders`, and `mcp_stdio_config` probes with authenticated
 `Authorization` and `X-Tenant-ID` headers.
 
+Focused connector/modeling evidence:
+`uv run pytest server/tests/test_source_connectors_api.py server/tests/test_source_understanding_api.py server/tests/test_semantic_modeling_api.py server/tests/test_sources_overview_api.py server/tests/test_data_studio_p0_source_matrix.py -q`
+passed with `79 passed`. This covers connector catalog availability, credential
+redaction, Feishu OAuth/picker/import/sync and reauthorization contracts, TOS
+object/prefix parser and permission contracts, source sync retry/checkpoint
+contracts, source overview states for SQL/Databricks/MongoDB/DynamoDB/TOS, source
+understanding profile/evidence/review contracts, semantic draft/publish/reload,
+MCP `query_metric`, and the generated source matrix. It remains contract/fixture
+evidence, not live credentials for every external provider.
+
 ## Modeling Evidence
 
 Required modeling checks include source understanding, profile, projection
@@ -83,9 +95,12 @@ honest partial/blocked states, and OpenHuman runtime provenance.
 Current status: `PARTIAL`. `/api/data-models`, `/api/semantic-models`, and the
 real `/data-models` UI route passed in all three runtime runs at both viewports.
 The requested `/data-modeling` route failed in every run by redirecting to `/`.
-OpenHuman runtime adapter status remains `UNVERIFIED`; MongoDB and DynamoDB
-remain beta until reviewed projection materialization proves they do not present
-semantic-ready prematurely.
+Focused modeling contracts passed for source understanding, profile,
+projection review, semantic draft/publish/reload, MCP `query_metric`, and
+lineage/evidence. MongoDB and DynamoDB profile contracts passed without
+creating semantic candidates before reviewed projection handoff. OpenHuman
+runtime adapter status remains `UNVERIFIED`, so the source matrix stays beta and
+the modeling gate is not claimed READY.
 
 ## Dashboard Evidence
 
@@ -99,6 +114,15 @@ Current status: `PARTIAL`. Static inspection confirms `client/src/App.tsx`
 registers `/dashboard-assets` and `/dashboard-assets/:assetId`, and
 `server/main.py` includes `dashboard_router`. `/api/dashboard-assets` passed in
 all three runtime runs.
+
+Focused dashboard evidence:
+`uv run pytest server/tests/test_dashboard_rest_api.py server/tests/test_dashboard_mcp_contract.py server/tests/test_dashboard_lifecycle_service.py server/tests/test_dashboard_execution_service.py server/tests/test_dashboard_legacy_tool_gating.py server/tests/test_dashboard_security_regressions.py -q`
+passed with `42 passed`. This covers REST lifecycle/query/state/lineage/audit,
+MCP lifecycle/query/explain, draft ETag conflicts, publish freeze, `saved_query`,
+`semantic_metric`, `context_search`, pinned-snapshot blocking, unresolved policy
+blocking, tenant/notebook boundaries, permission-denied viewer sessions, and
+legacy HTML tool gating. The browser blockers below still prevent a dashboard
+READY claim.
 
 Browser blockers:
 
@@ -120,9 +144,22 @@ REST/MCP parity, tenant isolation, idempotency, and audit.
 Current status: `PARTIAL`. Static inspection confirms `client/src/App.tsx`
 registers `/evaluation` and `/evaluation/:suiteId`, and `server/main.py`
 includes `evaluation_router`. `/api/evaluation/suites` and `/evaluation` passed
-in all three runtime runs at both viewports. Deeper suite lifecycle, worker,
-MCP parity, and advisor/promotion flows were not independently run in this
-verification pass.
+in all three runtime runs at both viewports.
+
+Focused evaluation evidence:
+`uv run pytest server/tests/test_evaluation_rest_api.py server/tests/test_evaluation_feedback_advisor_api.py server/tests/test_evaluation_mcp_contract.py server/tests/test_evaluation_runner_service.py server/tests/test_evaluation_service.py -q`
+passed with `17 passed`. This covers REST create/import/publish, read surfaces,
+preflight tenant scope, claim/heartbeat/complete/failure artifacts, idempotent
+preflight, compare, advisor review/verify/regress/apply surfaces, promotion
+gate evidence, REST/MCP parity, redaction, and published-suite immutability.
+
+Additional isolated SQLite MCP parity smoke:
+`DATABASE_URL=sqlite+aiosqlite:////Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-focused/runtime/evaluation-mcp/app.db APP_MODE=desktop SKILL_LOOP_ENABLED=false POSTHOG_DISABLED=true uv run python - <<'PY' ... PY`
+ran migrations, seeded the evaluation smoke fixture, and passed
+`server/scripts/evaluation_mcp_parity_smoke.py` with output `ok: true`,
+`case_count: 3`, `failure_count: 2`, `regression_count: 2`,
+`advisor_verification_status: queued`, and `advisor_regression_status: queued`.
+This is backend/MCP smoke evidence, not a browser-driven suite authoring flow.
 
 ## Sharing Evidence
 
@@ -131,9 +168,22 @@ rotation, revoke, audit, folder/dashboard/notebook/worker, and self-hosted
 external-sharing policy.
 
 Current status: `PARTIAL`. Authenticated `/api/folders` passed in all three
-runtime runs, and dashboard/folder routers are present. This verification pass
-did not independently exercise share creation, rotation, revoke, external
-sharing policy, or audit trail flows.
+runtime runs, and dashboard/folder routers are present.
+
+Focused sharing evidence:
+`uv run pytest server/tests/test_share_secret_redaction.py server/tests/test_share_object_authorization.py server/tests/test_sharing_canonical_service.py server/tests/test_sharing_read_surface.py -q`
+passed with `24 passed`. This covers share authorization, folder notebook and
+dashboard binding, secret redaction, canonical grant binding, revoke handling,
+viewer-session object/version binding, tenant-scoped read surfaces, and
+REST/MCP redaction parity.
+
+Additional in-memory governance smoke:
+`uv run python server/scripts/sharing_governance_smoke.py` passed with `ok:
+true`, `canonical_dashboard_grant_count: 1`, canonical notebook surfaces
+`folder_notebook`, `html_notebook_share`, and `json_notebook_share`,
+`json_has_password_after_rotation: true`, and revoked notebook statuses for all
+three surfaces. The smoke uses a fake worker and in-memory DB, so it proves
+policy/redaction/compatibility behavior rather than a live external worker.
 
 ## Playwright Route Evidence
 
@@ -155,6 +205,30 @@ Passed route evidence across all runs: `/login`, `/evaluation`, `/data-models`,
 
 ```bash
 uv run pytest tests/commercial_p0 -q
+uv run pytest server/tests/test_migration_chain_hardening.py server/tests/test_dashboard_persistence_migration.py server/tests/test_sharing_persistence_migration.py server/tests/test_evaluation_persistence_migration.py -q
+uv run pytest server/tests/test_dashboard_rest_api.py server/tests/test_dashboard_mcp_contract.py server/tests/test_dashboard_lifecycle_service.py server/tests/test_dashboard_execution_service.py server/tests/test_dashboard_legacy_tool_gating.py server/tests/test_dashboard_security_regressions.py -q
+uv run pytest server/tests/test_evaluation_rest_api.py server/tests/test_evaluation_feedback_advisor_api.py server/tests/test_evaluation_mcp_contract.py server/tests/test_evaluation_runner_service.py server/tests/test_evaluation_service.py -q
+uv run pytest server/tests/test_share_secret_redaction.py server/tests/test_share_object_authorization.py server/tests/test_sharing_canonical_service.py server/tests/test_sharing_read_surface.py -q
+uv run pytest server/tests/test_source_connectors_api.py server/tests/test_source_understanding_api.py server/tests/test_semantic_modeling_api.py server/tests/test_sources_overview_api.py server/tests/test_data_studio_p0_source_matrix.py -q
+uv run python server/scripts/sharing_governance_smoke.py
+DATABASE_URL='sqlite+aiosqlite:////Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-focused/runtime/evaluation-mcp/app.db' APP_MODE=desktop SKILL_LOOP_ENABLED=false POSTHOG_DISABLED=true uv run python - <<'PY'
+from server.utils.migrations import run_migrations
+
+run_migrations()
+
+import asyncio
+import json
+import os
+
+async def main() -> None:
+    from server.scripts.seed_evaluation_smoke import seed
+    fixture = await seed()
+    os.environ["EVALUATION_SMOKE_FIXTURE_JSON"] = json.dumps(fixture)
+    from server.scripts.evaluation_mcp_parity_smoke import main as parity_main
+    await parity_main()
+
+asyncio.run(main())
+PY
 node --check scripts/commercial_p0_verification.mjs
 bash -n scripts/commercial_p0_verification.sh
 git diff --check
@@ -176,5 +250,7 @@ databases.
   specified asset route, or let the verifier create one before browser probes.
 - Product follow-up: fix the PostgreSQL dashboard legacy-asset React error in
   `DashboardWorkspacePage.tsx` `normalizeEditorSelection`.
-- Run deeper dashboard/evaluation/sharing smoke flows after fixture setup is
-  made deterministic for this isolated self-hosted verifier.
+- After those route blockers are resolved, rerun the full browser/API verifier
+  on fresh SQLite, existing SQLite, and PostgreSQL; optionally add browser-level
+  deep workflows for dashboard/evaluation/sharing on top of the focused
+  backend/MCP/smoke contracts captured here.
