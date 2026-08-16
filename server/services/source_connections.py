@@ -151,12 +151,7 @@ class SourceConnectionService:
         if connection is None:
             raise ValueError("Source connection not found")
         if connection.status in {"reauthorization_required", "authorization_required", "disconnected"}:
-            return {
-                "items": [],
-                "next_page_token": None,
-                "scope": scope,
-                "connection_status": connection.status,
-            }
+            raise self._needs_authorization_error(connection)
         existing_result = await session.execute(
             select(SourceResource.external_id).where(
                 SourceResource.tenant_id == tenant_id,
@@ -206,10 +201,7 @@ class SourceConnectionService:
         if connection.provider != "feishu":
             raise ValueError("Quick link location is only supported for Feishu connections")
         if connection.status in {"reauthorization_required", "authorization_required", "disconnected"}:
-            return {
-                "item": None,
-                "connection_status": connection.status,
-            }
+            raise self._needs_authorization_error(connection)
 
         existing_result = await session.execute(
             select(SourceResource.external_id).where(
@@ -230,6 +222,13 @@ class SourceConnectionService:
             "item": item.to_payload(),
             "connection_status": connection.status,
         }
+
+    def _needs_authorization_error(self, connection: SourceConnection) -> ConnectorError:
+        if connection.status == "reauthorization_required":
+            message = "Source authorization expired or was revoked. Reauthorize source before browsing resources."
+        else:
+            message = "Source authorization is required before browsing resources."
+        return ConnectorError(message, code="needs_authorization", permanent=True)
 
     async def feishu_status(self, *, session: AsyncSession, tenant_id: UUID, user_id: UUID) -> dict[str, Any]:
         admin = await FeishuAdminConfigService.status(session=session)

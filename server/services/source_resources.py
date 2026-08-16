@@ -655,13 +655,14 @@ class SourceResourceService:
             next_actions = ["Review object size", "Confirm large object sync"]
             connector_required = False
         elif effective_status in {
+            "blocked",
             "failed",
             "source_unavailable",
             "permission_lost",
             "reauthorization_required",
             "authorization_required",
         }:
-            stage = "failed"
+            stage = "blocked" if effective_status == "blocked" else "failed"
             message = self._processing_failure_message(
                 resource=resource,
                 status=effective_status,
@@ -775,6 +776,7 @@ class SourceResourceService:
             "normalize_dataset": status_for_steps == "ready" and not projected_dataset_id and context_indexed,
         }
         failed_step = {
+            "blocked": "capture",
             "failed": "parse",
             "source_unavailable": "capture",
             "permission_lost": "capture",
@@ -864,6 +866,8 @@ class SourceResourceService:
             "invalid_state",
         }:
             return "Source authorization is not connected or has expired."
+        if status == "blocked" or (code and str(code).startswith("blocked_")):
+            return message or "Source capture is blocked by policy or upstream safety controls."
         if status == "permission_lost" or code == "permission_lost":
             return "The current user or connector no longer has permission to read this source."
         if status == "source_unavailable" or code == "source_unavailable":
@@ -887,6 +891,8 @@ class SourceResourceService:
             "invalid_state",
         }:
             return ["Reauthorize source", "Retry sync"]
+        if status == "blocked" or (code and str(code).startswith("blocked_")):
+            return ["Review source settings", "Choose an allowed source"]
         if status == "permission_lost" or code == "permission_lost":
             return ["Request source access", "Reconnect source"]
         if status == "source_unavailable" or code == "source_unavailable":
@@ -2528,6 +2534,8 @@ class SourceResourceService:
     def _status_for_connector_error(self, error: ConnectorError) -> str:
         if error.code in {"reauthorization_required", "invalid_state"}:
             return "reauthorization_required"
+        if error.code.startswith("blocked_"):
+            return "blocked"
         if error.code == "permission_lost":
             return "permission_lost"
         if error.code == "source_unavailable":

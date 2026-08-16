@@ -25,13 +25,14 @@ SourceResourceStatus = Literal[
     "understanding",
     "authorization_required",
     "reauthorization_required",
+    "blocked",
     "source_unavailable",
     "permission_lost",
     "needs_confirmation",
     "ready",
     "failed",
 ]
-SourceProcessingStage = Literal["waiting_for_connector", "captured", "needs_confirmation", "failed", "indexed"]
+SourceProcessingStage = Literal["waiting_for_connector", "captured", "needs_confirmation", "blocked", "failed", "indexed"]
 SourceProcessingStepId = Literal[
     "capture",
     "parse",

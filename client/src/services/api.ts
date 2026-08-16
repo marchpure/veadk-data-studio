@@ -188,6 +188,13 @@ export class ApiRequestError extends Error {
   }
 }
 
+function isExpectedAuthorizationError(error: unknown): boolean {
+  return (
+    error instanceof ApiRequestError &&
+    (error.code === 'needs_authorization' || error.code === 'reauthorization_required')
+  )
+}
+
 function normalizeDashboardFilterConfig(responseData: any): DashboardFilterConfigResponse {
   const extracted = extractData<any>(responseData)
   const rawFilters = Array.isArray(extracted?.filters) ? extracted.filters : []
@@ -865,6 +872,7 @@ export type SourceOverviewModelingStatus =
   | 'context_only'
   | 'permission_required'
   | 'reauthorization_required'
+  | 'blocked'
   | 'source_unavailable'
   | 'processing'
   | 'failed'
@@ -3159,7 +3167,9 @@ export class ApiService {
       const responseData = await response.json()
       return extractData<SourceResourcePickerResponse>(responseData)
     } catch (error) {
-      console.error('Error listing source connection resources:', error)
+      if (!isExpectedAuthorizationError(error)) {
+        console.error('Error listing source connection resources:', error)
+      }
       throw error
     }
   }
@@ -3204,12 +3214,18 @@ export class ApiService {
       })
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
-        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
+        throw new ApiRequestError(
+          extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`,
+          response.status,
+          extractErrorCode(errorData),
+        )
       }
       const responseData = await response.json()
       return extractData<SourceResourceQuickLocateResponse>(responseData)
     } catch (error) {
-      console.error('Error locating source connection resource:', error)
+      if (!isExpectedAuthorizationError(error)) {
+        console.error('Error locating source connection resource:', error)
+      }
       throw error
     }
   }

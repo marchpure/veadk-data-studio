@@ -441,7 +441,7 @@ export function useListSourceConnectionResources(params: {
     staleTime: 10 * 1000,
     gcTime: 2 * 60 * 1000,
     retry: (failureCount, error: Error & { code?: string }) =>
-      error.code !== 'reauthorization_required' && failureCount < 2,
+      error.code !== 'needs_authorization' && error.code !== 'reauthorization_required' && failureCount < 2,
   })
 }
 

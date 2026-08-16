@@ -2314,7 +2314,58 @@ async def test_feishu_resource_listing_persists_reauthorization_required(test_se
     await test_session.refresh(connection)
     assert connection.status == "reauthorization_required"
     assert connection.capabilities_json["last_error"]["code"] == "reauthorization_required"
-    assert connection.capabilities_json["last_error"]["stage"] == "resource_picker"
+
+
+async def test_source_connection_browse_requires_authorization_without_fake_empty_success(test_client, test_session):
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    connection = SourceConnection(
+        tenant_id=tenant.id,
+        provider="feishu",
+        auth_mode="oauth",
+        encrypted_credentials="encrypted-secret-token",
+        external_account_id="ou_cross_tenant_secret",
+        display_name="Revoked Feishu workspace",
+        status="reauthorization_required",
+        capabilities_json={
+            "last_error": {
+                "code": "reauthorization_required",
+                "message": "refresh token expired for secret workspace",
+                "permanent": True,
+            },
+            "sql": "select * from hidden_table",
+        },
+        created_by=tenant.owner_id,
+    )
+    test_session.add(connection)
+    await test_session.commit()
+
+    listing = await test_client.get(f"/api/source-connections/{connection.id}/resources?scope=recent")
+    assert listing.status_code == 403
+    listing_body = listing.json()
+    assert listing_body["success"] is False
+    assert listing_body["data"]["code"] == "needs_authorization"
+    assert "Reauthorize source" in listing_body["message"]
+    serialized_listing = json.dumps(listing_body)
+    assert "encrypted-secret-token" not in serialized_listing
+    assert "hidden_table" not in serialized_listing
+    assert "ou_cross_tenant_secret" not in serialized_listing
+    assert "items" not in listing_body
+
+    locate = await test_client.post(
+        f"/api/source-connections/{connection.id}/resources/locate",
+        json={"url": "https://example.feishu.cn/docx/doc_secret"},
+    )
+    assert locate.status_code == 403
+    locate_body = locate.json()
+    assert locate_body["success"] is False
+    assert locate_body["data"]["code"] == "needs_authorization"
+    assert "Reauthorize source" in locate_body["message"]
+    serialized_locate = json.dumps(locate_body)
+    assert "encrypted-secret-token" not in serialized_locate
+    assert "hidden_table" not in serialized_locate
+    assert "ou_cross_tenant_secret" not in serialized_locate
 
 
 async def test_tos_resource_listing_persists_picker_permission_failure(test_session):

@@ -369,11 +369,12 @@ function compareModelingDatasources(left: DataModelingDatasource, right: DataMod
     context_only: 2,
     reauthorization_required: 3,
     permission_required: 4,
-    processing: 5,
-    source_unavailable: 6,
-    failed: 7,
-    planned: 8,
-    unsupported: 9,
+    blocked: 5,
+    processing: 6,
+    source_unavailable: 7,
+    failed: 8,
+    planned: 9,
+    unsupported: 10,
   }
   const statusDelta = priority[left.modelingStatus] - priority[right.modelingStatus]
   if (statusDelta !== 0) return statusDelta
@@ -404,6 +405,12 @@ function sourceOverviewBlocker(item: SourceOverviewItem): { status: DataModeling
     return {
       status: 'source_unavailable',
       reason: 'The upstream source is unavailable. Retry sync or check the upstream resource.',
+    }
+  }
+  if (status === 'blocked') {
+    return {
+      status: 'blocked',
+      reason: 'Source capture is blocked by policy or upstream safety controls.',
     }
   }
   if (status === 'failed') {
