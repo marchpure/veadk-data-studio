@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.evaluation import (
+    AdvisorChangeSet,
     EvaluationArtifact,
     EvaluationAssessment,
     EvaluationCase,
@@ -14,6 +15,7 @@ from server.models.evaluation import (
     EvaluationRun,
     EvaluationSuite,
     EvaluationSuiteVersion,
+    PromotionDecision,
 )
 from server.models.tenant import Tenant
 from server.models.user import User
@@ -257,3 +259,93 @@ async def test_runner_reclaims_expired_lease_rejects_stale_worker_and_persists_a
     saved_artifact = await test_session.get(EvaluationArtifact, artifact.id)
     assert saved_artifact is not None
     assert saved_artifact.content_hash.startswith("sha256:")
+
+
+async def _create_completed_run(
+    test_session: AsyncSession,
+    *,
+    tenant_id: str,
+    suite_version_id: str,
+    status: str,
+    gate_decision: str,
+) -> EvaluationRun:
+    service = EvaluationService(test_session)
+    run = await service.create_preflight_run(
+        tenant_id=tenant_id,
+        suite_version_id=suite_version_id,
+        target_snapshot_payload=_complete_snapshot(),
+        actor_id="agent-1",
+        idempotency_key=f"promotion-{status}-{uuid4()}",
+    )
+    run.status = status
+    run.summary_json = {"gate_decision": gate_decision}
+    await test_session.commit()
+    await test_session.refresh(run)
+    return run
+
+
+async def test_promotion_decision_requires_verification_and_regression_gate_passes(
+    test_session: AsyncSession,
+) -> None:
+    tenant_id, suite_version_id = await _seed_published_suite_version_with_cases(test_session)
+    verification_run = await _create_completed_run(
+        test_session,
+        tenant_id=tenant_id,
+        suite_version_id=suite_version_id,
+        status="passed",
+        gate_decision="passed",
+    )
+    regression_run = await _create_completed_run(
+        test_session,
+        tenant_id=tenant_id,
+        suite_version_id=suite_version_id,
+        status="failed",
+        gate_decision="failed",
+    )
+    change_set = AdvisorChangeSet(
+        tenant_id=tenant_id,
+        suite_version_id=suite_version_id,
+        target_ref="semantic_model:sales",
+        base_version_ref="semantic_model:sales@1",
+        base_etag="etag-1",
+        status="verified",
+        evidence_json={},
+        verification_run_id=verification_run.id,
+        regression_run_id=regression_run.id,
+        created_by="advisor",
+    )
+    test_session.add(change_set)
+    await test_session.commit()
+    await test_session.refresh(change_set)
+
+    rejected = await EvaluationService(test_session).decide_promotion(
+        tenant_id=tenant_id,
+        change_set_id=str(change_set.id),
+        actor_id="owner",
+    )
+
+    assert rejected.decision == "rejected"
+    assert rejected.verification_run_id == verification_run.id
+    assert rejected.regression_run_id == regression_run.id
+    assert rejected.audit_json["verification_gate"] == "passed"
+    assert rejected.audit_json["regression_gate"] == "failed"
+    refreshed_change_set = await test_session.get(AdvisorChangeSet, change_set.id)
+    assert refreshed_change_set is not None and refreshed_change_set.status == "rejected"
+
+    regression_run.status = "passed"
+    regression_run.summary_json = {"gate_decision": "passed"}
+    change_set.status = "verified"
+    await test_session.commit()
+    accepted = await EvaluationService(test_session).decide_promotion(
+        tenant_id=tenant_id,
+        change_set_id=str(change_set.id),
+        actor_id="owner",
+    )
+
+    assert accepted.decision == "accepted"
+    refreshed_change_set = await test_session.get(AdvisorChangeSet, change_set.id)
+    assert refreshed_change_set is not None and refreshed_change_set.status == "promoted"
+    decisions = (
+        await test_session.execute(select(PromotionDecision).where(PromotionDecision.change_set_id == change_set.id))
+    ).scalars().all()
+    assert {decision.decision for decision in decisions} == {"rejected", "accepted"}

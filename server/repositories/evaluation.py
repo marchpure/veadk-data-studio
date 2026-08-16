@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.evaluation import (
+    AdvisorChangeSet,
     EvaluationArtifact,
     EvaluationAssessment,
     EvaluationAuditEvent,
@@ -15,6 +16,7 @@ from server.models.evaluation import (
     EvaluationRun,
     EvaluationSuiteVersion,
     EvaluationTargetSnapshot,
+    PromotionDecision,
 )
 
 
@@ -46,6 +48,20 @@ class EvaluationRepository:
             select(EvaluationRun).where(
                 EvaluationRun.tenant_id == tenant_id,
                 EvaluationRun.id == run_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_change_set(
+        self,
+        *,
+        tenant_id: str | UUID,
+        change_set_id: str | UUID,
+    ) -> AdvisorChangeSet | None:
+        result = await self._session.execute(
+            select(AdvisorChangeSet).where(
+                AdvisorChangeSet.tenant_id == tenant_id,
+                AdvisorChangeSet.id == change_set_id,
             )
         )
         return result.scalar_one_or_none()
@@ -236,6 +252,32 @@ class EvaluationRepository:
         self._session.add(artifact)
         await self._session.flush()
         return artifact
+
+    async def create_promotion_decision(
+        self,
+        *,
+        tenant_id: str | UUID,
+        change_set_id: str | UUID | None,
+        verification_run_id: str | UUID | None,
+        regression_run_id: str | UUID | None,
+        decision: str,
+        decided_by: str | UUID | None,
+        rationale: str,
+        audit_json: dict,
+    ) -> PromotionDecision:
+        promotion = PromotionDecision(
+            tenant_id=tenant_id,
+            change_set_id=change_set_id,
+            verification_run_id=verification_run_id,
+            regression_run_id=regression_run_id,
+            decision=decision,
+            decided_by=decided_by,
+            rationale=rationale,
+            audit_json=audit_json,
+        )
+        self._session.add(promotion)
+        await self._session.flush()
+        return promotion
 
     async def create_audit_event(
         self,

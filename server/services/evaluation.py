@@ -8,7 +8,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.models.evaluation import EvaluationArtifact, EvaluationRun, EvaluationSuiteVersion
+from server.models.evaluation import EvaluationArtifact, EvaluationRun, EvaluationSuiteVersion, PromotionDecision
 from server.repositories.evaluation import EvaluationRepository
 from server.schemas.evaluation import EvaluationTargetSnapshot
 
@@ -190,6 +190,65 @@ class EvaluationService:
         await self._session.commit()
         await self._session.refresh(artifact)
         return artifact
+
+    async def decide_promotion(
+        self,
+        *,
+        tenant_id: str | UUID,
+        change_set_id: str | UUID,
+        actor_id: str,
+    ) -> PromotionDecision:
+        change_set = await self._repo.get_change_set(tenant_id=tenant_id, change_set_id=change_set_id)
+        if change_set is None:
+            raise ValueError("advisor change set not found")
+        verification_run = await self._repo.get_run(
+            tenant_id=tenant_id,
+            run_id=change_set.verification_run_id,
+        )
+        regression_run = await self._repo.get_run(
+            tenant_id=tenant_id,
+            run_id=change_set.regression_run_id,
+        )
+        verification_gate = self._run_gate_decision(verification_run)
+        regression_gate = self._run_gate_decision(regression_run)
+        accepted = verification_gate == "passed" and regression_gate == "passed"
+        decision = "accepted" if accepted else "rejected"
+        change_set.status = "promoted" if accepted else "rejected"
+        audit_json = {
+            "verification_gate": verification_gate,
+            "regression_gate": regression_gate,
+            "target_ref": change_set.target_ref,
+            "base_version_ref": change_set.base_version_ref,
+            "actor_id": actor_id,
+        }
+        promotion = await self._repo.create_promotion_decision(
+            tenant_id=tenant_id,
+            change_set_id=change_set.id,
+            verification_run_id=change_set.verification_run_id,
+            regression_run_id=change_set.regression_run_id,
+            decision=decision,
+            decided_by=self._optional_uuid(actor_id),
+            rationale=(
+                "Verification and regression gates passed."
+                if accepted
+                else "Promotion blocked until verification and regression gates both pass."
+            ),
+            audit_json=audit_json,
+        )
+        await self._repo.create_audit_event(
+            tenant_id=tenant_id,
+            suite_id=None,
+            suite_version_id=change_set.suite_version_id,
+            run_id=None,
+            actor_type="human",
+            actor_id=actor_id,
+            action="evaluation.promotion.decide",
+            outcome=decision,
+            details_json=audit_json,
+        )
+        await self._session.commit()
+        await self._session.refresh(promotion)
+        return promotion
 
     async def claim_next_run(
         self,
@@ -406,6 +465,27 @@ class EvaluationService:
         if run.status != "running" or run.lease_holder != worker_id:
             raise ValueError("evaluation run is not leased by this worker")
         return run
+
+    @staticmethod
+    def _run_gate_decision(run: EvaluationRun | None) -> str:
+        if run is None:
+            return "missing"
+        summary = run.summary_json or {}
+        gate_decision = summary.get("gate_decision")
+        if gate_decision in {"passed", "failed", "canceled", "blocked"}:
+            return str(gate_decision)
+        if run.status == "passed":
+            return "passed"
+        return "failed"
+
+    @staticmethod
+    def _optional_uuid(value: str | UUID) -> UUID | None:
+        if isinstance(value, UUID):
+            return value
+        try:
+            return UUID(str(value))
+        except ValueError:
+            return None
 
     @staticmethod
     def _digest(payload: Any) -> str:

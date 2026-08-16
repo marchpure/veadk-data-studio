@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 2 — DB-backed Evaluation runner and grader gate. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer. Current slice: wire promotion decisions to verification/regression Evaluation gates. Next slice: Phase 2 promotion blocking.
+CURRENT_PHASE: Phase 2 — DB-backed Evaluation runner and grader gate complete. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking. Current slice: ready to enter Phase 3. Next slice: Phase 3 feedback/advisor/promotion API and UI wiring.
 
 ## Phase 0 Slice Checklist
 
@@ -310,3 +310,25 @@ Remaining Phase 2 work:
 
 - Wire promotion decisions so advisor/promote flows are blocked unless verification and regression Evaluation runs satisfy gate policy.
 - Add promotion-decision audit evidence for accepted/rejected advisor changesets.
+
+## 2026-08-16 18:05 CST - Phase 2 Promotion Gate Blocking
+
+Scope:
+
+- Added promotion-decision service flow for advisor change sets.
+- Promotion is accepted only when both verification and regression Evaluation runs have gate decisions of `passed`; missing/failed/canceled/blocked runs reject promotion.
+- Rejected promotions update the advisor change set to `rejected`; accepted promotions update it to `promoted`.
+- Promotion decisions persist verification/regression run IDs, actor/audit metadata, rationale, and gate outcomes for release review.
+- Added regression coverage for a failed regression gate blocking promotion and a subsequent passed regression gate allowing promotion.
+
+Evidence:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_evaluation_runner_service.py -q` -> `4 passed, 14 warnings`.
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_evaluation_runner_service.py tests/test_migration_chain_hardening.py -q` -> `18 passed, 15 warnings`.
+- `cd server && uv run ruff check repositories/evaluation.py services/evaluation.py tests/test_evaluation_runner_service.py tests/test_evaluation_service.py` -> passed with the existing removed-rule warning.
+
+Phase 3 next steps:
+
+- Expose Evaluation suite/run/promotion primitives through REST/MCP APIs with tenant/action authorization.
+- Add UI/API wiring for feedback-to-evaluation-case and advisor change-set review.
+- Add end-to-end tests showing feedback creates cases, advisor changesets require Evaluation gates, and promotion evidence is visible without leaking secrets.
