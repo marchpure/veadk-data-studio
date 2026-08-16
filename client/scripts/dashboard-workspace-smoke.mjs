@@ -445,8 +445,24 @@ const browser = await chromium.launch({
   executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
 })
 
+async function loginPage(page, tenantId) {
+  await page.goto(`${baseURL}/login`, { waitUntil: 'domcontentloaded' })
+  await page.evaluate(id => {
+    window.localStorage.clear()
+    window.sessionStorage.clear()
+    window.localStorage.setItem('byaan_active_tenant', id)
+  }, tenantId)
+  await page.getByLabel('Email').fill(adminEmail)
+  await page.getByLabel('Password').fill(adminPassword)
+  await Promise.all([
+    page.waitForURL(url => !url.pathname.startsWith('/login'), { timeout: 30000 }),
+    page.getByRole('button', { name: /^Sign in$/ }).click(),
+  ])
+}
+
 async function makePage(viewport, tenantId) {
   const page = await browser.newPage({ viewport })
+  await loginPage(page, tenantId)
   page.on('pageerror', error => {
     stats.pageerror += 1
     console.error('pageerror:', error.message)
@@ -469,15 +485,6 @@ async function makePage(viewport, tenantId) {
       console.error('http5xx:', response.status(), response.url())
     }
   })
-  const loginResponse = await page.request.post(`${apiURL}/api/auth/login`, {
-    form: { username: adminEmail, password: adminPassword },
-  })
-  if (!loginResponse.ok()) {
-    throw new Error(`Browser login failed ${loginResponse.status()}: ${await loginResponse.text()}`)
-  }
-  await page.addInitScript(id => {
-    localStorage.setItem('byaan_active_tenant', id)
-  }, tenantId)
   return page
 }
 

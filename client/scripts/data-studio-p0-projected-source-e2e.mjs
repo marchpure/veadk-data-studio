@@ -15,6 +15,7 @@ const allowedNavigationAbortPath = `/api/semantic-models/${modelId}`
 
 let accessToken = ''
 let browserContext
+let browserContextLoggedIn = false
 const navigationStateByPage = new WeakMap()
 
 if ((email && !password) || (!email && password)) {
@@ -293,21 +294,30 @@ async function publishAndQueryModel(model) {
   return reloaded
 }
 
+async function loginPage(page) {
+  if (!email || !password || browserContextLoggedIn) return
+  await page.goto(`${baseURL}/login`, { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    window.localStorage.clear()
+    window.sessionStorage.clear()
+  })
+  await page.getByLabel('Email').fill(email)
+  await page.getByLabel('Password').fill(password)
+  await Promise.all([
+    page.waitForURL(url => !url.pathname.startsWith('/login'), { timeout: 30000 }),
+    page.getByRole('button', { name: /^Sign in$/ }).click(),
+  ])
+  browserContextLoggedIn = true
+}
+
 async function makePage(browser, viewport) {
   if (!browserContext) {
     browserContext = await browser.newContext({ viewport, baseURL })
-    if (email && password) {
-      const login = await browserContext.request.post('/api/auth/login', {
-        form: { username: email, password },
-      })
-      if (!login.ok()) {
-        throw new Error(`Browser pre-authentication failed: ${login.status()} ${await login.text()}`)
-      }
-    }
   }
   const page = await browserContext.newPage()
   navigationStateByPage.set(page, { navigating: false, screen: '', pendingRequests: new Map() })
   await page.setViewportSize(viewport)
+  await loginPage(page)
   await browserContext.route('https://accounts.google.com/**', route => {
     route.fulfill({ status: 204, body: '' })
   })
