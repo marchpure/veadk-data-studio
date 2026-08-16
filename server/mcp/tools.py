@@ -22,6 +22,7 @@ from server.mcp.tool_wrappers import (
     describe_evaluation_failure_wrapper,
     describe_evaluation_suite_wrapper,
     describe_semantic_model_wrapper,
+    describe_sharing_grant_wrapper,
     emit_plan_status_wrapper,
     ensure_notebook_exists,
     execute_duckdb_query_wrapper,
@@ -45,6 +46,7 @@ from server.mcp.tool_wrappers import (
     get_user_instructions_wrapper,
     get_user_style_guidelines_wrapper,
     list_metrics_wrapper,
+    list_sharing_grants_wrapper,
     patch_dashboard_draft_wrapper,
     preview_dashboard_wrapper,
     preview_evaluation_ground_truth_wrapper,
@@ -506,6 +508,41 @@ def register_all_tools(mcp: FastMCP, get_or_create_session_func):
             session["user_id"],
             include_expected_contract,
             limit,
+        )
+
+    @mcp.tool()
+    async def list_sharing_grants(
+        object_type: str = "",
+        object_id: str = "",
+        legacy_surface: str = "",
+        status: str = "",
+        limit: int = 20,
+        context: Context = None,
+    ) -> str:
+        """
+        List canonical Sharing grants with optional object or legacy compatibility filters.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await list_sharing_grants_wrapper(
+            session["tenant_id"],
+            session["user_id"],
+            object_type,
+            object_id,
+            legacy_surface,
+            status,
+            limit,
+        )
+
+    @mcp.tool()
+    async def describe_sharing_grant(grant_id: str, context: Context = None) -> str:
+        """
+        Describe redacted canonical Sharing evidence for a grant.
+        """
+        session = await extract_session_from_context(get_or_create_session_func, context)
+        return await describe_sharing_grant_wrapper(
+            grant_id,
+            session["tenant_id"],
+            session["user_id"],
         )
 
     @mcp.tool()

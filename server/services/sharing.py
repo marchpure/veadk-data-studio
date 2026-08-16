@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.dashboard import Dashboard, DashboardAsset
@@ -244,6 +244,157 @@ class SharingService:
         await self._session.commit()
         await self._session.refresh(grant)
         return grant
+
+    async def ensure_folder_notebook_grant(
+        self,
+        *,
+        tenant_id: str | UUID,
+        actor_id: str | UUID,
+        folder_notebook_id: str | UUID,
+        notebook_id: str | UUID,
+        is_snapshot: bool,
+        snapshot_updated_at: datetime | None = None,
+    ) -> SharingGrant:
+        tenant_uuid = _coerce_uuid(tenant_id)
+        actor_uuid = _coerce_uuid(actor_id)
+        folder_notebook_uuid = _coerce_uuid(folder_notebook_id)
+        notebook_uuid = _coerce_uuid(notebook_id)
+        legacy_id = str(folder_notebook_uuid)
+        mode = "snapshot_export" if is_snapshot else "live_notebook"
+        metadata = sanitize_error_payload(
+            {
+                "legacy_surface": "folder_notebook",
+                "legacy_id": legacy_id,
+                "notebook_id": str(notebook_uuid),
+                "is_snapshot": is_snapshot,
+                "snapshot_updated_at": snapshot_updated_at.isoformat() if snapshot_updated_at else None,
+            }
+        )
+        existing = await self._grant_for_legacy_link("folder_notebook", legacy_id)
+        if existing is not None:
+            existing.object_id = notebook_uuid
+            existing.object_version_id = None
+            existing.object_version_digest = ""
+            existing.mode = mode
+            existing.status = "active"
+            existing.revoked_at = None
+            existing.revoked_by = None
+            existing.revocation_reason = None
+            existing.metadata_json = metadata
+            link = await self._compatibility_link_for_grant(
+                grant_id=existing.id,
+                legacy_surface="folder_notebook",
+                legacy_id=legacy_id,
+            )
+            if link is not None:
+                link.metadata_json = metadata
+            grant = existing
+        else:
+            grant = SharingGrant(
+                tenant_id=tenant_uuid,
+                object_type="notebook",
+                object_id=notebook_uuid,
+                object_version_id=None,
+                object_version_digest="",
+                mode=mode,
+                channel="folder",
+                audience="folder_member",
+                status="active",
+                created_by=actor_uuid,
+                metadata_json=metadata,
+            )
+            self._session.add(grant)
+            await self._session.flush()
+            self._session.add(
+                SharingCompatibilityLink(
+                    tenant_id=tenant_uuid,
+                    grant_id=grant.id,
+                    legacy_surface="folder_notebook",
+                    legacy_id=legacy_id,
+                    metadata_json=metadata,
+                )
+            )
+        self._session.add(
+            self._audit_event(
+                tenant_id=tenant_uuid,
+                grant=grant,
+                actor_id=str(actor_uuid),
+                action="sharing.compat.folder_notebook.upsert",
+                outcome="active",
+                details=metadata,
+            )
+        )
+        await self._session.commit()
+        await self._session.refresh(grant)
+        return grant
+
+    async def list_grants(
+        self,
+        *,
+        tenant_id: str | UUID,
+        object_type: str | None = None,
+        object_id: str | UUID | None = None,
+        legacy_surface: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[SharingGrant]:
+        tenant_uuid = _coerce_uuid(tenant_id)
+        query = select(SharingGrant).where(SharingGrant.tenant_id == tenant_uuid)
+        if legacy_surface:
+            query = query.join(SharingCompatibilityLink, SharingCompatibilityLink.grant_id == SharingGrant.id).where(
+                SharingCompatibilityLink.legacy_surface == legacy_surface
+            )
+        if object_type:
+            query = query.where(SharingGrant.object_type == object_type)
+        if object_id is not None:
+            query = query.where(SharingGrant.object_id == _coerce_uuid(object_id))
+        if status:
+            query = query.where(SharingGrant.status == status)
+        query = query.order_by(SharingGrant.created_at.desc()).limit(max(1, min(limit, 100)))
+        result = await self._session.execute(query)
+        return list(result.scalars().unique().all())
+
+    async def grant_evidence(self, *, tenant_id: str | UUID, grant_id: str | UUID) -> dict[str, Any]:
+        tenant_uuid = _coerce_uuid(tenant_id)
+        grant_uuid = _coerce_uuid(grant_id)
+        grant = await self._session.scalar(
+            select(SharingGrant).where(SharingGrant.tenant_id == tenant_uuid, SharingGrant.id == grant_uuid)
+        )
+        if grant is None:
+            raise ValueError("sharing grant not found")
+        link_result = await self._session.execute(
+            select(SharingCompatibilityLink).where(SharingCompatibilityLink.tenant_id == tenant_uuid, SharingCompatibilityLink.grant_id == grant.id)
+        )
+        secret_counts = (
+            await self._session.execute(
+                select(SharingSecret.secret_type, SharingSecret.status, func.count(SharingSecret.id))
+                .where(SharingSecret.tenant_id == tenant_uuid, SharingSecret.grant_id == grant.id)
+                .group_by(SharingSecret.secret_type, SharingSecret.status)
+            )
+        ).all()
+        viewer_count = await self._session.scalar(
+            select(func.count(SharingViewerSession.id)).where(
+                SharingViewerSession.tenant_id == tenant_uuid,
+                SharingViewerSession.grant_id == grant.id,
+                SharingViewerSession.revoked_at.is_(None),
+            )
+        )
+        audit_result = await self._session.execute(
+            select(SharingAuditEvent)
+            .where(SharingAuditEvent.tenant_id == tenant_uuid, SharingAuditEvent.grant_id == grant.id)
+            .order_by(SharingAuditEvent.created_at.desc())
+            .limit(10)
+        )
+        return {
+            "grant": grant,
+            "compatibility_links": list(link_result.scalars().all()),
+            "secret_counts": [
+                {"secret_type": secret_type, "status": secret_status, "count": count}
+                for secret_type, secret_status, count in secret_counts
+            ],
+            "active_viewer_session_count": int(viewer_count or 0),
+            "audit_events": list(audit_result.scalars().all()),
+        }
 
     async def revoke_legacy_grant(
         self,
@@ -487,6 +638,22 @@ class SharingService:
             select(SharingGrant)
             .join(SharingCompatibilityLink, SharingCompatibilityLink.grant_id == SharingGrant.id)
             .where(
+                SharingCompatibilityLink.legacy_surface == legacy_surface,
+                SharingCompatibilityLink.legacy_id == legacy_id,
+            )
+        )
+        return result.scalars().first()
+
+    async def _compatibility_link_for_grant(
+        self,
+        *,
+        grant_id: UUID,
+        legacy_surface: str,
+        legacy_id: str,
+    ) -> SharingCompatibilityLink | None:
+        result = await self._session.execute(
+            select(SharingCompatibilityLink).where(
+                SharingCompatibilityLink.grant_id == grant_id,
                 SharingCompatibilityLink.legacy_surface == legacy_surface,
                 SharingCompatibilityLink.legacy_id == legacy_id,
             )

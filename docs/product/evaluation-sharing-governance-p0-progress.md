@@ -1,6 +1,6 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 5 — worker-backed notebook share compatibility now uses canonical Sharing. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface, Phase 3/4 Human UI workspace and advisor verify/regress/review/apply REST surfaces, Phase 3/4 browser/MCP parity smoke, Phase 5 canonical Sharing grant/secret/viewer-session foundation, Phase 5 folder dashboard canonical compatibility, Phase 5 worker-backed notebook share canonical compatibility. Current slice: Phase 5 canonical Sharing REST/MCP evidence and remaining folder notebook compatibility. Next slice: add canonical Sharing read/inspection surface and port folder notebook shares or explicitly map remaining legacy share rows.
+CURRENT_PHASE: Phase 5 — canonical Sharing REST/MCP evidence and folder notebook compatibility are implemented. Completed slices: integration worktree init, dashboard merge integration gates, Phase 0 Sharing 安全止血, Phase 1 Evaluation 权威模型, Phase 2 runner lease/gate tracer, Phase 2 runner resumability/artifact tracer, Phase 2 promotion blocking, Phase 3 Evaluation REST runner/promotion API, Phase 3 feedback-to-case and advisor draft compatibility API, Phase 3/4 Evaluation MCP wrappers/shared serializers, Phase 3/4 Evaluation REST read surface, Phase 3/4 Human UI workspace and advisor verify/regress/review/apply REST surfaces, Phase 3/4 browser/MCP parity smoke, Phase 5 canonical Sharing grant/secret/viewer-session foundation, Phase 5 folder dashboard canonical compatibility, Phase 5 worker-backed notebook share canonical compatibility, Phase 5 canonical Sharing read surface and folder notebook compatibility. Current slice: Phase 5 local end-to-end sharing smoke and release-gate preparation. Next slice: run a local smoke covering folder dashboard share, folder notebook share, worker HTML/JSON notebook share/password rotation, redacted canonical evidence, and legacy response compatibility before final real `127.0.0.1:8080` Release Gate.
 
 ## Phase 0 Slice Checklist
 
@@ -505,9 +505,31 @@ Evidence:
 
 Remaining Phase 5 work:
 
-- Add canonical Sharing REST/MCP read surface for grant/secret/viewer/audit evidence, redacted by default, so Human and agent flows can inspect canonical state without touching worker secrets.
-- Port folder notebook shares or create explicit canonical compatibility links for `folder_notebooks` rows.
 - Run an end-to-end local smoke covering dashboard folder share, notebook worker share, JSON share password rotation, canonical audit evidence, and legacy response compatibility before the final real `127.0.0.1:8080` Release Gate.
+
+## 2026-08-16 20:23 CST - Phase 5 Canonical Sharing Read Surface And Folder Notebook Compatibility
+
+Scope:
+
+- Folder notebook share creation now upserts canonical `sharing_grants` and `sharing_compatibility_links` rows using legacy surface `folder_notebook` and the `folder_notebooks.id`.
+- Folder notebook snapshot refresh updates the canonical grant mode/metadata and compatibility metadata without storing snapshot payloads or secrets in canonical grant metadata.
+- Folder notebook unshare now revokes the linked canonical grant and associated viewer sessions before deleting the legacy `folder_notebooks` row.
+- Added tenant-scoped REST read endpoints under `/api/sharing/grants` for canonical grant inventory and redacted grant evidence.
+- Added MCP tools `list_sharing_grants` and `describe_sharing_grant`, backed by the same serializer as REST.
+- Canonical Sharing evidence returns compatibility links, secret counts, `has_secret`, active viewer-session counts, and recent audit events; it does not return `salt`, `verifier_hash`, `token_digest`, plaintext password, raw token, credentials, or SQL-like details.
+
+Evidence:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_share_object_authorization.py::test_owner_can_folder_share_notebook_and_dashboard_after_dashboard_share_authorization tests/test_sharing_read_surface.py tests/test_sharing_canonical_service.py -q` -> `7 passed, 9 warnings`.
+- `cd server && uv run ruff check services/sharing.py services/folder_service.py serializers/sharing.py routers/sharing.py ../server/main.py mcp/tool_wrappers.py mcp/tools.py tests/test_share_object_authorization.py tests/test_sharing_read_surface.py` -> passed with the existing removed-rule warning.
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_share_secret_redaction.py tests/test_share_object_authorization.py tests/test_dashboard_security_regressions.py tests/test_sharing_canonical_service.py tests/test_sharing_read_surface.py tests/test_sharing_persistence_migration.py tests/test_migration_chain_hardening.py -q` -> `39 passed, 9 warnings`.
+- `cd server && PYTHONPATH=..:tests uv run alembic heads` -> `add_canonical_sharing_model (head)`.
+- `git diff --check` -> passed.
+
+Remaining Phase 5 work:
+
+- Run an end-to-end local smoke covering folder dashboard share, folder notebook share, worker HTML/JSON notebook share/password rotation, canonical audit evidence, and legacy response compatibility.
+- Run the final real `127.0.0.1:8080` Release Gate only after the local Phase 5 smoke passes, including verification/cleanup of the registered dashboard test folder.
 
 ## 2026-08-16 19:17 CST - Phase 3/4 Evaluation Human UI And Advisor REST Lifecycle
 

@@ -366,6 +366,28 @@ async def test_owner_can_folder_share_notebook_and_dashboard_after_dashboard_sha
 
     assert notebook_response.status_code == 201
     assert dashboard_response.status_code == 201
+    folder_notebook_id = notebook_response.json()["data"]["id"]
+    notebook_compatibility = (
+        await test_session.execute(
+            select(SharingCompatibilityLink).where(
+                SharingCompatibilityLink.legacy_surface == "folder_notebook",
+                SharingCompatibilityLink.legacy_id == folder_notebook_id,
+            )
+        )
+    ).scalar_one()
+    notebook_grant = await test_session.get(SharingGrant, notebook_compatibility.grant_id)
+    assert notebook_grant is not None
+    assert notebook_grant.object_type == "notebook"
+    assert str(notebook_grant.object_id) == notebook_id
+    assert notebook_grant.channel == "folder"
+    assert notebook_grant.audience == "folder_member"
+    assert notebook_grant.status == "active"
+
+    delete_notebook_response = await test_client.delete(f"/api/folders/{folder_id}/notebooks/{notebook_id}")
+    assert delete_notebook_response.status_code == 204
+    await test_session.refresh(notebook_grant)
+    assert notebook_grant.status == "revoked"
+
     folder_dashboard_id = dashboard_response.json()["data"]["id"]
     compatibility = (
         await test_session.execute(

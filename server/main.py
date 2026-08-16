@@ -81,6 +81,7 @@ from server.routers import schedules as schedules_router
 from server.routers import scopes as scopes_router
 from server.routers import semantic_models as semantic_models_router
 from server.routers import settings as settings_router
+from server.routers import sharing as sharing_router
 from server.routers import skill_loop as skill_loop_router
 from server.routers import skill_suggestions as skill_suggestions_router
 from server.routers import skills as skills_router
@@ -582,6 +583,7 @@ app.include_router(semantic_models_router.router, prefix="/api", tags=["semantic
 
 app.include_router(dashboard_router.router, prefix="/api", tags=["dashboard"])
 app.include_router(evaluation_router.router, prefix="/api", tags=["evaluation"])
+app.include_router(sharing_router.router, prefix="/api", tags=["sharing"])
 
 app.include_router(analysis_artifacts_router.router, prefix="/api", tags=["analysis-artifacts"])
 app.include_router(assets_router.router, prefix="/api", tags=["assets"])

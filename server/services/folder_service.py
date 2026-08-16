@@ -291,6 +291,14 @@ class FolderService:
         session.add(folder_notebook)
         await session.commit()
         await session.refresh(folder_notebook)
+        await SharingService(session).ensure_folder_notebook_grant(
+            tenant_id=notebook.tenant_id,
+            actor_id=shared_by,
+            folder_notebook_id=folder_notebook.id,
+            notebook_id=notebook_id,
+            is_snapshot=is_snapshot,
+            snapshot_updated_at=snapshot_updated_at,
+        )
 
         share_type = "snapshot" if is_snapshot else "live"
         logger.info(f"Notebook {notebook_id} shared ({share_type}) to folder {folder_id} by user {shared_by}")
@@ -321,6 +329,13 @@ class FolderService:
         if not folder_notebook:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notebook is not shared to this folder")
 
+        await SharingService(session).revoke_legacy_grant(
+            tenant_id=notebook.tenant_id,
+            legacy_surface="folder_notebook",
+            legacy_id=str(folder_notebook.id),
+            actor_id=user_id,
+            reason="folder notebook share removed",
+        )
         result = await folder_notebook_repo.delete(folder_notebook.id)
         if result:
             logger.info(f"Notebook {notebook_id} unshared from folder {folder_id}")
@@ -374,6 +389,16 @@ class FolderService:
 
         await session.commit()
         await session.refresh(folder_notebook)
+        notebook = await NotebookRepository(session).get(notebook_id)
+        if notebook is not None:
+            await SharingService(session).ensure_folder_notebook_grant(
+                tenant_id=notebook.tenant_id,
+                actor_id=user_id,
+                folder_notebook_id=folder_notebook.id,
+                notebook_id=notebook_id,
+                is_snapshot=True,
+                snapshot_updated_at=folder_notebook.snapshot_updated_at,
+            )
 
         logger.info(f"Snapshot updated for notebook {notebook_id} in folder {folder_id} by user {user_id}")
         return folder_notebook

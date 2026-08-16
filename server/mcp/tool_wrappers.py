@@ -31,8 +31,10 @@ from server.serializers.evaluation import (
     evaluation_run_payload,
     evaluation_suite_payload,
 )
+from server.serializers.sharing import sharing_grant_evidence_payload, sharing_grant_payload
 from server.services.dashboard import DashboardService
 from server.services.evaluation import EvaluationService
+from server.services.sharing import SharingService
 from server.utils.custom_logger import get_logger
 from server.utils.error_sanitizer import sanitize_error_message, sanitize_error_payload
 
@@ -263,6 +265,49 @@ async def search_evaluation_suites_wrapper(
     except Exception as e:
         logger.error(f"Error in search_evaluation_suites_wrapper: {e}", exc_info=True)
         return _json_error(e, operation="search_evaluation_suites")
+
+
+async def list_sharing_grants_wrapper(
+    tenant_id: UUID,
+    user_id: UUID,
+    object_type: str = "",
+    object_id: str = "",
+    legacy_surface: str = "",
+    status: str = "",
+    limit: int = MCP_DASHBOARD_DEFAULT_LIMIT,
+) -> str:
+    try:
+        async with AsyncSessionFactory() as session:
+            set_tenant_id(tenant_id)
+            await _require_mcp_dashboard_scope(session, tenant_id, user_id, Scope.DASHBOARD_READ)
+            grants = await SharingService(session).list_grants(
+                tenant_id=tenant_id,
+                object_type=object_type or None,
+                object_id=UUID(object_id) if object_id else None,
+                legacy_surface=legacy_surface or None,
+                status=status or None,
+                limit=max(1, min(limit, MCP_DASHBOARD_MAX_LIMIT)),
+            )
+            return _json_success(items=[sharing_grant_payload(grant) for grant in grants], total=len(grants))
+    except Exception as e:
+        logger.error(f"Error in list_sharing_grants_wrapper: {e}", exc_info=True)
+        return _json_error(e, operation="list_sharing_grants")
+
+
+async def describe_sharing_grant_wrapper(
+    grant_id: str,
+    tenant_id: UUID,
+    user_id: UUID,
+) -> str:
+    try:
+        async with AsyncSessionFactory() as session:
+            set_tenant_id(tenant_id)
+            await _require_mcp_dashboard_scope(session, tenant_id, user_id, Scope.DASHBOARD_READ)
+            evidence = await SharingService(session).grant_evidence(tenant_id=tenant_id, grant_id=UUID(grant_id))
+            return _json_success(**sharing_grant_evidence_payload(evidence))
+    except Exception as e:
+        logger.error(f"Error in describe_sharing_grant_wrapper: {e}", exc_info=True)
+        return _json_error(e, operation="describe_sharing_grant")
 
 
 async def describe_evaluation_suite_wrapper(
