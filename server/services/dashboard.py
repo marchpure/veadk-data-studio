@@ -559,6 +559,7 @@ class DashboardService:
         manifest = self.validate_manifest_payload(version.manifest_json)
         selected_data_views = self._select_data_views(manifest, data_view_ids)
         normalized_filters = self._normalize_filters(filters or {})
+        policy_blockers = self._manifest_policy_blockers(manifest)
         filter_digest = self.digest_payload(normalized_filters)
         execution_plan_digest = self.digest_payload(
             {
@@ -571,15 +572,21 @@ class DashboardService:
             }
         )
         started_at = datetime.utcnow()
-        view_results = []
-        for data_view in selected_data_views:
-            view_results.append(
-                await self._execute_data_view(
-                    session=session,
-                    data_view=data_view,
-                    normalized_filters=normalized_filters,
+        if policy_blockers:
+            view_results = [
+                self._permission_denied_view_result(data_view=data_view, policy_blockers=policy_blockers)
+                for data_view in selected_data_views
+            ]
+        else:
+            view_results = []
+            for data_view in selected_data_views:
+                view_results.append(
+                    await self._execute_data_view(
+                        session=session,
+                        data_view=data_view,
+                        normalized_filters=normalized_filters,
+                    )
                 )
-            )
 
         completed_at = datetime.utcnow()
         overall_freshness = self._overall_freshness(view_results)
@@ -637,7 +644,7 @@ class DashboardService:
             actor_type=actor_type,
             actor_id=actor_id,
             action="dashboard.query",
-            outcome="success" if not run_payload["errors"] else "partial",
+            outcome=self._run_outcome(view_results),
             correlation_id=correlation_id,
             details={"run_id": str(run.id), "data_view_ids": [view["data_view_id"] for view in view_results]},
         )
@@ -674,6 +681,7 @@ class DashboardService:
         manifest = self.validate_manifest_payload(version.manifest_json)
         selected_data_views = self._select_data_views(manifest, data_view_ids)
         normalized_filters = self._normalize_filters(filters or {})
+        policy_blockers = self._manifest_policy_blockers(manifest)
         filter_digest = self.digest_payload(normalized_filters)
         execution_plan_digest = self.digest_payload(
             {
@@ -683,14 +691,20 @@ class DashboardService:
             }
         )
         started_at = datetime.utcnow()
-        view_results = [
-            await self._execute_data_view(
-                session=session,
-                data_view=data_view,
-                normalized_filters=normalized_filters,
-            )
-            for data_view in selected_data_views
-        ]
+        if policy_blockers:
+            view_results = [
+                self._permission_denied_view_result(data_view=data_view, policy_blockers=policy_blockers)
+                for data_view in selected_data_views
+            ]
+        else:
+            view_results = [
+                await self._execute_data_view(
+                    session=session,
+                    data_view=data_view,
+                    normalized_filters=normalized_filters,
+                )
+                for data_view in selected_data_views
+            ]
         completed_at = datetime.utcnow()
         run_payload = {
             "contract_version": "dashboard.run.v1",
@@ -724,7 +738,7 @@ class DashboardService:
             actor_type=actor_type,
             actor_id=actor_id,
             action="dashboard.preview",
-            outcome="success" if not run_payload["errors"] else "partial",
+            outcome=self._run_outcome(view_results),
             correlation_id=correlation_id,
             details={"run_id": run_payload["run_id"], "data_view_ids": [view["data_view_id"] for view in view_results]},
         )
@@ -765,6 +779,42 @@ class DashboardService:
     @staticmethod
     def _normalize_filters(filters: dict[str, Any]) -> dict[str, Any]:
         return {key: filters[key] for key in sorted(filters)}
+
+    @staticmethod
+    def _manifest_policy_blockers(manifest: dict[str, Any]) -> dict[str, list[str]]:
+        access_policy = manifest.get("access_policy") or {}
+        blockers = {
+            "row_policy_refs": sorted(str(ref) for ref in access_policy.get("row_policy_refs") or []),
+            "column_policy_refs": sorted(str(ref) for ref in access_policy.get("column_policy_refs") or []),
+            "redaction_policy_refs": sorted(str(ref) for ref in access_policy.get("redaction_policy_refs") or []),
+        }
+        return {kind: refs for kind, refs in blockers.items() if refs}
+
+    @staticmethod
+    def _permission_denied_view_result(
+        *,
+        data_view: dict[str, Any],
+        policy_blockers: dict[str, list[str]],
+    ) -> dict[str, Any]:
+        policy_reason = "; ".join(f"{kind}={','.join(refs)}" for kind, refs in policy_blockers.items())
+        return {
+            "data_view_id": data_view["id"],
+            "status": "permission_denied",
+            "result": None,
+            "schema": data_view.get("output_schema", []),
+            "row_count": 0,
+            "cached": False,
+            "stale": False,
+            "warnings": ["Dashboard access policy refs are not resolved for this execution context"],
+            "error": {
+                "code": "policy_not_enforced",
+                "message": "Dashboard data view execution is blocked by unresolved access policy refs",
+                "retryable": False,
+                "policy_reason": policy_reason,
+            },
+            "evidence": data_view.get("evidence", []),
+            "lineage": data_view.get("lineage") or data_view.get("saved_query", {}).get("lineage", []),
+        }
 
     async def _execute_data_view(
         self,
@@ -860,6 +910,14 @@ class DashboardService:
         for view in view_results:
             warnings.extend(str(warning) for warning in view.get("warnings", []))
         return warnings
+
+    @staticmethod
+    def _run_outcome(view_results: list[dict[str, Any]]) -> str:
+        if not any(view.get("error") for view in view_results):
+            return "success"
+        if all(view.get("status") in {"blocked", "permission_denied", "error"} for view in view_results):
+            return "blocked"
+        return "partial"
 
     @staticmethod
     def _manifest_model_versions(manifest: dict[str, Any]) -> dict[str, str]:

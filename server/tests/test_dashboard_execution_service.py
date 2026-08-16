@@ -14,7 +14,7 @@ from server.models.user import User
 from server.services.dashboard import DashboardService
 
 
-def _manifest_payload(query_id: str) -> dict:
+def _manifest_payload(query_id: str, access_policy: dict | None = None) -> dict:
     return {
         "schema_version": "dashboard.manifest.v1",
         "dashboard_id": "dash-saved-query",
@@ -75,7 +75,7 @@ def _manifest_payload(query_id: str) -> dict:
         ],
         "actions": [],
         "freshness_policy": {"mode": "live", "max_age_seconds": 3600, "allow_stale": True},
-        "access_policy": {"required_scopes": ["dashboard:read", "dashboard:query"]},
+        "access_policy": access_policy or {"required_scopes": ["dashboard:read", "dashboard:query"]},
         "provenance": {"created_by_actor_type": "human", "created_by": "user-1", "source": "human"},
         "migration": {"state": "new_structured", "blockers": []},
     }
@@ -84,6 +84,7 @@ def _manifest_payload(query_id: str) -> dict:
 async def _seed_published_saved_query_dashboard(
     test_session: AsyncSession,
     query_id: str,
+    access_policy: dict | None = None,
 ) -> dict[str, UUID]:
     user_id = uuid4()
     tenant_id = uuid4()
@@ -117,7 +118,7 @@ async def _seed_published_saved_query_dashboard(
         actor_id=user_id,
         notebook_id=notebook_id,
         slug=f"exec-{query_id}",
-        manifest_payload=_manifest_payload(query_id),
+        manifest_payload=_manifest_payload(query_id, access_policy=access_policy),
     )
     published = await service.publish(
         session=test_session,
@@ -236,3 +237,71 @@ async def test_query_dashboard_blocks_pinned_snapshot_without_artifacts(test_ses
 
     assert exc.value.status_code == 409
     assert "pinned_snapshot" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_query_dashboard_blocks_unresolved_access_policy_refs_before_execution(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    query_id = str(uuid4())
+    ids = await _seed_published_saved_query_dashboard(
+        test_session,
+        query_id,
+        access_policy={
+            "required_scopes": ["dashboard:read", "dashboard:query"],
+            "row_policy_refs": ["tenant_rls"],
+            "column_policy_refs": ["finance_columns"],
+            "redaction_policy_refs": ["pii_redaction"],
+        },
+    )
+    executed = False
+
+    async def fake_execute_saved_query(*_args, **_kwargs):
+        nonlocal executed
+        executed = True
+        return {"success": True, "data": [{"revenue": 42}]}
+
+    monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
+
+    run = await DashboardService().query_dashboard(
+        session=test_session,
+        tenant_id=ids["tenant_id"],
+        asset_id=ids["asset_id"],
+        actor_id=str(ids["user_id"]),
+        actor_type="human",
+        filters={"region": "AMER"},
+        data_view_ids=["dv-saved-revenue"],
+        correlation_id="policy-guard",
+    )
+
+    assert executed is False
+    assert run["overall_freshness"] == "blocked"
+    assert run["warnings"] == ["Dashboard access policy refs are not resolved for this execution context"]
+    assert run["errors"] == [
+        {
+            "code": "policy_not_enforced",
+            "message": "Dashboard data view execution is blocked by unresolved access policy refs",
+            "retryable": False,
+            "policy_reason": "row_policy_refs=tenant_rls; column_policy_refs=finance_columns; redaction_policy_refs=pii_redaction",
+        }
+    ]
+    assert run["views"][0]["data_view_id"] == "dv-saved-revenue"
+    assert run["views"][0]["status"] == "permission_denied"
+    assert run["views"][0]["result"] is None
+    assert run["views"][0]["row_count"] == 0
+    assert run["views"][0]["error"]["code"] == "policy_not_enforced"
+
+    saved_run = await test_session.get(DashboardRun, UUID(run["run_id"]))
+    assert saved_run is not None
+    assert saved_run.overall_freshness == "blocked"
+    assert saved_run.errors_json == run["errors"]
+    audit_outcomes = (
+        await test_session.execute(
+            select(DashboardAuditEvent.outcome).where(
+                DashboardAuditEvent.asset_id == ids["asset_id"],
+                DashboardAuditEvent.action == "dashboard.query",
+            )
+        )
+    ).scalars().all()
+    assert "blocked" in audit_outcomes

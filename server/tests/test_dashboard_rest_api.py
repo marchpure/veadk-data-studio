@@ -85,6 +85,17 @@ def _manifest_payload(query_id: str | None = None, dashboard_id: str = "dash-res
     }
 
 
+def _manifest_with_policy_refs(query_id: str) -> dict:
+    manifest = _manifest_payload(query_id=query_id, dashboard_id="dash-rest-policy")
+    manifest["access_policy"] = {
+        "required_scopes": ["dashboard:read", "dashboard:query"],
+        "row_policy_refs": ["tenant_rls"],
+        "column_policy_refs": ["finance_columns"],
+        "redaction_policy_refs": ["pii_redaction"],
+    }
+    return manifest
+
+
 async def _seed_notebook(test_session) -> Notebook:
     tenant = (await test_session.execute(select(Tenant))).scalars().first()
     assert tenant is not None
@@ -422,3 +433,57 @@ async def test_dashboard_rest_query_matches_mcp_contract_for_same_principal(
     assert mcp_run["views"][0]["cached"] == rest_run["views"][0]["cached"] is True
     assert mcp_run["views"][0]["stale"] == rest_run["views"][0]["stale"] is False
     assert mcp_run["views"][0]["as_of"] == rest_run["views"][0]["as_of"] == "2026-08-16T12:34:56"
+
+
+async def test_dashboard_rest_query_blocks_unresolved_policy_refs_before_saved_query_execution(
+    test_client,
+    test_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    notebook = await _seed_notebook(test_session)
+    query_id = str(uuid4())
+    create_response = await test_client.post(
+        "/api/dashboard-assets",
+        json={
+            "slug": "rest-policy-guard-dashboard",
+            "notebook_id": str(notebook.id),
+            "manifest": _manifest_with_policy_refs(query_id),
+            "change_summary": "create policy guard dashboard",
+        },
+    )
+    assert create_response.status_code == 201
+    asset = create_response.json()["data"]
+    publish_response = await test_client.post(
+        f"/api/dashboard-assets/{asset['id']}/publish",
+        json={"base_etag": asset["etag"], "change_summary": "publish policy guard dashboard"},
+    )
+    assert publish_response.status_code == 200
+
+    executed = False
+
+    async def fake_execute_saved_query(*_args, **_kwargs):
+        nonlocal executed
+        executed = True
+        return {"success": True, "data": [{"revenue": 42}]}
+
+    monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
+
+    query_response = await test_client.post(
+        f"/api/dashboard-assets/{asset['id']}/query",
+        json={"filters": {"region": "AMER"}, "data_view_ids": ["dv-saved-revenue"], "correlation_id": "policy-guard"},
+    )
+    assert query_response.status_code == 200
+    run = query_response.json()["data"]
+    assert executed is False
+    assert run["overall_freshness"] == "blocked"
+    assert run["views"][0]["status"] == "permission_denied"
+    assert run["views"][0]["result"] is None
+    assert run["views"][0]["error"]["code"] == "policy_not_enforced"
+    assert run["views"][0]["error"]["policy_reason"] == (
+        "row_policy_refs=tenant_rls; column_policy_refs=finance_columns; redaction_policy_refs=pii_redaction"
+    )
+    assert run["warnings"] == ["Dashboard access policy refs are not resolved for this execution context"]
+
+    saved_run = await test_session.get(DashboardRun, run["run_id"])
+    assert saved_run is not None
+    assert saved_run.overall_freshness == "blocked"
