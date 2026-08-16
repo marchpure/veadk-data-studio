@@ -41,7 +41,8 @@ Evolve `dashboards` rows as version records without dropping existing columns:
 
 - Keep `notebook_id`, `version_num`, `html_content`, existing share/export references, and existing URLs.
 - Add `asset_id`, `manifest_schema_version`, `manifest_json`, `content_hash`, `status`, actor/change metadata, pinned semantic/source refs, validation result, renderer version, and migration state.
-- Draft changes use allowlisted JSON Patch plus `If-Match`/`base_etag`; stale edits return structured `409`.
+- Draft changes use the controlled `PATCH /api/dashboard-assets/{id}/draft` entry point with allowlisted JSON Patch plus `If-Match`/`base_etag`; stale edits return structured `409`.
+- The canonical Human/Agent edit payload is `json_patch`. Compatibility full-`manifest` submissions are accepted only when the top-level changed-key set is within the same allowlist: `title`, `description`, `audience`, `semantic_bindings`, `data_views`, `filters`, `layout`, `tiles`, `actions`, `freshness_policy`, `access_policy`, and `migration`. Any full manifest update that changes `schema_version`, `dashboard_id`, `provenance`, or another non-allowlisted top-level key returns `403`.
 - Publish validates a draft and creates an immutable published version. Published versions never drift when model/source data changes.
 - Reload creates a new draft and semantic diff; it never mutates the published version.
 
@@ -101,6 +102,9 @@ REST routes will be implemented under `/api/dashboard-assets` and call one `Dash
 - `GET /api/dashboard-assets/{id}`
 - `GET /api/dashboard-assets/{id}/versions/{version}`
 - `PATCH /api/dashboard-assets/{id}/draft`
+  - Controlled draft mutation entry point for Human UI and Agent/MCP parity.
+  - Preferred payload: `json_patch` operations using `base_etag`.
+  - Compatibility payload: full `manifest`, constrained by the same top-level allowlist as JSON Patch.
 - `POST /api/dashboard-assets/{id}/validate`
 - `POST /api/dashboard-assets/{id}/preview`
 - `POST /api/dashboard-assets/{id}/publish`
