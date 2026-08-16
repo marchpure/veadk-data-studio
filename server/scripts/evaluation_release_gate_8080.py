@@ -66,6 +66,51 @@ async def _login(client: httpx.AsyncClient, email: str, password: str) -> Auth:
     return Auth(token=token, tenant_id=tenant["tenant_id"], user_id=_jwt_claims(token)["sub"])
 
 
+async def _claim_release_gate_run(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    *,
+    expected_run_id: str,
+    worker_id: str,
+    max_claims: int = 10,
+) -> dict[str, Any]:
+    for _attempt in range(max_claims):
+        claim = _data(
+            (
+                await _request(
+                    client,
+                    "POST",
+                    "/api/evaluation/runs/claim",
+                    "claim evaluation run",
+                    headers=headers,
+                    json={"worker_id": worker_id, "lease_seconds": 60},
+                )
+            ).json(),
+            "claim evaluation run",
+        )
+        claimed_run_id = claim.get("id")
+        if claimed_run_id == expected_run_id:
+            return claim
+        if not claimed_run_id:
+            raise AssertionError(f"release gate run {expected_run_id} was not claimable")
+        await _request(
+            client,
+            "POST",
+            f"/api/evaluation/runs/{claimed_run_id}/stop",
+            "stop stale evaluation run",
+            headers=headers,
+        )
+        await _request(
+            client,
+            "POST",
+            f"/api/evaluation/runs/{claimed_run_id}/heartbeat",
+            "cancel stale evaluation run",
+            headers=headers,
+            json={"worker_id": worker_id, "lease_seconds": 60},
+        )
+    raise AssertionError(f"release gate run {expected_run_id} was not claimed after {max_claims} attempts")
+
+
 def _target_snapshot(auth: Auth, run_id: str) -> dict[str, Any]:
     return {
         "contract_version": "evaluation.target_snapshot.v1",
@@ -185,18 +230,12 @@ async def run_gate() -> dict[str, Any]:
             ).json(),
             "create evaluation preflight",
         )
-        claim = _data(
-            (
-                await _request(
-                    client,
-                    "POST",
-                    "/api/evaluation/runs/claim",
-                    "claim evaluation run",
-                    headers=headers,
-                    json={"worker_id": f"evaluation-release-gate-{run_id}", "lease_seconds": 60},
-                )
-            ).json(),
-            "claim evaluation run",
+        worker_id = f"evaluation-release-gate-{run_id}"
+        claim = await _claim_release_gate_run(
+            client,
+            headers,
+            expected_run_id=run["id"],
+            worker_id=worker_id,
         )
         completed = _data(
             (
@@ -207,7 +246,7 @@ async def run_gate() -> dict[str, Any]:
                     "complete evaluation run",
                     headers=headers,
                     json={
-                        "worker_id": f"evaluation-release-gate-{run_id}",
+                        "worker_id": worker_id,
                         "case_results": [
                             {
                                 "case_key": f"{run_id}-pass",
