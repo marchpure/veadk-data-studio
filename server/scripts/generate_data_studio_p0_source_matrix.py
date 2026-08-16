@@ -349,6 +349,67 @@ def matrix_payload() -> dict[str, Any]:
     }
 
 
+def beta_to_ready_requirements() -> list[tuple[str, str]]:
+    return [
+        (
+            "local_file_csv",
+            "Real customer-scale CSV fixtures, large/resumable upload hardening, profiling evidence from non-trivial files, and manual projection review records.",
+        ),
+        (
+            "local_file_xlsx_xlsm",
+            "Workbook edge-case coverage for multi-sheet formulas/merged cells, real upload fixtures, profiling evidence, and reviewed projection records.",
+        ),
+        (
+            "local_file_pdf_docx_pptx",
+            "Verified semi-structured extraction provenance, OpenHuman-compatible runtime metadata, real document fixtures, and human review of extracted evidence quality.",
+        ),
+        (
+            "local_file_parquet_json_jsonl",
+            "Nested/semi-structured flattening policy, real Parquet/JSON/JSONL profiling evidence, customer-scale fixtures, and reviewed projection materialization.",
+        ),
+        (
+            "web_url",
+            "Crawler/page-group policy, public-site capture fixtures, richer table extraction evidence, retry/freshness review, and manual compliance review.",
+        ),
+        (
+            "feishu_doc_wiki",
+            "Live tenant OAuth credentials, real Feishu Docs/Wiki E2E evidence, verified OpenHuman extraction adapter metadata, and manual evidence-quality review.",
+        ),
+        (
+            "feishu_sheet_base",
+            "Live tenant OAuth credentials, real Sheets/Base import E2E, projection review evidence, profiling evidence, and source-level permission regression coverage.",
+        ),
+        (
+            "volcengine_tos_bucket_prefix",
+            "Real TOS credentials, bucket/prefix incremental sync policy, prefix parser coverage, freshness evidence, and manual review of imported manifests.",
+        ),
+        (
+            "volcengine_tos_object_tabular",
+            "Real TOS credentials and objects, parser/profile evidence across supported tabular formats, projection review evidence, and S3-compatible vendor normalization.",
+        ),
+        (
+            "volcengine_tos_object_context",
+            "Real TOS credentials and context objects, verified extraction provenance, parser warnings/freshness evidence, and manual evidence-quality review.",
+        ),
+        (
+            "sql_pg_mysql_sqlite_oracle_mssql",
+            "Live-driver credentials for each dialect, real schema/profile E2E evidence, deeper dialect-specific profiling, and reviewed semantic draft quality.",
+        ),
+        (
+            "mongo",
+            "Reviewed tabular projection materialization, real Mongo credentials/data, profiling evidence for nested documents, and semantic draft handoff after review.",
+        ),
+        (
+            "dynamodb",
+            "Reviewed tabular projection materialization, real DynamoDB credentials/data, key/index profiling evidence, and semantic draft handoff after review.",
+        ),
+        (
+            "databricks",
+            "Live Databricks OAuth credentials, warehouse/catalog drill-down E2E evidence, profile freshness proof, and reviewed semantic draft quality.",
+        ),
+    ]
+
+
 def render_markdown() -> str:
     payload = matrix_payload()
     rows: list[MatrixRow] = payload["rows"]
@@ -373,28 +434,45 @@ def render_markdown() -> str:
         "|---:|---:|---:|---:|---:|",
         f"| {summary['ready']} | {summary['beta']} | {summary['planned']} | {summary['blocked']} | {len(rows)} |",
         "",
-        "## Modeling Mode Coverage",
+        "## Readiness Classification",
         "",
-        "| mode | current rows | coverage note |",
-        "|---|---|---|",
-        "| Structured Data Modeler | `sql_pg_mysql_sqlite_oracle_mssql`, `databricks` | Schema/profile, Source Understanding, semantic draft, publish/reload, and MCP metric preview exist for the listed beta rows. |",
-        "| Tabular Projection Modeler | local CSV/Excel/Parquet/JSON/JSONL, Feishu Sheets/Base, TOS tabular objects, MongoDB/DynamoDB document profiles | Projection manifests, raw snapshots, field/profile evidence, projected datasets, review status, Source Understanding handoff, semantic draft generation, and lineage exist for file/SaaS/object rows; NoSQL rows have source profile snapshots and require reviewed projection materialization. |",
-        "| Context & Policy Modeler | local PDF/DOCX/PPTX, Web URL, Feishu Docs/Wiki, TOS context objects | Context evidence and lineage exist; OpenHuman-compatible extraction adapter provenance is not yet verified in runtime metadata. |",
-        "| Blocked projection/modeling | none | Current matrix has no blocked rows; beta rows still list hardening gaps individually. |",
+        f"- Final acceptance status: `PARTIAL`. The matrix has `{summary['ready']}` ready rows, `{summary['beta']}` beta rows, `{summary['planned']}` planned rows, and `{summary['blocked']}` blocked rows; zero ready rows means the P0 source catalog is not ready-complete.",
+        "- 8080 deployment status: `8080_PARTIAL`. Restored strict E2E evidence exists on isolated local port `18096`; the current `8080` listener was not killed or occupied during correction, so this run does not prove the restored gate against `8080`.",
+        "- OpenHuman runtime adapter status remains `UNVERIFIED`; do not promote context extraction rows to ready until verified adapter provenance is persisted at runtime.",
         "",
-        "## OpenHuman Provenance",
+        "## Beta To Ready Promotion Checklist",
         "",
-        "- Fetched `OpenHuman Memory Source 抽取链路说明` from Lark document `BJr1dJ2n7ocNuJxPEtacjfiOnEd`, revision `4`, using `lark-cli docs +fetch --as user` on 2026-08-16.",
-        "- Confirmed reference chain: source reader -> canonicalize -> raw document/archive -> chunk -> score/extract -> entity/relation extraction -> tree/summary.",
-        "- Confirmed Composio/OAuth and workspace source are separate scheduling/dedup chains.",
-        "- Fetched `OpenHuman 同类型竞品分析` from Lark document `KfMPd4ibMougsFxG1SJcsCbRnRg`, revision `5`; it states OpenHuman's open-source license as GPL-3.0.",
-        "- Runtime adapter status: `UNVERIFIED`. This repo does not yet persist `algorithm_name`, `algorithm_version`, `config_digest`, `source_revision`, `confidence`, `evidence_locator`, `provenance`, and `warnings` from a verified OpenHuman implementation for semi-structured extraction.",
-        "",
-        "## Matrix",
-        "",
-        "| source_type | provider / adapter | availability | auth / config contract | browse / select / import contract | snapshot / raw artifact | parser / profile contract | modeling mode | fixture | API journey | UI journey | lineage / evidence | retry / revoke | final status | blocker reason |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| beta source_type | missing before ready |",
+        "|---|---|",
     ]
+    for source_type, requirement in beta_to_ready_requirements():
+        lines.append(f"| `{_cell(source_type)}` | {_cell(requirement)} |")
+    lines.extend(
+        [
+            "",
+            "## Modeling Mode Coverage",
+            "",
+            "| mode | current rows | coverage note |",
+            "|---|---|---|",
+            "| Structured Data Modeler | `sql_pg_mysql_sqlite_oracle_mssql`, `databricks` | Schema/profile, Source Understanding, semantic draft, publish/reload, and MCP metric preview exist for the listed beta rows. |",
+            "| Tabular Projection Modeler | local CSV/Excel/Parquet/JSON/JSONL, Feishu Sheets/Base, TOS tabular objects, MongoDB/DynamoDB document profiles | Projection manifests, raw snapshots, field/profile evidence, projected datasets, review status, Source Understanding handoff, semantic draft generation, and lineage exist for file/SaaS/object rows; NoSQL rows have source profile snapshots and require reviewed projection materialization. |",
+            "| Context & Policy Modeler | local PDF/DOCX/PPTX, Web URL, Feishu Docs/Wiki, TOS context objects | Context evidence and lineage exist; OpenHuman-compatible extraction adapter provenance is not yet verified in runtime metadata. |",
+            "| Blocked projection/modeling | none | Current matrix has no blocked rows; beta rows still list hardening gaps individually. |",
+            "",
+            "## OpenHuman Provenance",
+            "",
+            "- Fetched `OpenHuman Memory Source 抽取链路说明` from Lark document `BJr1dJ2n7ocNuJxPEtacjfiOnEd`, revision `4`, using `lark-cli docs +fetch --as user` on 2026-08-16.",
+            "- Confirmed reference chain: source reader -> canonicalize -> raw document/archive -> chunk -> score/extract -> entity/relation extraction -> tree/summary.",
+            "- Confirmed Composio/OAuth and workspace source are separate scheduling/dedup chains.",
+            "- Fetched `OpenHuman 同类型竞品分析` from Lark document `KfMPd4ibMougsFxG1SJcsCbRnRg`, revision `5`; it states OpenHuman's open-source license as GPL-3.0.",
+            "- Runtime adapter status: `UNVERIFIED`. This repo does not yet persist `algorithm_name`, `algorithm_version`, `config_digest`, `source_revision`, `confidence`, `evidence_locator`, `provenance`, and `warnings` from a verified OpenHuman implementation for semi-structured extraction.",
+            "",
+            "## Matrix",
+            "",
+            "| source_type | provider / adapter | availability | auth / config contract | browse / select / import contract | snapshot / raw artifact | parser / profile contract | modeling mode | fixture | API journey | UI journey | lineage / evidence | retry / revoke | final status | blocker reason |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
     for row in rows:
         lines.append(
             "| "
