@@ -26,17 +26,17 @@ whole-product READY claim is made here.
 | Field | Evidence |
 |---|---|
 | BASE_SHA | `e9358ea56554cc0ecdf93b723359eee711cb13b1` |
-| Verification HEAD | Branch tip; verify with `git ls-remote --heads veadk-data-studio verification/data-studio-commercial-p0`. |
+| Verification HEAD | `7ddb9b759c5a43bf1ce5833e093ab42bfa2efa70` |
 | Verification branch | `verification/data-studio-commercial-p0` |
-| Exact remote branch | `veadk-data-studio/verification/data-studio-commercial-p0` points at this verification branch tip. |
+| Exact remote branch | `veadk-data-studio/verification/data-studio-commercial-p0` points at `7ddb9b759c5a43bf1ce5833e093ab42bfa2efa70`. |
 | Stale wrong-baseline backup | Old remote tip `9c2a2d9cfb1280569df927ded583bfec7c7a591c` preserved as `veadk-data-studio/backup/verification-data-studio-commercial-p0-86fbace-remote`. |
-| Auxiliary safe branch | `veadk-data-studio/verification/data-studio-commercial-p0-e9358ea` also points at this verification branch tip. |
+| Auxiliary safe branch | `veadk-data-studio/verification/data-studio-commercial-p0-e9358ea` also points at `7ddb9b759c5a43bf1ce5833e093ab42bfa2efa70`. |
 | Worktree | `/Users/bytedance/worktrees/byaan-commercial-verification-p0` |
 | Backend port | `18123` |
 | Frontend port | `15179` |
 | 8080 policy | Not stopped, restarted, probed, or occupied by this verifier. |
 | Image revision | Not set; `COMMERCIAL_P0_IMAGE` was not provided. |
-| Clean status | `true` in all collected `result.json` files. |
+| Clean status | Runtime collector recorded `true` in all collected `result.json` files; final post-push `git status --short --branch` was clean and tracking `veadk-data-studio/verification/data-studio-commercial-p0`. |
 
 ## Migration Evidence
 
@@ -45,8 +45,8 @@ whole-product READY claim is made here.
 | Fresh SQLite | `/Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-sqlite-fresh/result.json`; DB at `runtime/sqlite/app.db`; backend/frontend logs under `logs/`. | `PARTIAL`: startup and all API probes passed; browser route matrix has known failures. |
 | Existing SQLite | `/Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-sqlite-existing/result.json`; reused fresh SQLite DB path. | `PARTIAL`: idempotent startup and all API probes passed; same browser route failures as fresh SQLite. |
 | PostgreSQL | `/Users/bytedance/.codex/data-studio-commercial-p0-evidence/20260817Tcommercial-postgres/result.json`; container `byaan-commercial-p0-postgres`; volume `byaan-commercial-p0-postgres-data`; port `15432`. | `PARTIAL`: startup and all API probes passed; dashboard browser route also hit a React error with seeded legacy assets. |
-| Single Alembic head | `uv run pytest server/tests/test_migration_chain_hardening.py server/tests/test_dashboard_persistence_migration.py server/tests/test_sharing_persistence_migration.py server/tests/test_evaluation_persistence_migration.py -q` | Passed: `12 passed`, covering migration chain hardening and dashboard/sharing/evaluation persistence registration plus SQLite upgrade/downgrade SQL contracts. |
-| Upgrade / downgrade | Same focused migration command; runtime startup also exercised upgrade path on isolated SQLite and PostgreSQL DBs. | Passed for focused migration contracts; PostgreSQL downgrade was not separately run as a live DB downgrade. |
+| Single Alembic head | `uv run pytest server/tests/test_migration_chain_hardening.py server/tests/test_dashboard_persistence_migration.py server/tests/test_sharing_persistence_migration.py server/tests/test_evaluation_persistence_migration.py -q`; `APP_MODE=self-hosted DATABASE_URL=postgresql+asyncpg://...@127.0.0.1:15432/byaan_commercial_p0 uv run alembic -c alembic.ini heads/current` from `server/`. | Passed: `12 passed`; live PostgreSQL reported the single head `add_canonical_sharing_model (head)`. |
+| Upgrade / downgrade | Same focused migration command; runtime startup also exercised upgrade path on isolated SQLite and PostgreSQL DBs; live PostgreSQL one-step command `uv run alembic -c alembic.ini downgrade -1 && uv run alembic -c alembic.ini current && uv run alembic -c alembic.ini upgrade head && uv run alembic -c alembic.ini current`. | Passed: downgrade moved `add_canonical_sharing_model -> add_evaluation_authoritative_model`, then upgrade returned to `add_canonical_sharing_model (head)`. Full historical PostgreSQL downgrade to base was not attempted. |
 | Persistent Docker volume | `docker volume inspect byaan-commercial-p0-postgres-data` returned mountpoint `/var/lib/docker/volumes/byaan-commercial-p0-postgres-data/_data`. | Proven for dedicated volume creation/persistence during run. |
 
 ## Connector Evidence Matrix
@@ -229,6 +229,10 @@ async def main() -> None:
 
 asyncio.run(main())
 PY
+APP_MODE=self-hosted DATABASE_URL='postgresql+asyncpg://byaan:byaan_commercial_p0@127.0.0.1:15432/byaan_commercial_p0' uv run alembic -c alembic.ini heads
+APP_MODE=self-hosted DATABASE_URL='postgresql+asyncpg://byaan:byaan_commercial_p0@127.0.0.1:15432/byaan_commercial_p0' uv run alembic -c alembic.ini current
+APP_MODE=self-hosted DATABASE_URL='postgresql+asyncpg://byaan:byaan_commercial_p0@127.0.0.1:15432/byaan_commercial_p0' uv run alembic -c alembic.ini downgrade -1
+APP_MODE=self-hosted DATABASE_URL='postgresql+asyncpg://byaan:byaan_commercial_p0@127.0.0.1:15432/byaan_commercial_p0' uv run alembic -c alembic.ini upgrade head
 node --check scripts/commercial_p0_verification.mjs
 bash -n scripts/commercial_p0_verification.sh
 git diff --check
