@@ -338,6 +338,85 @@ async def test_dashboard_asset_rest_lifecycle_query_state_lineage_and_audit(
     assert "dashboard.export" in audit_actions
 
 
+async def test_dashboard_full_manifest_patch_rejects_non_allowlisted_top_level_change(
+    test_client,
+    test_session,
+) -> None:
+    notebook = await _seed_notebook(test_session)
+    manifest = _manifest_payload()
+    create_response = await test_client.post(
+        "/api/dashboard-assets",
+        json={
+            "slug": "rest-governed-dashboard-full-manifest-guard",
+            "notebook_id": str(notebook.id),
+            "manifest": manifest,
+            "change_summary": "create guard fixture",
+        },
+    )
+    assert create_response.status_code == 201
+    asset = create_response.json()["data"]
+
+    blocked_manifest = deepcopy(manifest)
+    blocked_manifest["dashboard_id"] = "blocked-dashboard-id-rewrite"
+    patch_response = await test_client.patch(
+        f"/api/dashboard-assets/{asset['id']}/draft",
+        json={
+            "base_etag": asset["etag"],
+            "manifest": blocked_manifest,
+            "change_summary": "attempt non-allowlisted full manifest change",
+        },
+    )
+
+    assert patch_response.status_code == 403
+    data = patch_response.json()["data"]
+    assert data["code"] == "dashboard_manifest_patch_forbidden"
+    assert data["blocked_keys"] == ["dashboard_id"]
+
+
+async def test_dashboard_json_patch_returns_structured_etag_conflict(
+    test_client,
+    test_session,
+) -> None:
+    notebook = await _seed_notebook(test_session)
+    manifest = _manifest_payload()
+    create_response = await test_client.post(
+        "/api/dashboard-assets",
+        json={
+            "slug": "rest-governed-dashboard-json-patch-conflict",
+            "notebook_id": str(notebook.id),
+            "manifest": manifest,
+            "change_summary": "create conflict fixture",
+        },
+    )
+    assert create_response.status_code == 201
+    asset = create_response.json()["data"]
+
+    first_patch = await test_client.patch(
+        f"/api/dashboard-assets/{asset['id']}/draft",
+        json={
+            "base_etag": asset["etag"],
+            "json_patch": [{"op": "replace", "path": "/title", "value": "Conflict fixture updated"}],
+            "change_summary": "first patch",
+        },
+    )
+    assert first_patch.status_code == 200
+
+    stale_patch = await test_client.patch(
+        f"/api/dashboard-assets/{asset['id']}/draft",
+        json={
+            "base_etag": asset["etag"],
+            "json_patch": [{"op": "replace", "path": "/description", "value": "stale description"}],
+            "change_summary": "stale patch",
+        },
+    )
+
+    assert stale_patch.status_code == 409
+    data = stale_patch.json()["data"]
+    assert data["code"] == "etag_conflict"
+    assert data["current_etag"].startswith("sha256:")
+    assert data["current_etag"] != asset["etag"]
+
+
 async def test_dashboard_asset_rest_enforces_tenant_and_notebook_boundaries(test_client, test_session) -> None:
     missing_notebook_response = await test_client.post(
         "/api/dashboard-assets",

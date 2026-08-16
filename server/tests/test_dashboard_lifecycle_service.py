@@ -149,6 +149,37 @@ async def test_patch_draft_rejects_stale_etag(test_session: AsyncSession) -> Non
 
 
 @pytest.mark.asyncio
+async def test_patch_draft_rejects_full_manifest_non_allowlisted_top_level_change(test_session: AsyncSession) -> None:
+    ids = await _seed_owner_notebook(test_session)
+    service = DashboardService()
+    asset = await service.create_asset_draft(
+        session=test_session,
+        tenant_id=ids["tenant_id"],
+        actor_id=ids["user_id"],
+        notebook_id=ids["notebook_id"],
+        slug="revenue-full-manifest-guard",
+        manifest_payload=_manifest_payload("dash-full-manifest-guard"),
+    )
+    blocked_manifest = deepcopy(_manifest_payload("dash-full-manifest-guard"))
+    blocked_manifest["dashboard_id"] = "dash-full-manifest-rewrite"
+
+    with pytest.raises(HTTPException) as exc:
+        await service.patch_draft(
+            session=test_session,
+            tenant_id=ids["tenant_id"],
+            asset_id=asset.id,
+            actor_id=ids["user_id"],
+            base_etag=asset.etag,
+            manifest_payload=blocked_manifest,
+            change_summary="blocked manifest rewrite",
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail["code"] == "dashboard_manifest_patch_forbidden"
+    assert exc.value.detail["blocked_keys"] == ["dashboard_id"]
+
+
+@pytest.mark.asyncio
 async def test_patch_draft_creates_new_version_and_publish_freezes_it(test_session: AsyncSession) -> None:
     ids = await _seed_owner_notebook(test_session)
     service = DashboardService()

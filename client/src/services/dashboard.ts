@@ -18,6 +18,18 @@ interface StandardResponse<T> {
   data: T
 }
 
+export class DashboardApiError extends Error {
+  status: number
+  data: unknown
+
+  constructor(message: string, status: number, data: unknown) {
+    super(message)
+    this.name = 'DashboardApiError'
+    this.status = status
+    this.data = data
+  }
+}
+
 async function getDashboardApiUrl(): Promise<string> {
   const runtimeBase = getApiBaseUrl()
   if (runtimeBase && runtimeBase !== '/api') {
@@ -56,10 +68,10 @@ async function dashboardFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     const message = payload?.message || payload?.detail || response.statusText || 'Dashboard request failed'
-    throw new Error(message)
+    throw new DashboardApiError(String(message), response.status, payload?.data ?? payload?.detail ?? payload)
   }
   if (payload?.success === false) {
-    throw new Error(payload.message || 'Dashboard request failed')
+    throw new DashboardApiError(payload.message || 'Dashboard request failed', response.status, payload.data ?? payload)
   }
   return (payload?.data ?? payload) as T
 }

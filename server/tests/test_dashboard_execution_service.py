@@ -335,6 +335,49 @@ async def test_query_dashboard_executes_manifest_bound_saved_query(
 
 
 @pytest.mark.asyncio
+async def test_query_dashboard_marks_saved_query_view_stale_from_view_freshness_policy(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    query_id = str(uuid4())
+    payload = _manifest_payload(query_id)
+    payload["data_views"][0]["freshness_policy"] = {
+        "mode": "live",
+        "max_age_seconds": 1,
+        "allow_stale": True,
+        "require_as_of": True,
+    }
+    ids = await _seed_published_dashboard(test_session, payload, slug_suffix=f"stale-{query_id}")
+
+    async def fake_execute_saved_query(session, query_id_arg, filters=None, viewer_user_id=None):
+        return {
+            "success": True,
+            "data": [{"revenue": 42}],
+            "query_name": "Revenue query",
+            "query_id": query_id_arg,
+            "cached": True,
+            "stale": False,
+            "as_of": "2020-01-01T00:00:00",
+        }
+
+    monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
+
+    run = await DashboardService().query_dashboard(
+        session=test_session,
+        tenant_id=ids["tenant_id"],
+        asset_id=ids["asset_id"],
+        actor_id=str(ids["user_id"]),
+        actor_type="human",
+        data_view_ids=["dv-saved-revenue"],
+    )
+
+    assert run["overall_freshness"] == "stale"
+    assert run["views"][0]["status"] == "stale"
+    assert run["views"][0]["stale"] is True
+    assert run["views"][0]["as_of"] == "2020-01-01T00:00:00"
+
+
+@pytest.mark.asyncio
 async def test_query_dashboard_executes_manifest_bound_semantic_metric(
     test_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,

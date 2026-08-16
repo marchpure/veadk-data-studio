@@ -32,7 +32,174 @@ async function api(path, options = {}) {
   return payload?.data ?? payload
 }
 
-function manifest({ dashboardId, queryId, title, policyRefs = false, migrationState = 'new_structured' }) {
+async function uploadCsvDataset(headers, notebookId) {
+  const form = new FormData()
+  const csv = [
+    'region,revenue,failure_reason',
+    'AMER,4200,none',
+    'EMEA,2700,none',
+  ].join('\n')
+  form.append('files', new Blob([csv], { type: 'text/csv' }), 'dashboard_browser_fixture.csv')
+  form.append('notebook_id', notebookId)
+  form.append('name', `Dashboard Browser Dataset ${Date.now()}`)
+  form.append('file_type', 'csv')
+  const response = await fetch(`${apiURL}/api/datasets/upload-files`, {
+    method: 'POST',
+    headers,
+    body: form,
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(`Dataset upload failed ${response.status}: ${JSON.stringify(payload)}`)
+  }
+  return payload?.data ?? payload
+}
+
+async function createSavedQuery(headers, notebookId, datasetId, name, query) {
+  const response = await fetch(`${apiURL}/api/execute-query`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...headers,
+    },
+    body: JSON.stringify({
+      query,
+      connection_id: datasetId,
+      notebook_id: notebookId,
+      db_type: 'duckdb',
+      name,
+    }),
+  })
+  const result = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(`Saved query creation failed ${response.status}: ${JSON.stringify(result)}`)
+  }
+  if (!result?.query_id) {
+    throw new Error(`Saved query was not created: ${JSON.stringify(result)}`)
+  }
+  return String(result.query_id)
+}
+
+function savedQueryView({ id, queryId, question, fields, stale = false, failing = false }) {
+  return {
+    id,
+    kind: 'saved_query',
+    question,
+    output_schema: fields,
+    filter_fields: ['region'],
+    sensitivity: 'internal',
+    freshness_policy: stale
+      ? { mode: 'live', max_age_seconds: 0, allow_stale: true, require_as_of: true }
+      : { mode: 'live', max_age_seconds: 3600, allow_stale: true, require_as_of: true },
+    saved_query: {
+      query_id: queryId,
+      compatibility_reason: failing ? 'browser acceptance partial failure fixture' : 'browser acceptance fixture',
+      filter_contract: {},
+      lineage: [
+        {
+          id: `${id}-lineage`,
+          kind: 'saved_query',
+          name: failing ? 'Failure query' : 'Revenue query',
+          ref: queryId,
+        },
+      ],
+    },
+    evidence: [
+      {
+        id: `${id}-evidence`,
+        kind: stale ? 'cache_snapshot' : 'source_understanding',
+        title: stale ? 'Stale cache snapshot' : 'Reviewed source profile',
+        locator: { path: stale ? 'browser-fixture-stale-cache' : 'browser-fixture' },
+        confidence: 0.9,
+      },
+    ],
+  }
+}
+
+function manifest({
+  dashboardId,
+  queryId,
+  title,
+  policyRefs = false,
+  migrationState = 'new_structured',
+  blockers = [],
+  staleQueryId,
+  failureQueryId,
+  tileTitle = 'Revenue',
+}) {
+  const dataViews = [
+    savedQueryView({
+      id: 'dv-revenue',
+      queryId,
+      question: 'What revenue did the governed query return?',
+      fields: [
+        { name: 'revenue', data_type: 'number', unit: 'USD', sensitivity: 'internal' },
+        { name: 'region', data_type: 'string', sensitivity: 'internal' },
+      ],
+    }),
+  ]
+  const tiles = [
+    {
+      id: 'tile-revenue',
+      title: tileTitle,
+      tile_type: 'kpi',
+      business_question: 'What is revenue?',
+      data_view_id: 'dv-revenue',
+      encoding: { value: 'revenue', label: 'region' },
+      accessible_fallback: { summary: 'Revenue KPI', table_fields: ['revenue', 'region'] },
+    },
+    {
+      id: 'tile-table',
+      title: 'Revenue Table',
+      tile_type: 'table',
+      business_question: 'Which rows support revenue?',
+      data_view_id: 'dv-revenue',
+      accessible_fallback: { summary: 'Revenue table', table_fields: ['revenue', 'region'] },
+    },
+  ]
+  let layout = { sections: [{ id: 'main', title: 'Revenue Overview', tile_ids: ['tile-revenue', 'tile-table'] }] }
+
+  if (staleQueryId && failureQueryId) {
+    dataViews.push(
+      savedQueryView({
+        id: 'dv-stale-revenue',
+        queryId: staleQueryId,
+        question: 'Which revenue snapshot is stale?',
+        fields: [
+          { name: 'revenue', data_type: 'number', unit: 'USD', sensitivity: 'internal' },
+          { name: 'region', data_type: 'string', sensitivity: 'internal' },
+        ],
+        stale: true,
+      }),
+      savedQueryView({
+        id: 'dv-partial-failure',
+        queryId: failureQueryId,
+        question: 'Which dashboard data view partially failed?',
+        fields: [{ name: 'failure_reason', data_type: 'string', sensitivity: 'internal' }],
+        failing: true,
+      }),
+    )
+    tiles.push(
+      {
+        id: 'tile-stale',
+        title: 'Stale Revenue Cache',
+        tile_type: 'kpi',
+        business_question: 'Which cached value is stale?',
+        data_view_id: 'dv-stale-revenue',
+        accessible_fallback: { summary: 'Stale cached revenue KPI', table_fields: ['revenue', 'region'] },
+      },
+      {
+        id: 'tile-partial',
+        title: 'Partial Failure View',
+        tile_type: 'status',
+        business_question: 'Which data view failed while the dashboard partially rendered?',
+        data_view_id: 'dv-partial-failure',
+        accessible_fallback: { summary: 'Partial failure status', table_fields: ['failure_reason'] },
+      },
+    )
+    layout = { sections: [{ id: 'main', title: 'Stale And Partial States', tile_ids: ['tile-stale', 'tile-partial'] }] }
+  }
+
   return {
     schema_version: 'dashboard.manifest.v1',
     dashboard_id: dashboardId,
@@ -49,41 +216,7 @@ function manifest({ dashboardId, queryId, title, policyRefs = false, migrationSt
         allowed_dimensions: ['region'],
       },
     ],
-    data_views: [
-      {
-        id: 'dv-revenue',
-        kind: 'saved_query',
-        question: 'What revenue did the governed query return?',
-        output_schema: [
-          { name: 'revenue', data_type: 'number', unit: 'USD', sensitivity: 'internal' },
-          { name: 'region', data_type: 'string', sensitivity: 'internal' },
-        ],
-        filter_fields: ['region'],
-        sensitivity: 'internal',
-        saved_query: {
-          query_id: queryId,
-          compatibility_reason: 'browser acceptance fixture',
-          filter_contract: {},
-          lineage: [
-            {
-              id: 'query-lineage',
-              kind: 'saved_query',
-              name: 'Revenue query',
-              ref: queryId,
-            },
-          ],
-        },
-        evidence: [
-          {
-            id: 'evidence-1',
-            kind: 'source_understanding',
-            title: 'Reviewed source profile',
-            locator: { path: 'browser-fixture' },
-            confidence: 0.9,
-          },
-        ],
-      },
-    ],
+    data_views: dataViews,
     filters: [
       {
         id: 'region',
@@ -92,29 +225,13 @@ function manifest({ dashboardId, queryId, title, policyRefs = false, migrationSt
         field: 'region',
         filter_type: 'enum',
         operators: ['eq'],
-        affected_data_view_ids: ['dv-revenue'],
+        affected_data_view_ids: dataViews.map(view => view.id),
         domain: ['AMER', 'EMEA'],
+        default_value: 'AMER',
       },
     ],
-    layout: { sections: [{ id: 'main', title: 'Revenue Overview', tile_ids: ['tile-revenue', 'tile-table'] }] },
-    tiles: [
-      {
-        id: 'tile-revenue',
-        title: 'Revenue',
-        tile_type: 'kpi',
-        business_question: 'What is revenue?',
-        data_view_id: 'dv-revenue',
-        accessible_fallback: { summary: 'Revenue KPI', table_fields: ['revenue', 'region'] },
-      },
-      {
-        id: 'tile-table',
-        title: 'Revenue Table',
-        tile_type: 'table',
-        business_question: 'Which rows support revenue?',
-        data_view_id: 'dv-revenue',
-        accessible_fallback: { summary: 'Revenue table', table_fields: ['revenue', 'region'] },
-      },
-    ],
+    layout,
+    tiles,
     actions: [
       { id: 'export', label: 'Export', action_type: 'export', required_scope: 'dashboard:export' },
     ],
@@ -128,8 +245,31 @@ function manifest({ dashboardId, queryId, title, policyRefs = false, migrationSt
         }
       : { required_scopes: ['dashboard:read', 'dashboard:query'] },
     provenance: { created_by_actor_type: 'human', created_by: 'browser-smoke', source: 'human' },
-    migration: { state: migrationState, blockers: [] },
+    migration: { state: migrationState, blockers },
   }
+}
+
+async function createDashboard(headers, notebookId, slugPrefix, manifestPayload, publish = true) {
+  const draftAsset = await api('/api/dashboard-assets', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      slug: stableSlug(slugPrefix),
+      notebook_id: notebookId,
+      manifest: manifestPayload,
+      tags: ['browser'],
+      change_summary: `browser fixture ${slugPrefix}`,
+    }),
+  })
+  let publishedVersion = null
+  if (publish) {
+    publishedVersion = await api(`/api/dashboard-assets/${draftAsset.id}/publish`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ base_etag: draftAsset.etag, change_summary: `browser fixture publish ${slugPrefix}` }),
+    })
+  }
+  return { asset: draftAsset, publishedVersion }
 }
 
 async function seedDashboardFixtures() {
@@ -147,75 +287,125 @@ async function seedDashboardFixtures() {
       description: 'Browser acceptance fixture notebook',
     }),
   })
-  const queryId = crypto.randomUUID()
 
-  const draftAsset = await api('/api/dashboard-assets', {
-    method: 'POST',
+  const dataset = await uploadCsvDataset(headers, notebook.id)
+  const queryId = await createSavedQuery(
     headers,
-    body: JSON.stringify({
-      slug: stableSlug('dashboard-browser-structured'),
-      notebook_id: notebook.id,
-      manifest: manifest({
-        dashboardId: 'browser-structured',
-        queryId,
-        title: 'Browser Structured Revenue',
-      }),
-      tags: ['browser'],
-      change_summary: 'browser fixture structured draft',
-    }),
-  })
-  const publishedVersion = await api(`/api/dashboard-assets/${draftAsset.id}/publish`, {
-    method: 'POST',
+    notebook.id,
+    dataset.dataset_id,
+    'Browser revenue query',
+    'SELECT region, revenue FROM dashboard_browser_fixture ORDER BY region',
+  )
+  const secondQueryId = await createSavedQuery(
     headers,
-    body: JSON.stringify({ base_etag: draftAsset.etag, change_summary: 'browser fixture publish' }),
-  })
+    notebook.id,
+    dataset.dataset_id,
+    'Browser margin query',
+    'SELECT region, revenue AS margin FROM dashboard_browser_fixture ORDER BY region',
+  )
+  const staleQueryId = await createSavedQuery(
+    headers,
+    notebook.id,
+    dataset.dataset_id,
+    'Browser stale revenue query',
+    'SELECT region, revenue FROM dashboard_browser_fixture WHERE region = \'AMER\'',
+  )
+  const failureQueryId = crypto.randomUUID()
+  const editQueryId = queryId
 
-  const policyAsset = await api('/api/dashboard-assets', {
-    method: 'POST',
+  const structured = await createDashboard(
     headers,
-    body: JSON.stringify({
-      slug: stableSlug('dashboard-browser-policy'),
-      notebook_id: notebook.id,
-      manifest: manifest({
-        dashboardId: 'browser-policy',
-        queryId,
-        title: 'Browser Policy Guard',
-        policyRefs: true,
-      }),
-      tags: ['browser'],
-      change_summary: 'browser fixture policy guard',
+    notebook.id,
+    'dashboard-browser-structured',
+    manifest({
+      dashboardId: 'browser-structured',
+      queryId,
+      title: 'Browser Structured Revenue',
     }),
-  })
-  await api(`/api/dashboard-assets/${policyAsset.id}/publish`, {
-    method: 'POST',
+  )
+  const secondary = await createDashboard(
     headers,
-    body: JSON.stringify({ base_etag: policyAsset.etag, change_summary: 'browser fixture policy publish' }),
-  })
+    notebook.id,
+    'dashboard-browser-secondary',
+    manifest({
+      dashboardId: 'browser-secondary',
+      queryId: secondQueryId,
+      title: 'Browser Secondary Margin',
+      tileTitle: 'Margin',
+    }),
+  )
+  const policy = await createDashboard(
+    headers,
+    notebook.id,
+    'dashboard-browser-policy',
+    manifest({
+      dashboardId: 'browser-policy',
+      queryId,
+      title: 'Browser Policy Guard',
+      policyRefs: true,
+    }),
+  )
+  const stalePartial = await createDashboard(
+    headers,
+    notebook.id,
+    'dashboard-browser-stale-partial',
+    manifest({
+      dashboardId: 'browser-stale-partial',
+      queryId,
+      staleQueryId,
+      failureQueryId,
+      title: 'Browser Stale Partial',
+    }),
+  )
+  const edit = await createDashboard(
+    headers,
+    notebook.id,
+    'dashboard-browser-edit-review',
+    manifest({
+      dashboardId: 'browser-edit-review',
+      queryId: editQueryId,
+      title: 'Browser Edit Review',
+      migrationState: 'legacy_unstructured',
+      blockers: ['browser smoke publish blocker'],
+    }),
+    false,
+  )
+  const legacy = await createDashboard(
+    headers,
+    notebook.id,
+    'dashboard-browser-legacy',
+    manifest({
+      dashboardId: 'browser-legacy',
+      queryId,
+      title: 'Browser Legacy Review',
+      migrationState: 'legacy_unstructured',
+    }),
+    false,
+  )
 
-  const legacyAsset = await api('/api/dashboard-assets', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      slug: stableSlug('dashboard-browser-legacy'),
-      notebook_id: notebook.id,
-      manifest: manifest({
-        dashboardId: 'browser-legacy',
-        queryId,
-        title: 'Browser Legacy Review',
-        migrationState: 'legacy_unstructured',
-      }),
-      tags: ['browser'],
-      change_summary: 'browser fixture legacy fallback',
-    }),
-  })
+  const structuredDetail = await api(`/api/dashboard-assets/${structured.asset.id}`, { headers })
+  const policyDetail = await api(`/api/dashboard-assets/${policy.asset.id}`, { headers })
+  const staleDetail = await api(`/api/dashboard-assets/${stalePartial.asset.id}`, { headers })
 
   return {
     tenantId: bootstrap.tenant_id,
-    notebookId: notebook.id,
-    structuredAssetId: draftAsset.id,
-    structuredVersionNum: publishedVersion.version_num,
-    policyAssetId: policyAsset.id,
-    legacyAssetId: legacyAsset.id,
+    headers,
+    structuredSlug: structured.asset.slug,
+    secondarySlug: secondary.asset.slug,
+    structuredAssetId: structured.asset.id,
+    structuredVersionNum: structured.publishedVersion.version_num,
+    secondaryAssetId: secondary.asset.id,
+    policyAssetId: policy.asset.id,
+    stalePartialAssetId: stalePartial.asset.id,
+    editAssetId: edit.asset.id,
+    editEtag: edit.asset.etag,
+    legacyAssetId: legacy.asset.id,
+    stalePartialVersionNum: stalePartial.publishedVersion.version_num,
+    publishedEtags: {
+      structured: structuredDetail.etag,
+      policy: policyDetail.etag,
+      stalePartial: staleDetail.etag,
+    },
   }
 }
 
@@ -261,10 +451,24 @@ async function assertNoHorizontalOverflow(page) {
   }
 }
 
+async function hideDevtoolToggles(page) {
+  await page.evaluate(() => {
+    for (const element of Array.from(document.querySelectorAll('button, [role="button"]'))) {
+      const label = element.getAttribute('aria-label') || element.textContent || ''
+      if (/tanstack query devtools/i.test(label)) {
+        element.setAttribute('data-dashboard-smoke-hidden', 'true')
+        element.setAttribute('style', `${element.getAttribute('style') || ''}; display: none !important;`)
+      }
+    }
+  })
+}
+
 async function assertNoOverlaps(page) {
+  await hideDevtoolToggles(page)
   const overlaps = await page.evaluate(() => {
+    const root = document.querySelector('[data-dashboard-workspace="true"]') || document.querySelector('main') || document.body
     const selectors = ['button', 'input', 'select', 'a', '[role="tab"]']
-    const elements = selectors.flatMap(selector => Array.from(document.querySelectorAll(selector)))
+    const elements = selectors.flatMap(selector => Array.from(root.querySelectorAll(selector)))
     const boxes = elements
       .map((element, index) => {
         const rect = element.getBoundingClientRect()
@@ -291,41 +495,196 @@ async function assertNoOverlaps(page) {
   }
 }
 
+async function assertSceneLayout(page) {
+  await assertNoHorizontalOverflow(page)
+  await assertNoOverlaps(page)
+}
+
+async function capture(page, scene, viewport) {
+  await assertSceneLayout(page)
+  await page.screenshot({ path: `${screenDir}/dashboard-${scene}-${viewport}.png`, fullPage: true })
+}
+
+async function runInventoryScene(page, fixtures, viewport) {
+  await page.goto(`${baseURL}/dashboard-assets`, { waitUntil: 'networkidle' })
+  await page.getByRole('heading', { name: 'Dashboards' }).waitFor()
+  const inventoryTable = page.getByRole('table')
+  await inventoryTable.getByText(fixtures.structuredSlug).waitFor()
+  await inventoryTable.getByText(fixtures.secondarySlug).waitFor()
+  await inventoryTable.getByRole('columnheader', { name: 'Owner' }).waitFor()
+  await inventoryTable.getByRole('columnheader', { name: 'Published / Draft Version' }).waitFor()
+  await inventoryTable.getByRole('columnheader', { name: 'Model / Version' }).waitFor()
+  await inventoryTable.getByRole('columnheader', { name: 'Freshness' }).waitFor()
+  await inventoryTable.getByRole('columnheader', { name: 'Readiness / Warnings' }).waitFor()
+  await inventoryTable.getByRole('columnheader', { name: 'Last Update' }).waitFor()
+  await inventoryTable.getByText(/Published/i).first().waitFor()
+  await inventoryTable.getByText(/Draft/i).first().waitFor()
+  await inventoryTable.getByText(/published|draft|legacy_unstructured/i).first().waitFor()
+  if (viewport === '1440') {
+    const search = page.getByLabel('Search Dashboards').first()
+    await search.fill('Secondary')
+    await inventoryTable.getByText(fixtures.secondarySlug).waitFor()
+    await inventoryTable.getByText(fixtures.structuredSlug).waitFor({ state: 'detached' })
+    await search.fill('')
+    await inventoryTable.getByText(fixtures.structuredSlug).waitFor()
+  } else {
+    await page.goto(`${baseURL}/dashboard-assets/${fixtures.structuredAssetId}`, { waitUntil: 'networkidle' })
+    await page.getByRole('heading', { name: /Browser Structured Revenue/i }).waitFor()
+  }
+  await capture(page, 'inventory', viewport)
+}
+
+async function runViewScene(page, fixtures, viewport) {
+  await page.goto(`${baseURL}/dashboard-assets/${fixtures.structuredAssetId}`, { waitUntil: 'networkidle' })
+  await page.getByRole('heading', { name: /Browser Structured Revenue/i }).waitFor()
+  await page.getByText('Filter Digest').waitFor()
+  await page.getByText(/as of|No rows returned|No run timestamp/i).first().waitFor()
+  await capture(page, 'view', viewport)
+
+  if (viewport === '1440') {
+    await page.getByRole('button', { name: /Data/i }).click()
+    await page.getByRole('heading', { name: 'dv-revenue' }).waitFor()
+    await capture(page, 'data', viewport)
+
+    await page.getByRole('button', { name: /Lineage/i }).click()
+    await page.getByText('Reviewed source profile').waitFor()
+    await capture(page, 'lineage', viewport)
+  }
+}
+
+async function runPermissionScene(page, fixtures, viewport) {
+  await page.goto(`${baseURL}/dashboard-assets/${fixtures.policyAssetId}`, { waitUntil: 'networkidle' })
+  await page.getByText('Dashboard data view execution is blocked by unresolved access policy refs').first().waitFor()
+  await page.getByText(/permission_denied|blocked/i).first().waitFor()
+  await capture(page, 'permission-denied', viewport)
+}
+
+async function runLegacyScene(page, fixtures, viewport) {
+  await page.goto(`${baseURL}/dashboard-assets/${fixtures.legacyAssetId}`, { waitUntil: 'networkidle' })
+  await page.getByText('Legacy HTML fallback').waitFor()
+  await page.getByText('not agent-ready').waitFor()
+  await capture(page, 'legacy', viewport)
+}
+
+async function runStalePartialScene(page, fixtures, viewport) {
+  await page.goto(`${baseURL}/dashboard-assets/${fixtures.stalePartialAssetId}`, { waitUntil: 'networkidle' })
+  await page.getByRole('heading', { name: /Browser Stale Partial/i }).waitFor()
+  await page.locator('h3:visible', { hasText: 'Stale Revenue Cache' }).first().waitFor()
+  await page.locator('h3:visible', { hasText: 'Partial Failure View' }).first().waitFor()
+  await page.getByText('Stale data', { exact: true }).first().waitFor()
+  await page.getByText(/as of/i).first().waitFor()
+  await page.getByText('Partial failure', { exact: true }).waitFor()
+  await page.getByText(/Dashboard data view execution failed|No run timestamp/i).first().waitFor()
+  await capture(page, 'stale-partial', viewport)
+}
+
+async function runEditReviewScene(page, fixtures, viewport) {
+  await page.goto(`${baseURL}/dashboard-assets/${fixtures.editAssetId}`, { waitUntil: 'networkidle' })
+  await page.getByRole('heading', { name: /Browser Edit Review/i }).waitFor()
+  await page.getByText(/1 blockers/i).waitFor()
+  await page.getByRole('button', { name: 'Publish' }).waitFor()
+  if (await page.getByRole('button', { name: 'Publish' }).isEnabled()) {
+    throw new Error('Publish must be disabled while a draft has unresolved blockers')
+  }
+  await page.getByLabel('Draft title').fill('Browser Edit Review Patched')
+  await page.getByRole('button', { name: 'Patch Title' }).click()
+  await page.getByText('Draft title updated').waitFor()
+  await page.getByRole('heading', { name: /Browser Edit Review Patched/i }).waitFor()
+  await page.getByRole('heading', { name: 'Manifest editor' }).waitFor()
+
+  if (viewport === '1440' && !fixtures.editConflictExercised) {
+    fixtures.editConflictExercised = true
+    const latestEditAsset = await api(`/api/dashboard-assets/${fixtures.editAssetId}`, { headers: fixtures.headers })
+    const parallelDraft = await api(`/api/dashboard-assets/${fixtures.editAssetId}/draft`, {
+      method: 'PATCH',
+      headers: fixtures.headers,
+      body: JSON.stringify({
+        base_etag: latestEditAsset.etag,
+        json_patch: [{ op: 'replace', path: '/description', value: 'Parallel browser conflict update' }],
+        change_summary: 'parallel browser conflict fixture',
+      }),
+    })
+    const conflictedEditAsset = await api(`/api/dashboard-assets/${fixtures.editAssetId}`, { headers: fixtures.headers })
+    await page.evaluate(currentEtag => {
+      const realFetch = window.fetch.bind(window)
+      let returnedConflict = false
+      window.fetch = async (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input)
+        const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
+        if (!returnedConflict && method === 'PATCH' && url.includes('/api/dashboard-assets/') && url.endsWith('/draft')) {
+          returnedConflict = true
+          return new Response(JSON.stringify({
+            success: false,
+            message: 'etag_conflict',
+            data: { code: 'etag_conflict', current_etag: currentEtag },
+          }), {
+            status: 409,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return realFetch(input, init)
+      }
+    }, conflictedEditAsset.etag ?? parallelDraft.etag ?? latestEditAsset.etag)
+    await page.getByLabel('Tile title').fill(`Edited Revenue ${viewport}`)
+    await page.getByLabel('Tile business question').fill(`What edited revenue does viewport ${viewport} show?`)
+    await page.getByLabel('Tile encoding JSON').fill(JSON.stringify({ value: 'revenue', label: 'region', comparison: `viewport-${viewport}` }, null, 2))
+    await page.getByRole('button', { name: 'Save Tile' }).click()
+    await page.getByText('Draft conflict (409)').waitFor()
+    await page.getByText('Current ETag').waitFor()
+    await page.getByRole('button', { name: 'Retry Patch' }).click()
+    await page.getByText('Tile inspector saved').waitFor()
+  } else {
+    await page.getByLabel('Tile title').fill(`Edited Revenue ${viewport}`)
+    await page.getByLabel('Tile business question').fill(`What edited revenue does viewport ${viewport} show?`)
+    await page.getByLabel('Tile encoding JSON').fill(JSON.stringify({ value: 'revenue', label: 'region', comparison: `viewport-${viewport}` }, null, 2))
+    await page.getByRole('button', { name: 'Save Tile' }).click()
+    await page.getByText('Tile inspector saved').waitFor()
+  }
+
+  await page.getByRole('button', { name: `Select tile Edited Revenue ${viewport}` }).waitFor()
+  await page.locator('button').filter({ hasText: `What edited revenue does viewport ${viewport} show?` }).first().waitFor()
+  await page.getByLabel(`Move Edited Revenue ${viewport} down`).click()
+  await page.getByText('Tile order updated').waitFor()
+  await page.getByLabel(`Move Edited Revenue ${viewport} up`).click()
+  await page.getByText('Tile order updated').waitFor()
+  await page.getByRole('button', { name: /Region/ }).click()
+  await page.getByLabel('Filter label').fill(`Region ${viewport}`)
+  await page.getByLabel('Filter operator').selectOption('in')
+  await page.getByLabel('Filter default value').fill('EMEA')
+  await page.getByRole('button', { name: 'Save Filter' }).click()
+  await page.getByText('Filter inspector saved').waitFor()
+  await page.getByRole('button', { name: 'Filter', exact: true }).click()
+  await page.getByText('Filter added').waitFor()
+  await page.getByLabel('Filter label').fill(`Added Filter ${viewport}`)
+  await page.getByRole('button', { name: 'Save Filter' }).click()
+  await page.getByText('Filter inspector saved').waitFor()
+  await page.getByRole('button', { name: 'Remove Filter' }).click()
+  await page.getByText('Filter removed').waitFor()
+  await page.getByRole('button', { name: 'Validate' }).click()
+  await page.getByText(/1 blockers/i).waitFor()
+  await page.getByRole('button', { name: 'Preview' }).click()
+  await page.getByText('Preview executed against draft version').waitFor()
+  await page.getByText(/Review diff/i).waitFor()
+  await capture(page, 'edit-review', viewport)
+}
+
 async function runDashboardJourney(fixtures) {
   const desktop = await makePage({ width: 1440, height: 900 }, fixtures.tenantId)
-  await desktop.goto(`${baseURL}/notebook/${fixtures.notebookId}/preview`, { waitUntil: 'networkidle' })
-  await desktop.getByTitle('Close preview (Esc)').waitFor()
-  await desktop.getByRole('button', { name: /Code/i }).click()
-  await desktop.getByText('Dashboard HTML').waitFor()
-  await desktop.screenshot({ path: `${screenDir}/notebook-preview-route-1440.png`, fullPage: true })
-
-  await desktop.goto(`${baseURL}/dashboard-assets/${fixtures.structuredAssetId}`, { waitUntil: 'networkidle' })
-  await desktop.getByRole('heading', { name: /Browser Structured Revenue/i }).waitFor()
-  await desktop.getByRole('button', { name: /Data/i }).click()
-  await desktop.getByRole('heading', { name: 'dv-revenue' }).waitFor()
-  await assertNoHorizontalOverflow(desktop)
-  await assertNoOverlaps(desktop)
-  await desktop.screenshot({ path: `${screenDir}/dashboard-data-1440.png`, fullPage: true })
-
-  await desktop.getByRole('button', { name: /Lineage/i }).click()
-  await desktop.getByText('Reviewed source profile').waitFor()
-  await desktop.screenshot({ path: `${screenDir}/dashboard-lineage-1440.png`, fullPage: true })
-
-  await desktop.goto(`${baseURL}/dashboard-assets/${fixtures.policyAssetId}`, { waitUntil: 'networkidle' })
-  await desktop.getByText('Dashboard data view execution is blocked by unresolved access policy refs').first().waitFor()
-  await desktop.screenshot({ path: `${screenDir}/dashboard-permission-denied-1440.png`, fullPage: true })
-
-  await desktop.goto(`${baseURL}/dashboard-assets/${fixtures.legacyAssetId}`, { waitUntil: 'networkidle' })
-  await desktop.getByText('Legacy HTML fallback').waitFor()
-  await desktop.getByText('not agent-ready').waitFor()
-  await desktop.screenshot({ path: `${screenDir}/dashboard-legacy-1440.png`, fullPage: true })
+  await runInventoryScene(desktop, fixtures, '1440')
+  await runViewScene(desktop, fixtures, '1440')
+  await runEditReviewScene(desktop, fixtures, '1440')
+  await runStalePartialScene(desktop, fixtures, '1440')
+  await runPermissionScene(desktop, fixtures, '1440')
+  await runLegacyScene(desktop, fixtures, '1440')
   await desktop.close()
 
   const mobile = await makePage({ width: 390, height: 844 }, fixtures.tenantId)
-  await mobile.goto(`${baseURL}/dashboard-assets/${fixtures.structuredAssetId}`, { waitUntil: 'networkidle' })
-  await mobile.getByRole('heading', { name: /Browser Structured Revenue/i }).waitFor()
-  await assertNoHorizontalOverflow(mobile)
-  await mobile.screenshot({ path: `${screenDir}/dashboard-mobile-390.png`, fullPage: true })
+  await runInventoryScene(mobile, fixtures, '390')
+  await runViewScene(mobile, fixtures, '390')
+  await runEditReviewScene(mobile, fixtures, '390')
+  await runStalePartialScene(mobile, fixtures, '390')
+  await runPermissionScene(mobile, fixtures, '390')
+  await runLegacyScene(mobile, fixtures, '390')
   await mobile.close()
 }
 
