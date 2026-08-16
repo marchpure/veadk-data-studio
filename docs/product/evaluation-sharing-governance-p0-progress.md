@@ -62,3 +62,19 @@ Environment note:
 - First-time `uv run alembic heads` in the new worktree stalled during dependency setup. Current Python gates used the already-installed Data Studio `.venv` interpreter against this integration worktree via `PYTHONPATH=..:tests`. A dedicated integration `.venv` still needs repair before broader full-suite runs.
 
 Current status: `DASHBOARD_MERGED_INTEGRATION_GATES_FOCUSED_PASS`.
+
+## 2026-08-16 13:37 CST - Migration And Security Gate Evidence
+
+Migration evidence:
+
+- `alembic heads` -> `backfill_legacy_dashboard_assets (head)`.
+- Fresh SQLite `alembic upgrade head` -> `backfill_legacy_dashboard_assets (head)`.
+- Existing SQLite path `upgrade add_file_source_resource_type -> upgrade head -> downgrade add_governed_dashboard_assets -> upgrade head` -> `backfill_legacy_dashboard_assets (head)`.
+- Existing SQLite evidence DB retained at `/var/folders/y5/s7wzkl8d44q4z4lj2ljg4lrc0000gn/T/byaan-integration-existing-XXXXXX.TyIhjNqGoD/existing.db`.
+- Fresh SQLite evidence DB retained at `/var/folders/y5/s7wzkl8d44q4z4lj2ljg4lrc0000gn/T/byaan-integration-fresh-XXXXXX.cChPhthAjn/fresh.db`.
+
+Security/compatibility evidence:
+
+- `tests/test_dashboard_security_regressions.py tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py tests/test_source_connectors_api.py::test_feishu_admin_config_status_is_admin_only_and_never_returns_secret tests/test_source_connectors_api.py::test_source_connection_encrypts_credentials_and_redacts_secret` -> `15 passed, 37 warnings`.
+
+Current status: `THREE_LAYER_INTEGRATION_GATE_FOCUSED_PASS`.
