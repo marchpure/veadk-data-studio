@@ -114,9 +114,9 @@ Keep `evidence_fragments.locator_json` but enforce a JSON schema at write bounda
 - common: `source_connection_id`, `source_resource_id`, `source_snapshot_id`, `content_hash`, `parser_version`, `captured_at`
 - web: `final_url`, optional `selector`, `text_range`
 - Feishu Doc/Wiki: `document_token`, optional `wiki_token`, `block_id`, `heading_path`
-- Feishu Sheet: `spreadsheet_token`, `sheet_id`, `range` / `cell_range`
-- Feishu Base: `app_token`, `table_id`, optional `view_id`, `record_id`, `field_id`
-- TOS: `bucket`, `key`, optional `version_id`, `etag`, `last_modified`
+- Feishu Sheet: `spreadsheet_ref`, `sheet_id`, `range` / `cell_range`
+- Feishu Base: `app_ref`, `table_id`, optional `view_id`, `record_id`, `field_id`
+- TOS: `bucket_ref`, `key_ref`, optional `version_id`, `etag`, `last_modified`
 - PDF: `page`, optional `bbox`, parser identifier
 
 Migration path:

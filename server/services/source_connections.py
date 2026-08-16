@@ -16,12 +16,12 @@ from server.services.source_connectors import (
     ConnectorError,
     FeishuAdminConfigService,
     FeishuConnectorAdapter,
-    FeishuOAuthStateStore,
     ResourceListInput,
     SourceConnectorAdapter,
     get_connector_adapter,
     redact_credentials,
 )
+from server.services.source_redaction import redact_sensitive_text
 
 
 class SourceConnectionService:
@@ -46,7 +46,14 @@ class SourceConnectionService:
         capabilities = dict(payload.capabilities)
         external_account_id = payload.external_account_id
         if payload.test_connection:
-            test_result = await adapter.test_connection(payload.credentials)
+            try:
+                test_result = await adapter.test_connection(payload.credentials)
+            except ConnectorError as exc:
+                raise ConnectorError(
+                    redact_sensitive_text(str(exc)) or "Source connection authorization failed",
+                    code=exc.code,
+                    permanent=exc.permanent,
+                ) from exc
             capabilities["test_connection"] = {"status": "passed", **test_result}
             external_account_id = external_account_id or test_result.get("account_id") or test_result.get("external_account_id")
         encrypted = await CryptoService.encrypt_config(payload.credentials, session)
@@ -160,31 +167,24 @@ class SourceConnectionService:
             select(SourceResource.external_id).where(
                 SourceResource.tenant_id == tenant_id,
                 SourceResource.source_connection_id == connection.id,
-                SourceResource.status != "failed",
             )
         )
         already_added = frozenset(str(item) for item in existing_result.scalars().all() if item)
         adapter = adapter or get_connector_adapter(connection.provider)
-        try:
-            result = await adapter.list_resources(
-                session=session,
-                input=ResourceListInput(
-                    tenant_id=tenant_id,
-                    connection=connection,
-                    scope=scope,
-                    parent_token=parent_token,
-                    resource_type=resource_type,
-                    query=query,
-                    page_token=page_token,
-                    page_size=page_size,
-                    already_added_external_ids=already_added,
-                ),
-            )
-        except ConnectorError as error:
-            if connection.provider == "feishu" and error.code == "reauthorization_required":
-                connection.status = "reauthorization_required"
-                await session.commit()
-            raise
+        result = await adapter.list_resources(
+            session=session,
+            input=ResourceListInput(
+                tenant_id=tenant_id,
+                connection=connection,
+                scope=scope,
+                parent_token=parent_token,
+                resource_type=resource_type,
+                query=query,
+                page_token=page_token,
+                page_size=page_size,
+                already_added_external_ids=already_added,
+            ),
+        )
         return {
             "items": [item.to_payload() for item in result.items],
             "next_page_token": result.next_page_token,
@@ -216,7 +216,6 @@ class SourceConnectionService:
             select(SourceResource.external_id).where(
                 SourceResource.tenant_id == tenant_id,
                 SourceResource.source_connection_id == connection.id,
-                SourceResource.status != "failed",
             )
         )
         already_added = frozenset(str(item) for item in existing_result.scalars().all() if item)
@@ -237,35 +236,11 @@ class SourceConnectionService:
                 SourceConnection.provider == "feishu",
             )
         )
-        connection_status = connection.status if connection else None
-        if not admin.get("configured"):
-            product_status = "not_configured"
-        elif connection_status == "connected":
-            product_status = "connected"
-        elif connection_status == "reauthorization_required":
-            product_status = "needs_reauth"
-        elif admin.get("missing_scopes"):
-            product_status = "scope_missing"
-        else:
-            product_status = "ready_to_authorize"
         return {
             "admin_config": admin,
             "connection": self.connection_payload(connection) if connection else None,
             "configured": admin.get("configured", False),
             "connected": bool(connection and connection.status == "connected"),
-            "status": product_status,
-            "source_authorization": {
-                "status": product_status,
-                "purpose": "授权 Byaan 读取你选择的飞书文档、Wiki、表格和多维表格。",
-                "scopes": admin.get("required_scopes", []),
-                "revoke_action": "Disconnect Feishu source connection",
-            },
-            "collaboration_bot": {
-                "status": "separate_installation_required",
-                "purpose": "将 Byaan bot 加入指定测试群，用于协作消息和通知。",
-                "scopes": ["im:message", "im:chat"],
-                "revoke_action": "Disconnect Feishu collaboration installation",
-            },
         }
 
     async def feishu_oauth_start(self, *, session: AsyncSession, tenant_id: UUID, user_id: UUID) -> dict[str, str]:
@@ -275,27 +250,11 @@ class SourceConnectionService:
             tenant_id=tenant_id,
             user_id=user_id,
         )
-        return {
-            "authorization_url": authorization_url,
-            "state": state,
-            "result_url": f"/api/source-connections/feishu/oauth/result?state={state}",
-            "expires_in": 600,
-            "status": "authorizing",
-        }
+        return {"authorization_url": authorization_url, "state": state}
 
     async def feishu_oauth_callback(self, *, session: AsyncSession, code: str, state: str) -> SourceConnection:
         adapter = FeishuConnectorAdapter()
         return await adapter.complete_oauth_callback(session=session, code=code, state=state)
-
-    async def feishu_oauth_result(
-        self,
-        *,
-        session: AsyncSession,
-        tenant_id: UUID,
-        user_id: UUID,
-        state: str,
-    ) -> dict[str, Any] | None:
-        return await FeishuOAuthStateStore.result(session=session, tenant_id=tenant_id, user_id=user_id, state=state)
 
     def connection_payload(self, connection: SourceConnection | None) -> dict[str, Any] | None:
         if connection is None:

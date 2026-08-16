@@ -11,12 +11,9 @@ if TYPE_CHECKING:
     from agents import Agent
 
 from agents import RunConfig
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.auth.tenant_context import set_tenant_id
-from server.models.knowledge_resources import KnowledgeResource
-from server.models.notebook_assets import NotebookAsset
 from server.prompts.prompt_variants import detect_model_family
 from server.prompts.prompts import get_unified_agent_prompt_compact
 from server.repositories.connections import ConnectionRepository
@@ -91,77 +88,6 @@ HTML_EDIT_COMPLETE_TOOLS = {
 }
 
 HTML_CONTEXT_FETCH_TOOLS = {"get_existing_html"}
-
-
-async def _associate_request_datasource_with_notebook(
-    session: AsyncSession,
-    *,
-    datasource_id: str | UUID,
-    notebook_id: str | UUID,
-    tenant_id: UUID | None,
-    user_id: UUID | None,
-) -> None:
-    """Attach a selected datasource to a notebook.
-
-    The datasource picker now returns both legacy Dataset IDs and source_resource IDs.
-    Source resources are notebook knowledge assets, not Dataset rows. Treating them as
-    datasets aborts the SSE stream before any assistant text is sent.
-    """
-    datasource_id_str = str(datasource_id)
-
-    dataset = await DatasetService.get_dataset(session, datasource_id_str)
-    if dataset:
-        await DatasetService.associate_dataset_with_notebook(session, datasource_id_str, str(notebook_id))
-        return
-
-    if tenant_id is None:
-        logger.warning(
-            "Skipping non-dataset datasource %s for notebook %s because tenant context is missing",
-            datasource_id_str,
-            notebook_id,
-        )
-        return
-
-    knowledge_resource = await session.scalar(
-        select(KnowledgeResource)
-        .where(
-            KnowledgeResource.tenant_id == tenant_id,
-            KnowledgeResource.resource_id == datasource_id_str,
-            KnowledgeResource.parse_status == "parsed",
-            KnowledgeResource.index_status == "indexed",
-        )
-        .order_by(KnowledgeResource.created_at.desc())
-    )
-    if not knowledge_resource:
-        logger.warning(
-            "Skipping datasource %s for notebook %s: no dataset or indexed knowledge resource found",
-            datasource_id_str,
-            notebook_id,
-        )
-        return
-
-    existing_asset = await session.scalar(
-        select(NotebookAsset).where(
-            NotebookAsset.tenant_id == tenant_id,
-            NotebookAsset.notebook_id == notebook_id,
-            NotebookAsset.asset_type == "knowledge_resource",
-            NotebookAsset.asset_id == str(knowledge_resource.id),
-        )
-    )
-    if existing_asset:
-        return
-
-    session.add(
-        NotebookAsset(
-            tenant_id=tenant_id,
-            notebook_id=notebook_id,
-            asset_type="knowledge_resource",
-            asset_id=str(knowledge_resource.id),
-            added_by=user_id,
-            usage_policy_json={"purpose": "source_context", "allow_snapshot_reuse": True},
-        )
-    )
-    await session.commit()
 
 
 def _truncate_text(text: str | None, limit: int = 1500) -> str:
@@ -989,13 +915,7 @@ async def stream_handoff_agent_response(
                 if request.datasource_ids:
                     logger.info(f"Associating {len(request.datasource_ids)} datasources with notebook {notebook.id}")
                     for datasource_id in request.datasource_ids:
-                        await _associate_request_datasource_with_notebook(
-                            session,
-                            datasource_id=datasource_id,
-                            notebook_id=notebook.id,
-                            tenant_id=tenant_id,
-                            user_id=user_id,
-                        )
+                        await DatasetService.associate_dataset_with_notebook(session, datasource_id, notebook.id)
 
                 # Yield notebook_created event
                 notebook_event = json.dumps(

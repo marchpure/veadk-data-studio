@@ -1,8 +1,6 @@
 import { chromium } from 'playwright'
 import { mkdirSync } from 'node:fs'
 
-// Demo-only browser journey for the local mock fixture route. Production
-// acceptance must use data-modeling-production-e2e.mjs against a real backend.
 const baseURL = process.env.BASE_URL || 'http://127.0.0.1:5173'
 const screenDir = process.env.SCREEN_DIR || './tmp-data-modeling-screens'
 mkdirSync(screenDir, { recursive: true })

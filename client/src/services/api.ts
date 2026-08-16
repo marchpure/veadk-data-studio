@@ -164,30 +164,6 @@ function extractErrorMessage(errorData: any): string {
   return 'An unknown error occurred'
 }
 
-function extractErrorCode(errorData: any): string | undefined {
-  if (!errorData || typeof errorData !== 'object') return undefined
-  if (typeof errorData.code === 'string') return errorData.code
-  if (errorData.data && typeof errorData.data === 'object' && typeof errorData.data.code === 'string') {
-    return errorData.data.code
-  }
-  if (errorData.detail && typeof errorData.detail === 'object' && typeof errorData.detail.code === 'string') {
-    return errorData.detail.code
-  }
-  return undefined
-}
-
-export class ApiRequestError extends Error {
-  code?: string
-  status: number
-
-  constructor(message: string, status: number, code?: string) {
-    super(message)
-    this.name = 'ApiRequestError'
-    this.status = status
-    this.code = code
-  }
-}
-
 function normalizeDashboardFilterConfig(responseData: any): DashboardFilterConfigResponse {
   const extracted = extractData<any>(responseData)
   const rawFilters = Array.isArray(extracted?.filters) ? extracted.filters : []
@@ -648,52 +624,6 @@ export interface LLMConnectionListResponse {
   total?: number
 }
 
-export interface CollaborationInstallation {
-  id: string
-  platform: 'feishu' | 'slack' | string
-  external_tenant_id: string
-  external_tenant_name: string | null
-  app_id: string | null
-  connection_mode: 'websocket' | 'webhook' | string
-  default_llm_connection_id: string | null
-  bot_external_id: string | null
-  is_active: boolean
-  health_status: string
-  health_error: string | null
-  last_connected_at: string | null
-  last_event_at: string | null
-  created_at: string | null
-  updated_at: string | null
-}
-
-export interface FeishuDeliveryTarget {
-  id: string
-  target_type: string
-  chat_id: string
-  root_id?: string | null
-  display_name?: string | null
-  is_verified: boolean
-  confirm_non_production: boolean
-  chat_type?: string | null
-  created_at?: string | null
-  updated_at?: string | null
-}
-
-export interface FeishuChatItem {
-  chat_id: string
-  name: string
-  description?: string | null
-  chat_type: string
-  selected_target?: FeishuDeliveryTarget | null
-}
-
-export interface FeishuChatListResponse {
-  items: FeishuChatItem[]
-  selected_targets: FeishuDeliveryTarget[]
-  next_page_token?: string | null
-  has_more: boolean
-}
-
 export interface ProviderConfig {
   required_fields: string[]
   optional_fields: string[]
@@ -959,33 +889,11 @@ export interface SourceConnectionCreateRequest {
 
 export interface FeishuAdminConfigStatus {
   configured: boolean
-  mode?: 'hosted' | 'self_built' | 'not_configured' | string
-  status?: string
   app_id?: string | null
   redirect_uri?: string | null
-  generated_redirect_uri?: string | null
-  secret_configured?: boolean
-  can_configure_custom_app?: boolean
   scopes: string[]
   required_scopes: string[]
   missing_scopes: string[]
-}
-
-export interface FeishuAdminConfigValidation {
-  configured: boolean
-  mode?: string | null
-  secret_configured: boolean
-  redirect_uri: string
-  required_scopes: string[]
-  missing_scopes: string[]
-  checks: Record<string, {
-    ok: boolean
-    message: string
-    expected?: string
-    actual?: string
-    missing_scopes?: string[]
-  }>
-  app_id?: string | null
 }
 
 export interface FeishuStatus {
@@ -993,36 +901,11 @@ export interface FeishuStatus {
   connection?: SourceConnection | null
   configured: boolean
   connected: boolean
-  status: string
-  source_authorization?: {
-    status: string
-    purpose: string
-    scopes: string[]
-    revoke_action: string
-  }
-  collaboration_bot?: {
-    status: string
-    purpose: string
-    scopes: string[]
-    revoke_action: string
-  }
 }
 
 export interface FeishuOAuthStartResponse {
   authorization_url: string
   state: string
-  result_url: string
-  expires_in: number
-  status: string
-}
-
-export interface FeishuOAuthResult {
-  status: string
-  purpose: string
-  expires_at: string
-  connection_id?: string | null
-  result?: Record<string, any> | null
-  error?: { code: string; message: string } | null
 }
 
 export interface SourceResourcePickerItem {
@@ -1178,7 +1061,6 @@ export interface SemanticMetricQueryResponse {
   modelVersion: string
   status?: string
   result: any
-  error?: string
   freshness: string
   lineage: string[]
   policyDecision: string
@@ -1262,7 +1144,7 @@ function getCsrfToken(): string | undefined {
 async function doRefreshTokens(): Promise<boolean> {
   try {
     const apiUrl = await getApiBaseUrl()
-    const refreshToken = getRefreshToken()
+    const refreshToken = isTauriApp() ? getRefreshToken() : undefined
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
 
@@ -1289,7 +1171,7 @@ async function doRefreshTokens(): Promise<boolean> {
     const json = await response.json()
     const data = json.data || json
     setAccessToken(data.access_token)
-    if (data.refresh_token) {
+    if (isTauriApp() && data.refresh_token) {
       setRefreshToken(data.refresh_token)
     }
     return true
@@ -2286,25 +2168,6 @@ export class ApiService {
     }
   }
 
-  static async updateSemanticModel(modelSlug: string, payload: Record<string, any>): Promise<any> {
-    try {
-      const response = await apiFetch(`${API_BASE_URL}/data-models/${modelSlug}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
-      }
-      const responseData = await response.json()
-      return extractData<any>(responseData)
-    } catch (error) {
-      console.error(`Error updating semantic model ${modelSlug}:`, error)
-      throw error
-    }
-  }
-
   static async validateSemanticModel(modelSlug: string): Promise<any> {
     try {
       const response = await apiFetch(`${API_BASE_URL}/data-models/${modelSlug}/validate`, {
@@ -2785,62 +2648,6 @@ export class ApiService {
     }
   }
 
-  static async getFeishuAdminConfig(): Promise<FeishuAdminConfigStatus> {
-    try {
-      const response = await apiFetch(`${API_BASE_URL}/source-connections/feishu/admin-config`)
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
-      }
-      const responseData = await response.json()
-      return extractData<FeishuAdminConfigStatus>(responseData)
-    } catch (error) {
-      console.error('Error getting Feishu admin config:', error)
-      throw error
-    }
-  }
-
-  static async saveFeishuAdminConfig(data: {
-    app_id: string
-    app_secret: string
-    redirect_uri: string
-    scopes: string[]
-  }): Promise<FeishuAdminConfigStatus> {
-    try {
-      const response = await apiFetch(`${API_BASE_URL}/source-connections/feishu/admin-config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
-      }
-      const responseData = await response.json()
-      return extractData<FeishuAdminConfigStatus>(responseData)
-    } catch (error) {
-      console.error('Error saving Feishu admin config:', error)
-      throw error
-    }
-  }
-
-  static async validateFeishuAdminConfig(): Promise<FeishuAdminConfigValidation> {
-    try {
-      const response = await apiFetch(`${API_BASE_URL}/source-connections/feishu/admin-config/validate`, {
-        method: 'POST',
-      })
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
-      }
-      const responseData = await response.json()
-      return extractData<FeishuAdminConfigValidation>(responseData)
-    } catch (error) {
-      console.error('Error validating Feishu admin config:', error)
-      throw error
-    }
-  }
-
   static async startFeishuOAuth(): Promise<FeishuOAuthStartResponse> {
     try {
       const response = await apiFetch(`${API_BASE_URL}/source-connections/feishu/oauth/start`, {
@@ -2854,21 +2661,6 @@ export class ApiService {
       return extractData<FeishuOAuthStartResponse>(responseData)
     } catch (error) {
       console.error('Error starting Feishu OAuth:', error)
-      throw error
-    }
-  }
-
-  static async getFeishuOAuthResult(state: string): Promise<FeishuOAuthResult> {
-    try {
-      const response = await apiFetch(`${API_BASE_URL}/source-connections/feishu/oauth/result?state=${encodeURIComponent(state)}`)
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
-      }
-      const responseData = await response.json()
-      return extractData<FeishuOAuthResult>(responseData)
-    } catch (error) {
-      console.error('Error polling Feishu OAuth result:', error)
       throw error
     }
   }
@@ -2896,11 +2688,7 @@ export class ApiService {
       const response = await apiFetch(`${API_BASE_URL}/source-connections/${connectionId}/resources${query ? `?${query}` : ''}`)
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
-        throw new ApiRequestError(
-          extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`,
-          response.status,
-          extractErrorCode(errorData),
-        )
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
       }
       const responseData = await response.json()
       return extractData<SourceResourcePickerResponse>(responseData)
@@ -6093,142 +5881,6 @@ export class ApiService {
     }
     const json = await response.json()
     return { success: true, message: json.message || 'Test message sent successfully' }
-  }
-
-  // ============================================
-  // Collaboration / Feishu Integration
-  // ============================================
-
-  static async getFeishuInstallation(): Promise<CollaborationInstallation | null> {
-    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/feishu`)
-    if (!response.ok) {
-      if (response.status === 404) return null
-      const errorData = await response.json()
-      throw new Error(extractErrorMessage(errorData) || 'Failed to fetch Feishu installation')
-    }
-    const json = await response.json()
-    return json.data
-  }
-
-  static async connectFeishuInstallation(data: {
-    app_id: string
-    app_secret: string
-    connection_mode: 'websocket' | 'webhook'
-    default_llm_connection_id?: string | null
-  }): Promise<CollaborationInstallation> {
-    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/feishu`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(extractErrorMessage(errorData) || 'Failed to configure Feishu')
-    }
-    const json = await response.json()
-    return json.data
-  }
-
-  static async listFeishuChats(id: string, params?: { page_token?: string | null; page_size?: number }): Promise<FeishuChatListResponse> {
-    const search = new URLSearchParams()
-    if (params?.page_token) search.set('page_token', params.page_token)
-    if (params?.page_size) search.set('page_size', String(params.page_size))
-    const suffix = search.toString() ? `?${search.toString()}` : ''
-    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/feishu/chats${suffix}`)
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(extractErrorMessage(errorData) || 'Failed to fetch Feishu chats')
-    }
-    const json = await response.json()
-    return json.data
-  }
-
-  static async selectFeishuChat(id: string, data: {
-    chat_id: string
-    name?: string | null
-    chat_type?: string
-    root_id?: string | null
-    confirm_non_production: boolean
-  }): Promise<FeishuDeliveryTarget> {
-    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/feishu/chats`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(extractErrorMessage(errorData) || 'Failed to select Feishu chat')
-    }
-    const json = await response.json()
-    return json.data
-  }
-
-  static async probeCollaborationInstallation(id: string): Promise<any> {
-    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/probe`, { method: 'POST' })
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(extractErrorMessage(errorData) || 'Failed to probe Feishu')
-    }
-    const json = await response.json()
-    return json.data
-  }
-
-  static async startCollaborationInstallation(id: string): Promise<any> {
-    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/connect`, { method: 'POST' })
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(extractErrorMessage(errorData) || 'Failed to start Feishu WebSocket')
-    }
-    const json = await response.json()
-    return json.data
-  }
-
-  static async stopCollaborationInstallation(id: string): Promise<any> {
-    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/disconnect`, { method: 'POST' })
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(extractErrorMessage(errorData) || 'Failed to stop Feishu WebSocket')
-    }
-    const json = await response.json()
-    return json.data
-  }
-
-  static async getCollaborationInstallationHealth(id: string): Promise<any> {
-    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/health`)
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(extractErrorMessage(errorData) || 'Failed to fetch collaboration health')
-    }
-    const json = await response.json()
-    return json.data
-  }
-
-  static async disconnectCollaborationInstallation(id: string): Promise<void> {
-    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}`, { method: 'DELETE' })
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(extractErrorMessage(errorData) || 'Failed to disconnect integration')
-    }
-  }
-
-  static async testFeishuMessage(id: string, data: {
-    target_id?: string | null
-    chat_id?: string | null
-    text: string
-    root_id?: string | null
-    confirm_non_production: boolean
-  }): Promise<any> {
-    const response = await apiFetch(`${API_BASE_URL}/collaboration/installations/${id}/test-message`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(extractErrorMessage(errorData) || 'Failed to send Feishu test message')
-    }
-    const json = await response.json()
-    return json.data
   }
 
   // ============================================

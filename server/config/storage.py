@@ -30,9 +30,7 @@ def get_persistent_data_path() -> Path:
         return Path.home() / ".local" / "share" / app_name
 
 
-if os.getenv("DATA_DIR"):
-    DEFAULT_DATA_DIR = Path(os.path.expandvars(os.path.expanduser(os.environ["DATA_DIR"]))).resolve()
-elif getattr(sys, "frozen", False) and platform.system() in ["Darwin", "Windows", "Linux"]:
+if getattr(sys, "frozen", False) and platform.system() in ["Darwin", "Windows", "Linux"]:
     DEFAULT_DATA_DIR = get_persistent_data_path()
 else:
     DEFAULT_DATA_DIR = BASE_DIR / ".data"

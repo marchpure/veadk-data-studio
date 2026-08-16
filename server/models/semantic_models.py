@@ -36,7 +36,6 @@ class SemanticModel(Base):
     datasource_kind: Mapped[str] = mapped_column(String(64), nullable=False, default="oracle")
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="Draft")
-    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     draft_revision: Mapped[str] = mapped_column(String(64), nullable=False, default="draft-1")
     published_version: Mapped[str] = mapped_column(String(64), nullable=False, default="v0")
     readiness: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -63,9 +62,6 @@ class SemanticModel(Base):
     )
     dimensions: Mapped[list[SemanticModelDimension]] = relationship(
         back_populates="model", cascade="all, delete-orphan", order_by="SemanticModelDimension.sort_order"
-    )
-    versions: Mapped[list[SemanticModelVersion]] = relationship(
-        back_populates="model", cascade="all, delete-orphan", order_by="SemanticModelVersion.created_at"
     )
 
     __table_args__ = (UniqueConstraint("tenant_id", "slug", name="uq_semantic_models_tenant_slug"),)
@@ -211,28 +207,3 @@ class SemanticModelAuditEvent(Base):
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), server_default=func.current_timestamp())
 
     user: Mapped[User | None] = relationship("User")
-
-
-class SemanticModelVersion(Base):
-    __tablename__ = "semantic_model_versions"
-
-    id: Mapped[UUID] = mapped_column(GUID(), primary_key=True, default=generate_uuid)
-    tenant_id: Mapped[UUID] = mapped_column(
-        GUID(), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    model_id: Mapped[UUID] = mapped_column(
-        GUID(), ForeignKey("semantic_models.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    version_label: Mapped[str] = mapped_column(String(64), nullable=False)
-    revision: Mapped[int] = mapped_column(Integer, nullable=False)
-    snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
-    source_snapshot_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    physical_schema_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    review_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    published_by: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), server_default=func.current_timestamp())
-
-    model: Mapped[SemanticModel] = relationship(back_populates="versions")
-    publisher: Mapped[User | None] = relationship("User")
-
-    __table_args__ = (UniqueConstraint("model_id", "version_label", name="uq_semantic_model_versions_model_label"),)

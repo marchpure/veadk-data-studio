@@ -1,0 +1,164 @@
+name: Test R2 Upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_path:
+        description: "Test upload path (e.g., test/sample.txt)"
+        required: false
+        type: string
+        default: "test/sample.txt"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-r2-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  test-r2-upload:
+    name: Test R2 Upload
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      TEST_PATH_INPUT: ${{ inputs.test_path }}
+    steps:
+      - name: Validate authorized actor
+        run: |
+          if [ "$GITHUB_ACTOR" != "hadijaveed" ]; then
+            echo "Only hadijaveed may run R2 credential test workflows."
+            echo "Current actor: $GITHUB_ACTOR"
+            exit 1
+          fi
+
+      - name: Generate test file
+        run: |
+          mkdir -p test-files
+          cat > test-files/sample.txt << 'EOF'
+          ====================================
+          R2 Upload Test File
+          ====================================
+
+          Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          Test ID: $(uuidgen)
+
+          This is a test file to verify R2 bucket connectivity
+          and upload functionality.
+
+          If you can see this file, your R2 configuration is
+          working correctly!
+
+          ====================================
+          EOF
+
+          # Expand variables
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          TEST_ID=$(uuidgen 2>/dev/null || echo "$(date +%s)-$$")
+
+          sed -i "s|\$(date -u.*UTC\")|$TIMESTAMP|g" test-files/sample.txt
+          sed -i "s|\$(uuidgen)|$TEST_ID|g" test-files/sample.txt
+
+          echo ""
+          echo "=== Generated test file ==="
+          cat test-files/sample.txt
+          echo ""
+          ls -lh test-files/
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          TEST_PATH="$TEST_PATH_INPUT"
+
+          echo "Testing R2 upload..."
+          echo "Bucket: ${R2_BUCKET}"
+          echo "Endpoint: ${AWS_ENDPOINT_URL}"
+          echo "Upload path: ${TEST_PATH}"
+          echo ""
+
+          # Upload test file
+          aws s3 cp test-files/sample.txt "s3://${R2_BUCKET}/${TEST_PATH}" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read
+
+          echo ""
+          echo "✓ Successfully uploaded test file to R2!"
+          echo ""
+          echo "=== R2 Path ==="
+          echo "s3://${R2_BUCKET}/${TEST_PATH}"
+
+          # Try to list the file to verify
+          echo ""
+          echo "=== Verifying upload ==="
+          aws s3 ls "s3://${R2_BUCKET}/$(dirname ${TEST_PATH})/" \
+            --endpoint-url "$AWS_ENDPOINT_URL" || echo "Note: List operation may fail if bucket policy restricts it, but upload likely succeeded"
+
+          echo ""
+          echo "🎉 R2 upload test completed successfully!"
+          echo ""
+          echo "If your R2 bucket has a public URL configured, you can access the file at:"
+          echo "https://your-r2-public-url/${TEST_PATH}"
+
+      - name: Test versioned upload (like release workflow)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          VERSION="test-$(date +%Y%m%d-%H%M%S)"
+
+          echo "Testing versioned upload structure..."
+          echo ""
+
+          # Create version-specific test files
+          echo "Test x64 build - $VERSION" > test-files/test_x64.txt
+          echo "Test arm64 build - $VERSION" > test-files/test_arm64.txt
+
+          # Upload to versioned structure
+          aws s3 cp test-files/test_x64.txt "s3://${R2_BUCKET}/versions/v${VERSION}/x64/test_x64.txt" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read
+
+          aws s3 cp test-files/test_arm64.txt "s3://${R2_BUCKET}/versions/v${VERSION}/arm64/test_arm64.txt" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read
+
+          echo "✓ Uploaded versioned files to:"
+          echo "  - versions/v${VERSION}/x64/test_x64.txt"
+          echo "  - versions/v${VERSION}/arm64/test_arm64.txt"
+
+      - name: Test stable upload (like release workflow)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          echo "Testing stable channel upload..."
+          echo ""
+
+          # Create stable test files
+          echo "Stable x64 build - $(date -u)" > test-files/stable_x64.txt
+          echo "Stable arm64 build - $(date -u)" > test-files/stable_arm64.txt
+
+          # Upload to stable
+          aws s3 cp test-files/stable_x64.txt "s3://${R2_BUCKET}/stable/test_x64.txt" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read
+
+          aws s3 cp test-files/stable_arm64.txt "s3://${R2_BUCKET}/stable/test_arm64.txt" \
+            --endpoint-url "$AWS_ENDPOINT_URL" \
+            --acl public-read
+
+          echo "✓ Uploaded stable files to:"
+          echo "  - stable/test_x64.txt"
+          echo "  - stable/test_arm64.txt"
+          echo ""
+          echo "🎉 All R2 upload tests completed successfully!"
+          echo ""
+          echo "Your R2 configuration is working correctly and ready for production use."

@@ -71,8 +71,8 @@ export function SchemaProfilePanel({ profile, compact = false }: { profile: Data
                   </tr>
                 </thead>
                 <tbody>
-                  {selectedTable.fields.map((field, index) => (
-                    <tr key={`${field.name}-${index}`} className="border-b border-[#292929] text-[#d8d8d8]">
+                  {selectedTable.fields.map(field => (
+                    <tr key={field.name} className="border-b border-[#292929] text-[#d8d8d8]">
                       <td className="py-2 pr-3 font-mono text-[11px] text-white">{field.name}</td>
                       <td className="py-2 pr-3">{field.type}</td>
                       <td className="py-2 pr-3"><StatusPill tone={field.pii ? 'blocked' : field.role === 'amount' ? 'info' : 'neutral'}>{field.role}</StatusPill></td>
@@ -109,18 +109,18 @@ export function AgentSuggestionList({ suggestions }: { suggestions: AgentSuggest
 
   return (
     <div className="grid gap-3">
-      {suggestions.map((suggestion, index) => (
-        <div key={`${suggestion.id}-${index}`} className="rounded-lg border border-[#2a3136] bg-[#14181b] p-3">
+      {suggestions.map(suggestion => (
+        <div key={suggestion.id} className="rounded-lg border border-[#2a2a2a] bg-[#191919] p-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h4 className="text-sm font-medium text-[#f3f5f5]">{suggestion.title}</h4>
+                <h4 className="text-sm font-medium text-white">{suggestion.title}</h4>
                 <StatusPill tone={readinessTone(suggestion.status === 'rejected' ? 'blocked' : suggestion.status === 'pending' ? 'warning' : 'ready')}>
                   {suggestion.status}
                 </StatusPill>
                 <StatusPill tone="info">{Math.round(suggestion.confidence * 100)}% confidence</StatusPill>
               </div>
-              <p className="mt-2 text-sm leading-6 text-[#c4ccd2]">{suggestion.recommendation}</p>
+              <p className="mt-2 text-sm text-[#c7c7c7]">{suggestion.recommendation}</p>
             </div>
             <div className="flex shrink-0 gap-1">
               <Button size="sm" variant="brand-ghost" onClick={() => acceptSuggestion(suggestion.id)} aria-label={`Accept ${suggestion.title}`}>
@@ -135,13 +135,13 @@ export function AgentSuggestionList({ suggestions }: { suggestions: AgentSuggest
             </div>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
-            <div className="rounded border border-[#252c31] bg-[#0f1113] p-2">
+            <div className="rounded border border-[#292929] bg-[#151515] p-2">
               <SectionTitle>Evidence</SectionTitle>
               <ul className="mt-2 space-y-1 text-xs text-[#bdbdbd]">
-                {suggestion.evidence.map((item, index) => <li key={`${item.label}-${index}`}><span className="text-[#f3f5f5]">{item.label}:</span> {item.detail}</li>)}
+                {suggestion.evidence.map(item => <li key={item.label}><span className="text-white">{item.label}:</span> {item.detail}</li>)}
               </ul>
             </div>
-            <div className="rounded border border-[#252c31] bg-[#0f1113] p-2">
+            <div className="rounded border border-[#292929] bg-[#151515] p-2">
               <SectionTitle>Validation</SectionTitle>
               <p className="mt-2 text-xs text-[#bdbdbd]">{suggestion.validation}</p>
               {suggestion.editedNote && <p className="mt-2 text-xs text-brand-orange">{suggestion.editedNote}</p>}
@@ -155,9 +155,9 @@ export function AgentSuggestionList({ suggestions }: { suggestions: AgentSuggest
 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded border border-[#2a3136] bg-[#14181b] p-3">
-      <div className="text-xs text-[#818c95]">{label}</div>
-      <div className="mt-1 text-sm font-semibold text-[#f3f5f5]">{value}</div>
+    <div className="rounded border border-[#2a2a2a] bg-[#181818] p-3">
+      <div className="text-xs text-[#8d8d8d]">{label}</div>
+      <div className="mt-1 text-sm font-semibold text-white">{value}</div>
     </div>
   )
 }

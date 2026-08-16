@@ -54,7 +54,6 @@ dependencies = [
   "pytz>=2024.1",
   "slack-sdk>=3.27.0",
   "croniter>=2.0.0",
-  "lark-oapi>=1.4.23",
 ]
 
 [tool.setuptools.packages.find]

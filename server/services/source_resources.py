@@ -35,6 +35,7 @@ from server.services.source_connectors import (
     get_connector_adapter,
     parse_object_bytes,
 )
+from server.services.source_redaction import redact_sensitive_json, redact_sensitive_text, source_ref
 from server.services.web_source_adapter import WebCapturedPage, WebSourceAdapter
 
 
@@ -97,7 +98,7 @@ class SourceResourceService:
                 resource.status = self._status_for_connector_error(exc)
                 resource.sync_config_json = {
                     **(resource.sync_config_json or {}),
-                    "last_error": {"code": exc.code, "message": str(exc), "permanent": exc.permanent},
+                    "last_error": self._connector_error_payload(exc, resource_type=resource.resource_type),
                 }
         else:
             resource.status = "needs_confirmation"
@@ -149,11 +150,11 @@ class SourceResourceService:
                 resource.status = self._status_for_connector_error(exc)
                 resource.sync_config_json = {
                     **(resource.sync_config_json or {}),
-                    "last_error": {"code": exc.code, "message": str(exc), "permanent": exc.permanent},
+                    "last_error": self._connector_error_payload(exc, resource_type=resource.resource_type),
                 }
                 await session.flush()
                 status = resource.status
-                error = {"code": exc.code, "message": str(exc), "permanent": exc.permanent}
+                error = self._connector_error_payload(exc, resource_type=resource.resource_type)
             await session.refresh(resource)
             results.append(
                 {
@@ -209,7 +210,7 @@ class SourceResourceService:
                 self._finish_sync_run(resource=resource, sync_run=sync_run, status="failed", error=exc)
                 resource.sync_config_json = {
                     **(resource.sync_config_json or {}),
-                    "last_error": {"code": exc.code, "message": str(exc), "permanent": exc.permanent},
+                    "last_error": self._connector_error_payload(exc, resource_type=resource.resource_type),
                 }
             await session.commit()
             await session.refresh(resource)
@@ -740,7 +741,6 @@ class SourceResourceService:
         payload: SourceResourceImportRequest,
         selection,
     ) -> SourceResource:
-        selection_config_json = self._selection_config_json(selection)
         existing = await session.scalar(
             select(SourceResource)
             .where(
@@ -748,6 +748,7 @@ class SourceResourceService:
                 SourceResource.source_connection_id == connection.id,
                 SourceResource.external_id == selection.external_id,
                 SourceResource.resource_type == selection.resource_type,
+                SourceResource.selection_config_json == selection.selection_config,
             )
             .limit(1)
         )
@@ -755,10 +756,6 @@ class SourceResourceService:
             existing.name = selection.name or existing.name
             existing.source_url = selection.source_url or existing.source_url
             existing.parent_external_id = selection.parent_external_id
-            existing.selection_config_json = {
-                **(existing.selection_config_json or {}),
-                **selection_config_json,
-            }
             existing.sync_mode = payload.sync_mode
             existing.sync_config_json = {
                 **(existing.sync_config_json or {}),
@@ -773,7 +770,11 @@ class SourceResourceService:
             external_id=selection.external_id,
             source_url=selection.source_url,
             parent_external_id=selection.parent_external_id,
-            selection_config_json=selection_config_json,
+            selection_config_json={
+                **selection.selection_config,
+                **({"subresources": selection.subresources} if selection.subresources else {}),
+                **({"metadata": selection.metadata} if selection.metadata else {}),
+            },
             owner_id=user_id,
             visibility="workspace",
             sync_mode=payload.sync_mode,
@@ -783,13 +784,6 @@ class SourceResourceService:
         session.add(resource)
         await session.flush()
         return resource
-
-    def _selection_config_json(self, selection) -> dict[str, Any]:
-        return {
-            **selection.selection_config,
-            **({"subresources": selection.subresources} if selection.subresources else {}),
-            **({"metadata": selection.metadata} if selection.metadata else {}),
-        }
 
     async def _sync_resource_via_adapter(
         self,
@@ -835,11 +829,14 @@ class SourceResourceService:
                 resource_id=resource.id,
                 external_revision=captured.external_revision,
                 content_hash=content_hash,
-                raw_storage_uri=captured.raw_storage_uri,
+                raw_storage_uri=redact_sensitive_json(
+                    {"raw_storage_uri": captured.raw_storage_uri},
+                    resource_type=resource.resource_type,
+                )["raw_storage_uri"],
                 captured_at=datetime.utcnow(),
                 parser_version=captured.parser_version,
                 metadata_json={
-                    **captured.metadata,
+                    **redact_sensitive_json(captured.metadata, resource_type=resource.resource_type),
                     **self._captured_source_metadata(resource=resource, captured=captured),
                     "source_connection_id": str(connection.id),
                     "source_resource_id": str(resource.id),
@@ -1053,9 +1050,7 @@ class SourceResourceService:
         if not files:
             return None
 
-        existing_dataset_id = (resource.sync_config_json or {}).get("projected_dataset_id") or (
-            snapshot.metadata_json or {}
-        ).get("projected_dataset_id")
+        existing_dataset_id = (snapshot.metadata_json or {}).get("projected_dataset_id")
         if existing_dataset_id:
             existing = await session.get(Dataset, existing_dataset_id)
             if existing is not None:
@@ -1106,7 +1101,7 @@ class SourceResourceService:
                     dataset_id=dataset.id,
                     storage_path=str(storage.relative_path),
                     checksum=storage.checksum,
-                    source_url=resource.source_url,
+                    source_url=source_ref("url", resource.source_url) if resource.source_url else None,
                 )
                 session.add(file_record)
                 await session.flush()
@@ -1222,7 +1217,7 @@ class SourceResourceService:
                         "row_count": max(0, len(entry.get("values") or []) - 1),
                     }
                 )
-            return {"spreadsheet_token": resource.external_id, "sheets": sheets}
+            return {"spreadsheet_ref": source_ref("feishu_spreadsheet", resource.external_id), "sheets": sheets}
 
         if resource.resource_type == "feishu_base":
             raw = self._json_from_bytes(captured.raw_bytes)
@@ -1241,7 +1236,7 @@ class SourceResourceService:
                         "field_names": [field.get("field_name") for field in fields if field.get("field_name")],
                     }
                 )
-            return {"app_token": resource.external_id, "tables": tables}
+            return {"app_ref": source_ref("feishu_base", resource.external_id), "tables": tables}
 
         return {}
 
@@ -1273,7 +1268,7 @@ class SourceResourceService:
                         "kind": "feishu_sheet",
                         "source_connection_id": str(resource.source_connection_id) if resource.source_connection_id else None,
                         "source_resource_id": str(resource.id),
-                        "spreadsheet_token": resource.external_id,
+                        "spreadsheet_ref": source_ref("feishu_spreadsheet", resource.external_id),
                         "sheet_id": sheet_id,
                         "range": range_name,
                     },
@@ -1334,7 +1329,7 @@ class SourceResourceService:
                         "kind": "feishu_base",
                         "source_connection_id": str(resource.source_connection_id) if resource.source_connection_id else None,
                         "source_resource_id": str(resource.id),
-                        "app_token": resource.external_id,
+                        "app_ref": source_ref("feishu_base", resource.external_id),
                         "table_id": table_id,
                         "view_id": view_id,
                         "field_mappings": field_mappings,
@@ -1370,8 +1365,8 @@ class SourceResourceService:
                     "kind": "tos_object",
                     "source_connection_id": str(resource.source_connection_id) if resource.source_connection_id else None,
                     "source_resource_id": str(resource.id),
-                    "bucket": (captured.metadata or {}).get("bucket"),
-                    "key": (captured.metadata or {}).get("key"),
+                    "bucket_ref": source_ref("tos_bucket", (captured.metadata or {}).get("bucket")),
+                    "key_ref": source_ref("tos_key", (captured.metadata or {}).get("key")),
                     "version_id": (captured.metadata or {}).get("version_id"),
                     "etag": (captured.metadata or {}).get("etag"),
                     "last_modified": (captured.metadata or {}).get("last_modified"),
@@ -1555,7 +1550,7 @@ class SourceResourceService:
                 "finished_at": datetime.utcnow().isoformat(),
                 "snapshot_id": str(snapshot.id) if snapshot else None,
                 "checkpoint": self._sync_checkpoint(snapshot) if snapshot else None,
-                "error": {"code": error.code, "message": str(error), "permanent": error.permanent} if error else None,
+                "error": self._connector_error_payload(error, resource_type=resource.resource_type) if error else None,
             }
         )
         config = dict(resource.sync_config_json or {})
@@ -1594,6 +1589,8 @@ class SourceResourceService:
     def _status_for_connector_error(self, error: ConnectorError) -> str:
         if error.code in {"reauthorization_required", "invalid_state"}:
             return "reauthorization_required"
+        if error.code in {"authorization_required", "missing_token", "connection_failed"}:
+            return "authorization_required"
         if error.code == "permission_lost":
             return "permission_lost"
         if error.code == "source_unavailable":
@@ -1601,6 +1598,14 @@ class SourceResourceService:
         if error.code == "large_file_confirmation_required":
             return "needs_confirmation"
         return "failed"
+
+    def _connector_error_payload(self, error: ConnectorError, *, resource_type: str | None) -> dict[str, Any]:
+        return {
+            "code": error.code,
+            "message": redact_sensitive_text(str(error)),
+            "permanent": error.permanent,
+            "resource_type": resource_type,
+        }
 
     def _snapshot_payload(self, snapshot: SourceSnapshot | None) -> dict[str, Any] | None:
         if snapshot is None:

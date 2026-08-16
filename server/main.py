@@ -44,16 +44,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from server.auth.error_messages import AUTH_ERROR_MESSAGES, get_auth_error_message
 from server.auth.tenant_context import TenantContextMiddleware
-from server.collaboration.feishu.transport import feishu_ws_manager
 from server.db.session import ensure_database_encoding, ensure_database_schema
 from server.routers import analysis_artifacts as analysis_artifacts_router
-from server.routers import app_config as app_config_router
 from server.routers import assets as assets_router
+from server.routers import app_config as app_config_router
 from server.routers import auth as auth_router
 from server.routers import cache as cache_router
 from server.routers import claude_oauth as claude_oauth_router
 from server.routers import codex_oauth as codex_oauth_router
-from server.routers import collaboration as collaboration_router
 from server.routers import connections as connections_router
 from server.routers import custom_skills as custom_skills_router
 from server.routers import databricks_oauth as databricks_oauth_router
@@ -259,9 +257,6 @@ async def shutdown_event():
 
         # Stop skill loop service
         await skill_loop_service.stop()
-
-        # Stop Feishu WebSocket consumers and release DB leases
-        await feishu_ws_manager.shutdown()
 
         # Shutdown PostHog
         PostHogService.shutdown()
@@ -614,8 +609,6 @@ app.include_router(skill_suggestions_router.router, prefix="/api", tags=["skill-
 app.include_router(skill_loop_router.router, prefix="/api", tags=["skill-loop"])
 
 app.include_router(slack_router.router, prefix="/api", tags=["slack"])
-
-app.include_router(collaboration_router.router, prefix="/api", tags=["collaboration"])
 
 app.include_router(mcp_keys_router.router, prefix="/api", tags=["mcp"])
 app.include_router(mcp_keys_router.mcp_router, prefix="/api", tags=["mcp"])

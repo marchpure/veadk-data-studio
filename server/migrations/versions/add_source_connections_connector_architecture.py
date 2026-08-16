@@ -186,8 +186,6 @@ def upgrade() -> None:
         created.append("source_skill_candidates")
     if "semantic_models" not in existing:
         _create_semantic_model_tables(created)
-    else:
-        _alter_existing_semantic_model_tables()
     if "notebook_assets" not in existing:
         _create_notebook_assets()
         created.append("notebook_assets")
@@ -212,7 +210,6 @@ def downgrade() -> None:
         "analysis_artifacts",
         "notebook_assets",
         "semantic_model_audit_events",
-        "semantic_model_versions",
         "semantic_model_dimensions",
         "semantic_model_metrics",
         "semantic_model_relationships",
@@ -623,7 +620,6 @@ def _create_semantic_model_tables(created: list[str]) -> None:
         sa.Column("datasource_kind", sa.String(length=64), nullable=False),
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
-        sa.Column("revision", sa.Integer(), nullable=False, server_default=sa.text("1")),
         sa.Column("draft_revision", sa.String(length=64), nullable=False),
         sa.Column("published_version", sa.String(length=64), nullable=False),
         sa.Column("readiness", sa.Integer(), nullable=False),
@@ -758,43 +754,6 @@ def _create_semantic_model_tables(created: list[str]) -> None:
     for column in ("tenant_id", "model_id"):
         op.create_index(op.f(f"ix_semantic_model_audit_events_{column}"), "semantic_model_audit_events", [column], unique=False)
     created.append("semantic_model_audit_events")
-
-    _create_semantic_model_versions()
-    created.append("semantic_model_versions")
-
-
-def _alter_existing_semantic_model_tables() -> None:
-    columns = _columns("semantic_models")
-    if "revision" not in columns:
-        op.add_column("semantic_models", sa.Column("revision", sa.Integer(), nullable=False, server_default=sa.text("1")))
-        if op.get_bind().dialect.name == "postgresql":
-            op.execute(sa.text("ALTER TABLE semantic_models ALTER COLUMN revision DROP DEFAULT"))
-    if "semantic_model_versions" not in _tables():
-        _create_semantic_model_versions()
-
-
-def _create_semantic_model_versions() -> None:
-    op.create_table(
-        "semantic_model_versions",
-        sa.Column("id", GUID(), nullable=False),
-        sa.Column("tenant_id", GUID(), nullable=False),
-        sa.Column("model_id", GUID(), nullable=False),
-        sa.Column("version_label", sa.String(length=64), nullable=False),
-        sa.Column("revision", sa.Integer(), nullable=False),
-        sa.Column("snapshot_json", sa.Text(), nullable=False),
-        sa.Column("source_snapshot_ids_json", sa.Text(), nullable=False),
-        sa.Column("physical_schema_json", sa.Text(), nullable=False),
-        sa.Column("review_json", sa.Text(), nullable=False),
-        sa.Column("published_by", GUID(), nullable=True),
-        sa.Column("created_at", sa.TIMESTAMP(), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
-        sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], name=op.f("fk_semantic_model_versions_tenant_id_tenants"), ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["model_id"], ["semantic_models.id"], name=op.f("fk_semantic_model_versions_model_id_semantic_models"), ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["published_by"], ["users.id"], name=op.f("fk_semantic_model_versions_published_by_users"), ondelete="SET NULL"),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_semantic_model_versions")),
-        sa.UniqueConstraint("model_id", "version_label", name="uq_semantic_model_versions_model_label"),
-    )
-    for column in ("tenant_id", "model_id", "published_by"):
-        op.create_index(op.f(f"ix_semantic_model_versions_{column}"), "semantic_model_versions", [column], unique=False)
 
 
 def _create_semantic_child_table(table_name: str, columns: list[sa.Column], *, include_model_id: bool = True) -> None:

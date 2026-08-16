@@ -1,21 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import QRCode from 'qrcode'
-import { AlertCircle, CheckCircle2, ChevronRight, Copy, Database, FileText, Folder, HardDrive, Loader2, QrCode, Search, ShieldCheck } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ChevronRight, Database, FileText, Folder, HardDrive, Loader2, Search, ShieldCheck } from 'lucide-react'
 import { Button } from './ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
 import {
   useCreateSourceConnection,
-  useDeleteSourceConnection,
   useFeishuStatus,
   useImportSourceResources,
   useListSourceConnectionResources,
   useLocateSourceConnectionResource,
-  useFeishuOAuthResult,
   useSourceConnections,
   useStartFeishuOAuth,
 } from '../hooks/useDBConnections'
+import { openExternalUrl } from '../lib/tauri-api'
 import type {
   ConnectorDefinition,
   SourceResourceImportResult,
@@ -75,16 +72,6 @@ const itemKey = (item: SourceResourcePickerItem) => `${item.resource_type}:${ite
 
 const providerLabel = (provider: ProviderId) => provider === 'feishu' ? 'Feishu' : 'Volcengine TOS'
 
-const wikiBrowseToken = (item: SourceResourcePickerItem) => {
-  const spaceId = item.metadata?.space_id
-  if (typeof spaceId === 'string' && spaceId) {
-    return item.resource_type === 'feishu_folder'
-      ? spaceId
-      : `${spaceId}:${item.external_id}`
-  }
-  return item.external_id
-}
-
 const resourceLabel = (type: SourceResourceType | string) => {
   switch (type) {
     case 'feishu_doc':
@@ -124,12 +111,6 @@ export function SourceConnectorImportPanel({
   const [selectedItems, setSelectedItems] = useState<Record<string, SourceResourcePickerItem>>({})
   const [importResults, setImportResults] = useState<SourceResourceImportResult[] | null>(null)
   const [waitingForFeishuOAuth, setWaitingForFeishuOAuth] = useState(false)
-  const [authDialogOpen, setAuthDialogOpen] = useState(false)
-  const [authUrl, setAuthUrl] = useState('')
-  const [authState, setAuthState] = useState('')
-  const [authMode, setAuthMode] = useState<'browser' | 'qr'>('browser')
-  const [authMessage, setAuthMessage] = useState<string | null>(null)
-  const [popupBlocked, setPopupBlocked] = useState(false)
   const [tosForm, setTosForm] = useState({
     displayName: 'Volcengine TOS',
     endpoint: '',
@@ -145,11 +126,9 @@ export function SourceConnectorImportPanel({
   const feishuStatus = useFeishuStatus()
   const sourceConnections = useSourceConnections(provider)
   const startFeishuOAuth = useStartFeishuOAuth()
-  const pollFeishuOAuth = useFeishuOAuthResult()
   const createSourceConnection = useCreateSourceConnection()
   const importSourceResources = useImportSourceResources()
   const locateSourceResource = useLocateSourceConnectionResource()
-  const deleteSourceConnection = useDeleteSourceConnection()
 
   const connections = useMemo(
     () => (sourceConnections.data?.items || []).filter(item => item.status !== 'disconnected'),
@@ -194,47 +173,15 @@ export function SourceConnectorImportPanel({
 
   const connected = !!activeConnection && activeConnection.status === 'connected'
   const requiresReauth = !!activeConnection && activeConnection.status === 'reauthorization_required'
-  const resourceErrorCode = (resources.error as (Error & { code?: string }) | null)?.code
-  const resourceRequiresReauth = provider === 'feishu' && resourceErrorCode === 'reauthorization_required'
   const selectedList = Object.values(selectedItems)
   const supportedTypes = definition?.supported_resource_types || []
   const scopeTabs = provider === 'feishu' ? feishuScopes : tosScopes
   const typeOptions = provider === 'feishu' ? feishuTypes : tosTypes
-  const feishuProductStatus = provider === 'feishu'
-    ? feishuStatus.data?.status || (connected ? 'connected' : requiresReauth ? 'needs_reauth' : 'ready_to_authorize')
-    : activeConnection?.status || 'pending'
-  const feishuStatusCopy = feishuStateCopy(feishuProductStatus)
 
   const handleStartFeishuOAuth = async () => {
     const result = await startFeishuOAuth.mutateAsync()
-    setAuthUrl(result.authorization_url)
-    setAuthState(result.state)
-    setAuthMessage(null)
-    setPopupBlocked(false)
     setWaitingForFeishuOAuth(true)
-    const popup = window.open(result.authorization_url, 'byaan-feishu-oauth', 'width=720,height=760')
-    if (!popup) {
-      setPopupBlocked(true)
-      setAuthMessage(feishuStateCopy('popup_blocked').description)
-    }
-  }
-
-  const beginFeishuAuthorization = async (mode: 'browser' | 'qr' = 'browser') => {
-    setAuthMode(mode)
-    setAuthDialogOpen(true)
-    await handleStartFeishuOAuth()
-  }
-
-  const reopenAuthorization = () => {
-    if (!authUrl) return
-    const popup = window.open(authUrl, 'byaan-feishu-oauth', 'width=720,height=760')
-    if (!popup) setPopupBlocked(true)
-  }
-
-  const copyAuthorizationUrl = async () => {
-    if (!authUrl) return
-    await navigator.clipboard?.writeText(authUrl)
-    setAuthMessage('授权链接已复制。')
+    await openExternalUrl(result.authorization_url)
   }
 
   useEffect(() => {
@@ -243,31 +190,14 @@ export function SourceConnectorImportPanel({
     let attempts = 0
     const timer = window.setInterval(() => {
       attempts += 1
-      const poll = authState
-        ? pollFeishuOAuth.mutateAsync(authState).catch(() => null)
-        : Promise.resolve(null)
-      poll.then(result => {
-        if (stopped || !result) return
-        if (result.status === 'connected') {
+      feishuStatus.refetch().then(result => {
+        if (stopped) return
+        if (result.data?.connected) {
           setWaitingForFeishuOAuth(false)
-          setAuthDialogOpen(false)
-          setAuthMessage(null)
-          feishuStatus.refetch()
-          sourceConnections.refetch()
           return
         }
-        if (result.status && result.status !== 'authorizing') {
-          setWaitingForFeishuOAuth(false)
-          const copy = feishuStateCopy(result.status)
-          setAuthMessage(result.error?.message || `${copy.description} ${copy.action}`)
-        }
-      })
-      feishuStatus.refetch().then(() => {
-        if (stopped) return
         if (attempts >= 60) {
           setWaitingForFeishuOAuth(false)
-          const copy = feishuStateCopy('callback_unreachable')
-          setAuthMessage(`${copy.description} ${copy.action}`)
         }
       })
     }, 2000)
@@ -275,28 +205,7 @@ export function SourceConnectorImportPanel({
       stopped = true
       window.clearInterval(timer)
     }
-  }, [authState, feishuStatus, pollFeishuOAuth, provider, sourceConnections, waitingForFeishuOAuth])
-
-  useEffect(() => {
-    if (provider !== 'feishu') return
-    const onMessage = (event: MessageEvent) => {
-      const data = event.data
-      if (!data || data.type !== 'byaan:feishu-oauth') return
-      if (authState && data.state !== authState) return
-      if (data.status === 'connected') {
-        setWaitingForFeishuOAuth(false)
-        setAuthDialogOpen(false)
-        feishuStatus.refetch()
-        sourceConnections.refetch()
-      } else {
-        setWaitingForFeishuOAuth(false)
-        const copy = feishuStateCopy(data.status)
-        setAuthMessage(data.message || `${copy.description} ${copy.action}`)
-      }
-    }
-    window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
-  }, [authState, feishuStatus, provider, sourceConnections])
+  }, [feishuStatus, provider, waitingForFeishuOAuth])
 
   const handleCreateTosConnection = async () => {
     const connection = await createSourceConnection.mutateAsync({
@@ -319,11 +228,10 @@ export function SourceConnectorImportPanel({
   }
 
   const handleOpenFolder = (item: SourceResourcePickerItem) => {
-    if (provider === 'feishu' && (item.resource_type === 'feishu_wiki' || item.metadata?.type === 'wiki_space')) {
+    if (provider === 'feishu' && item.resource_type === 'feishu_wiki') {
       setScope('wiki')
-      const token = wikiBrowseToken(item)
-      setParentToken(token)
-      setBreadcrumbs(prev => [...prev, { label: item.name, token }])
+      setParentToken(item.external_id)
+      setBreadcrumbs(prev => [...prev, { label: item.name, token: item.external_id }])
       setPageToken('')
       return
     }
@@ -415,16 +323,6 @@ export function SourceConnectorImportPanel({
     onImported?.()
   }
 
-  const handleDisconnectFeishu = async () => {
-    if (!activeConnection) return
-    await deleteSourceConnection.mutateAsync(activeConnection.id)
-    setSelectedConnectionId('')
-    setSelectedItems({})
-    setImportResults(null)
-    await feishuStatus.refetch()
-    await sourceConnections.refetch()
-  }
-
   if (definition?.availability === 'planned') {
     return (
       <div className="rounded-lg border border-[#444444] bg-[#1a1a1a] p-5">
@@ -444,8 +342,8 @@ export function SourceConnectorImportPanel({
         <div className="flex items-start gap-3">
           <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-300" />
           <div>
-            <p className="font-medium">飞书集成尚未就绪</p>
-            <p className="mt-1 text-amber-100/80">请管理员在「设置 → 集成 → 飞书」启用托管应用或配置企业自建应用。普通用户不需要填写 App ID、App Secret 或回调地址。</p>
+            <p className="font-medium">请联系管理员配置飞书连接</p>
+            <p className="mt-1 text-amber-100/80">Self-hosted Team Version 需要先配置 Feishu App ID、App Secret、OAuth Redirect URI 和所需权限。这里不会再提供手填 Doc/Sheet URL 的假主流程。</p>
           </div>
         </div>
       </div>
@@ -454,76 +352,44 @@ export function SourceConnectorImportPanel({
 
   if (!connected) {
     return (
-      <>
-        <div className="space-y-4">
-          <div className="rounded-lg border border-[#444444] bg-[#1a1a1a] p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-medium text-white">{definition?.display_name || providerLabel(provider)}</p>
-                <p className="mt-1 text-sm text-gray-400">{definition?.description || 'Connect once, then browse and import resources repeatedly.'}</p>
-              </div>
-              <span className={`rounded px-2 py-1 text-xs ${feishuStatusCopy.badgeClass}`}>
-                {provider === 'feishu' ? feishuStatusCopy.label : requiresReauth ? 'Reauthorization required' : 'Not connected'}
-              </span>
+      <div className="space-y-4">
+        <div className="rounded-lg border border-[#444444] bg-[#1a1a1a] p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-white">{definition?.display_name || providerLabel(provider)}</p>
+              <p className="mt-1 text-sm text-gray-400">{definition?.description || 'Connect once, then browse and import resources repeatedly.'}</p>
             </div>
-            {supportedTypes.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {supportedTypes.map(type => (
-                  <span key={type} className="rounded bg-[#2a2a2a] px-2 py-1 text-xs text-gray-300">{resourceLabel(type)}</span>
-                ))}
-              </div>
-            )}
+            <span className={`rounded px-2 py-1 text-xs ${requiresReauth ? 'bg-amber-500/20 text-amber-300' : 'bg-gray-500/20 text-gray-300'}`}>
+              {requiresReauth ? 'Reauthorization required' : 'Not connected'}
+            </span>
           </div>
-
-          {provider === 'feishu' ? (
-            <div className="space-y-3">
-            <div className="rounded-lg border border-[#444444] bg-[#151515] p-4">
-              <div className="flex items-start gap-3">
-                <ShieldCheck className="mt-0.5 h-5 w-5 flex-shrink-0 text-brand-orange" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-white">连接飞书</p>
-                  <p className="mt-1 text-sm text-gray-400">授权后进入资源选择器。Byaan 只读取你选择导入的文档、Wiki、表格和多维表格。</p>
-                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-400">
-                    {(feishuStatus.data?.admin_config.required_scopes || []).map(scopeName => (
-                      <span key={scopeName} className="rounded border border-[#444444] bg-[#1f1f1f] px-2 py-1">{scopeName}</span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <Button
-                  onClick={() => beginFeishuAuthorization('browser')}
-                  disabled={disabled || startFeishuOAuth.isPending || waitingForFeishuOAuth}
-                  className="bg-brand-orange hover:bg-brand-orange/90"
-                >
-                  {startFeishuOAuth.isPending || (waitingForFeishuOAuth && authMode === 'browser') ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                  在飞书中授权
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => beginFeishuAuthorization('qr')}
-                  disabled={disabled || startFeishuOAuth.isPending || waitingForFeishuOAuth}
-                  className="border-[#555555] text-white hover:bg-[#3a3a3a]"
-                >
-                  {waitingForFeishuOAuth && authMode === 'qr' ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-                  使用飞书扫码
-                </Button>
-              </div>
+          {supportedTypes.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {supportedTypes.map(type => (
+                <span key={type} className="rounded bg-[#2a2a2a] px-2 py-1 text-xs text-gray-300">{resourceLabel(type)}</span>
+              ))}
             </div>
+          )}
+        </div>
+
+        {provider === 'feishu' ? (
+          <div className="space-y-3">
+            <Button
+              onClick={handleStartFeishuOAuth}
+              disabled={disabled || startFeishuOAuth.isPending || waitingForFeishuOAuth}
+              className="w-full bg-brand-orange hover:bg-brand-orange/90"
+            >
+              {startFeishuOAuth.isPending || waitingForFeishuOAuth ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+              {waitingForFeishuOAuth ? 'Waiting for Feishu authorization...' : 'Connect Feishu'}
+            </Button>
             {waitingForFeishuOAuth && (
               <p className="text-xs text-gray-400">
-                授权完成后本页面会自动刷新；如果回调窗口无法关闭，轮询也会接管状态。
+                Complete authorization in the browser. Byaan will refresh this panel and open the resource picker after the callback succeeds.
               </p>
             )}
-            {(feishuStatusCopy.description || feishuStatusCopy.action) && (
-              <div className="rounded border border-[#444444] bg-[#151515] px-3 py-2 text-xs text-gray-300">
-                {feishuStatusCopy.description}
-                {feishuStatusCopy.action && <span className="ml-1 text-brand-orange">{feishuStatusCopy.action}</span>}
-              </div>
-            )}
-            </div>
-          ) : (
-            <div className="space-y-4 rounded-lg border border-[#444444] bg-[#1a1a1a] p-4">
+          </div>
+        ) : (
+          <div className="space-y-4 rounded-lg border border-[#444444] bg-[#1a1a1a] p-4">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Connection name" value={tosForm.displayName} onChange={value => setTosForm(prev => ({ ...prev, displayName: value }))} disabled={disabled || createSourceConnection.isPending} />
               <Field label="Region" value={tosForm.region} onChange={value => setTosForm(prev => ({ ...prev, region: value }))} placeholder="cn-beijing" disabled={disabled || createSourceConnection.isPending} required />
@@ -562,66 +428,18 @@ export function SourceConnectorImportPanel({
               {createSourceConnection.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardDrive className="h-4 w-4" />}
               Test and connect TOS
             </Button>
-            </div>
-          )}
-        </div>
-        <FeishuAuthorizationDialog
-          open={authDialogOpen}
-          mode={authMode}
-          authorizationUrl={authUrl}
-          waiting={waitingForFeishuOAuth}
-          popupBlocked={popupBlocked}
-          message={authMessage}
-          onOpenChange={setAuthDialogOpen}
-          onReopen={reopenAuthorization}
-          onCopy={copyAuthorizationUrl}
-        />
-      </>
+          </div>
+        )}
+      </div>
     )
   }
 
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-green-700/40 bg-green-900/10 p-3 text-sm text-green-200">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-green-400" />
-              <span>Connected: {activeConnection?.display_name}</span>
-            </div>
-            {provider === 'feishu' && (
-              <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-green-100/80 md:grid-cols-4">
-                <span>授权身份：{activeConnection?.display_name || 'Feishu user'}</span>
-                <span>已选资源：{resources.data?.items.filter(item => item.already_added).length ?? 0}</span>
-                <span>最近同步：{importResults?.[0]?.resource?.updated_at || activeConnection?.updated_at || '-'}</span>
-                <span>权限状态：{feishuStateCopy(feishuProductStatus).label}</span>
-              </div>
-            )}
-          </div>
-          {provider === 'feishu' && (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => beginFeishuAuthorization('browser')}
-                disabled={disabled || startFeishuOAuth.isPending || waitingForFeishuOAuth}
-                className="bg-brand-orange hover:bg-brand-orange/90"
-              >
-                {startFeishuOAuth.isPending || waitingForFeishuOAuth ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                重新授权
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleDisconnectFeishu}
-                disabled={deleteSourceConnection.isPending}
-                className="border-red-800 text-red-300 hover:bg-red-900/20"
-              >
-                断开连接
-              </Button>
-            </div>
-          )}
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 text-green-400" />
+          <span>Connected: {activeConnection?.display_name}</span>
         </div>
       </div>
 
@@ -731,26 +549,6 @@ export function SourceConnectorImportPanel({
       <div className="min-h-[260px] rounded-lg border border-[#444444] bg-[#1a1a1a]">
         {resources.isLoading ? (
           <LoadingBox label="Loading resources..." />
-        ) : resourceRequiresReauth ? (
-          <div className="p-5 text-sm text-amber-100">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-300" />
-              <div>
-                <p className="font-medium">当前飞书授权不包含云盘读取权限</p>
-                <p className="mt-1 text-amber-100/75">管理员配置权限后，已有用户令牌不会自动升级。请重新授权并在飞书页面确认本次新增权限。</p>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => beginFeishuAuthorization('browser')}
-                  disabled={disabled || startFeishuOAuth.isPending || waitingForFeishuOAuth}
-                  className="mt-3 bg-brand-orange hover:bg-brand-orange/90"
-                >
-                  {startFeishuOAuth.isPending || waitingForFeishuOAuth ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                  重新授权飞书
-                </Button>
-              </div>
-            </div>
-          </div>
         ) : resources.error ? (
           <div className="p-5 text-sm text-red-200">
             <div className="flex items-start gap-2">
@@ -905,200 +703,10 @@ function LoadingBox({ label }: { label: string }) {
   )
 }
 
-function FeishuAuthorizationDialog({
-  open,
-  mode,
-  authorizationUrl,
-  waiting,
-  popupBlocked,
-  message,
-  onOpenChange,
-  onReopen,
-  onCopy,
-}: {
-  open: boolean
-  mode: 'browser' | 'qr'
-  authorizationUrl: string
-  waiting: boolean
-  popupBlocked: boolean
-  message: string | null
-  onOpenChange: (open: boolean) => void
-  onReopen: () => void
-  onCopy: () => void
-}) {
-  const [qrDataUrl, setQrDataUrl] = useState('')
-
-  useEffect(() => {
-    let cancelled = false
-    if (!authorizationUrl || mode !== 'qr') {
-      setQrDataUrl('')
-      return
-    }
-    QRCode.toDataURL(authorizationUrl, { width: 220, margin: 1, errorCorrectionLevel: 'M' })
-      .then(value => {
-        if (!cancelled) setQrDataUrl(value)
-      })
-      .catch(() => {
-        if (!cancelled) setQrDataUrl('')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [authorizationUrl, mode])
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl border-[#555555] bg-[#1f1f1f] text-white">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {mode === 'qr' ? <QrCode className="h-5 w-5 text-brand-orange" /> : <ShieldCheck className="h-5 w-5 text-brand-orange" />}
-            飞书授权
-          </DialogTitle>
-          <DialogDescription>授权窗口和二维码使用同一个 OAuth 链接。</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          {mode === 'qr' && (
-            <div className="flex justify-center rounded-lg border border-[#444444] bg-white p-4">
-              {qrDataUrl ? (
-                <img src={qrDataUrl} alt="Feishu OAuth QR code" className="h-[220px] w-[220px]" />
-              ) : (
-                <div className="flex h-[220px] w-[220px] items-center justify-center text-sm text-gray-500">生成二维码中...</div>
-              )}
-            </div>
-          )}
-          <div className="rounded border border-[#444444] bg-[#151515] p-3 text-sm text-gray-300">
-            {waiting ? '等待飞书回调。你可以在弹出的飞书页面完成授权，或扫码授权。' : '授权未在当前等待窗口内完成。'}
-          </div>
-          {popupBlocked && (
-            <div className="rounded border border-amber-700/50 bg-amber-900/20 p-3 text-sm text-amber-100">
-              浏览器拦截了授权窗口。请允许弹窗后重新打开，或复制链接到浏览器。
-            </div>
-          )}
-          {message && <div className="rounded border border-[#444444] bg-[#101010] p-3 text-sm text-gray-300">{message}</div>}
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={onReopen} disabled={!authorizationUrl} className="bg-brand-orange hover:bg-brand-orange/90">
-              <ShieldCheck className="h-4 w-4" />
-              重新打开授权页
-            </Button>
-            <Button variant="outline" onClick={onCopy} disabled={!authorizationUrl} className="border-[#555555] text-white hover:bg-[#3a3a3a]">
-              <Copy className="h-4 w-4" />
-              复制授权链接
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 function formatBytes(value: number) {
   if (!Number.isFinite(value) || value < 0) return ''
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`
   return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`
-}
-
-function feishuStateCopy(status: string) {
-  switch (status) {
-    case 'not_configured':
-      return {
-        label: 'Not configured',
-        description: '飞书应用尚未配置。',
-        action: '请管理员前往 Integrations 配置托管应用或企业自建应用。',
-        badgeClass: 'bg-gray-500/20 text-gray-300',
-      }
-    case 'ready_to_authorize':
-      return {
-        label: 'Ready to authorize',
-        description: '飞书应用已就绪，可以发起最小权限 OAuth 授权。',
-        action: '点击“在飞书中授权”。',
-        badgeClass: 'bg-brand-orange/20 text-brand-orange',
-      }
-    case 'authorizing':
-      return {
-        label: 'Authorizing',
-        description: '正在等待飞书 OAuth 回调。',
-        action: '完成弹窗授权或扫码授权。',
-        badgeClass: 'bg-blue-500/20 text-blue-300',
-      }
-    case 'connected':
-      return {
-        label: 'Connected',
-        description: '飞书账号已授权，可进入资源选择器。',
-        action: '选择文档、Wiki、Sheet 或 Base 后导入。',
-        badgeClass: 'bg-green-500/20 text-green-300',
-      }
-    case 'selecting_resources':
-      return {
-        label: 'Selecting resources',
-        description: '正在选择可导入资源。',
-        action: '勾选资源并点击导入。',
-        badgeClass: 'bg-blue-500/20 text-blue-300',
-      }
-    case 'syncing':
-      return {
-        label: 'Syncing',
-        description: '资源正在同步。',
-        action: '稍后刷新同步状态。',
-        badgeClass: 'bg-blue-500/20 text-blue-300',
-      }
-    case 'needs_reauth':
-    case 'reauthorization_required':
-      return {
-        label: 'Needs reauth',
-        description: '飞书 token 已失效或 refresh token 不可用。',
-        action: '请重新授权。',
-        badgeClass: 'bg-amber-500/20 text-amber-300',
-      }
-    case 'admin_approval_required':
-      return {
-        label: 'Admin approval required',
-        description: '飞书企业可能要求管理员审批应用权限。',
-        action: '请管理员在飞书后台审批并发布应用。',
-        badgeClass: 'bg-amber-500/20 text-amber-300',
-      }
-    case 'scope_missing':
-      return {
-        label: 'Scope missing',
-        description: '飞书应用缺少读取文档、Wiki、表格或 Base 的最小权限。',
-        action: '请管理员补齐权限后重新授权。',
-        badgeClass: 'bg-amber-500/20 text-amber-300',
-      }
-    case 'state_expired':
-      return {
-        label: 'State expired',
-        description: '授权链接已过期。',
-        action: '请重新打开授权页。',
-        badgeClass: 'bg-amber-500/20 text-amber-300',
-      }
-    case 'popup_blocked':
-      return {
-        label: 'Popup blocked',
-        description: '浏览器拦截了授权窗口。',
-        action: '允许弹窗、重新打开授权页，或复制授权链接。',
-        badgeClass: 'bg-amber-500/20 text-amber-300',
-      }
-    case 'callback_unreachable':
-      return {
-        label: 'Callback unreachable',
-        description: '授权窗口无法通知原页面。',
-        action: '页面会短轮询结果；仍失败时请重新授权。',
-        badgeClass: 'bg-amber-500/20 text-amber-300',
-      }
-    case 'installation_revoked':
-      return {
-        label: 'Installation revoked',
-        description: '飞书应用安装或授权已被撤销。',
-        action: '请重新安装应用并重新授权。',
-        badgeClass: 'bg-amber-500/20 text-amber-300',
-      }
-    default:
-      return {
-        label: 'Not connected',
-        description: '尚未连接飞书。',
-        action: '请发起授权。',
-        badgeClass: 'bg-gray-500/20 text-gray-300',
-      }
-  }
 }

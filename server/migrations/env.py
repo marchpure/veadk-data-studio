@@ -9,8 +9,6 @@ from pathlib import Path
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import AsyncConnection
-from sqlalchemy.sql import text
 from alembic import context
 from dotenv import load_dotenv
 
@@ -41,28 +39,6 @@ def _get_database_url() -> str:
     if not url:
         url = f"sqlite+aiosqlite:///{BASE_DIR / '.data' / 'app.db'}"
     return url
-
-
-async def _ensure_wide_alembic_version_column(connection: AsyncConnection, url: str) -> None:
-    """Allow human-readable Alembic revision ids on PostgreSQL.
-
-    Alembic creates ``alembic_version.version_num`` as VARCHAR(32), but this
-    repository has legacy semantic-modeling revision ids longer than that. The
-    self-hosted entrypoint invokes Alembic directly, so this preflight must live
-    in env.py instead of only in application startup migration helpers.
-    """
-    if "postgresql" not in url:
-        return
-
-    await connection.execute(
-        text(
-            "CREATE TABLE IF NOT EXISTS alembic_version ("
-            "version_num VARCHAR(255) NOT NULL, "
-            "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
-        )
-    )
-    await connection.execute(text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(255)"))
-    await connection.commit()
 
 
 def run_migrations_offline() -> None:
@@ -101,7 +77,6 @@ async def run_migrations_online() -> None:
     )
 
     async with connectable.connect() as connection:  # type: ignore[assignment]
-        await _ensure_wide_alembic_version_column(connection, _get_database_url())
         await connection.run_sync(do_run_migrations)
 
     await connectable.dispose()

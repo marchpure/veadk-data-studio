@@ -12,6 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.models.knowledge_resources import EvidenceFragment, KnowledgeResource
 from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
+from server.services.source_redaction import (
+    is_sensitive_source_type,
+    redact_sensitive_text,
+    sensitive_text_ref,
+    should_ref_evidence_text,
+    source_ref,
+)
 
 
 def stable_hash(value: str) -> str:
@@ -226,13 +233,20 @@ class NativeKnowledgeProvider:
             chunks = [normalized]
 
         fragment_type = self._fragment_type_for(resource.resource_type)
+        should_redact = is_sensitive_source_type(resource.resource_type)
+        should_ref_text = should_ref_evidence_text(resource.resource_type)
         fragments: list[dict[str, Any]] = []
         for index, chunk in enumerate(chunks[:100], start=1):
+            text = chunk[:8000]
+            if should_redact:
+                text = redact_sensitive_text(text) or ""
+            if should_ref_text:
+                text = sensitive_text_ref(text)
             fragments.append(
                 {
                     "fragment_type": fragment_type,
                     "title_path": [resource.name],
-                    "text": chunk[:8000],
+                    "text": text,
                     "locator_json": {
                         "kind": resource.resource_type,
                         "source_connection_id": str(resource.source_connection_id) if resource.source_connection_id else None,
@@ -240,8 +254,12 @@ class NativeKnowledgeProvider:
                         "source_snapshot_id": str(snapshot.id),
                         "resource_id": str(resource.id),
                         "snapshot_id": str(snapshot.id),
-                        "external_id": resource.external_id,
-                        "source_url": resource.source_url,
+                        "external_id": (
+                            source_ref(f"{resource.resource_type}_external", resource.external_id)
+                            if should_redact
+                            else resource.external_id
+                        ),
+                        "source_url": source_ref("url", resource.source_url) if should_redact else resource.source_url,
                         "external_revision": snapshot.external_revision,
                         "content_hash": snapshot.content_hash,
                         "parser_version": snapshot.parser_version,
@@ -293,7 +311,7 @@ class NativeKnowledgeProvider:
             sheet = self._first((metadata.get("sheets") or []), (selection_metadata.get("sheets") or []))
             spreadsheet = metadata.get("spreadsheet_token") or locator.get("spreadsheet_token") or resource.external_id
             return {
-                "spreadsheet_token": spreadsheet,
+                "spreadsheet_ref": source_ref("feishu_spreadsheet", spreadsheet),
                 "sheet_id": sheet.get("sheet_id") or sheet.get("id"),
                 "range": sheet.get("range") or metadata.get("range") or selection.get("range"),
                 "cell_range": sheet.get("range") or metadata.get("range") or selection.get("range"),
@@ -302,7 +320,10 @@ class NativeKnowledgeProvider:
         if resource.resource_type == "feishu_base":
             table = self._first((metadata.get("tables") or []), (selection_metadata.get("tables") or []))
             return {
-                "app_token": metadata.get("app_token") or locator.get("app_token") or resource.external_id,
+                "app_ref": source_ref(
+                    "feishu_base",
+                    metadata.get("app_token") or locator.get("app_token") or resource.external_id,
+                ),
                 "table_id": table.get("table_id"),
                 "view_id": table.get("view_id") or selection.get("view_id"),
                 "record_id": locator.get("record_id"),
@@ -311,8 +332,8 @@ class NativeKnowledgeProvider:
 
         if resource.resource_type.startswith("tos_"):
             return {
-                "bucket": metadata.get("bucket"),
-                "key": metadata.get("key") or metadata.get("prefix"),
+                "bucket_ref": source_ref("tos_bucket", metadata.get("bucket")),
+                "key_ref": source_ref("tos_key", metadata.get("key") or metadata.get("prefix")),
                 "version_id": metadata.get("version_id"),
                 "etag": metadata.get("etag"),
                 "last_modified": metadata.get("last_modified"),

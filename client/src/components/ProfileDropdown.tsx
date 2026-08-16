@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../stores/useStore'
 import { useScopes } from '@/hooks/useScopes'
 import { useSlackConfig } from '@/hooks/useSlackConfig'
-import { useFeishuIntegration } from '@/hooks/useFeishuIntegration'
 import { useSchedules } from '@/hooks/useSchedules'
 import { usePendingSuggestionCount } from '../hooks/useSkillSuggestions'
 import { ApiService } from '@/services/api'
@@ -13,7 +12,6 @@ import { isTauriApp } from '@/lib/tauri-api'
 import { isAnalyticsOptedOut, setAnalyticsOptedOut } from '@/lib/analyticsPreference'
 import { Switch } from './ui/switch'
 import { SlackIntegrationModal } from './slack/SlackIntegrationModal'
-import { FeishuIntegrationModal } from './collaboration/FeishuIntegrationModal'
 import { SchedulesPanel } from './schedules/SchedulesPanel'
 import { MCPKeysModal } from './MCPKeysModal'
 
@@ -32,19 +30,14 @@ export function ProfileDropdown({ isExpanded, onExpandSidebar }: ProfileDropdown
   const isLoadingTenants = useStore(state => state.isLoadingTenants)
   const { canManageTeam, isViewer } = useScopes()
   const slackConfig = useSlackConfig(isSelfHosted)
-  const feishuIntegration = useFeishuIntegration(isSelfHosted)
   const { isConnected: isSlackConnected, loading: slackLoading } = isSelfHosted
     ? slackConfig
-    : { isConnected: false, loading: false }
-  const { isConnected: isFeishuConnected, loading: feishuLoading } = isSelfHosted
-    ? feishuIntegration
     : { isConnected: false, loading: false }
   const { data: schedules = [] } = useSchedules()
   const { data: pendingSuggestionCount = 0 } = usePendingSuggestionCount()
   const navigate = useNavigate()
   const [isOpen, setIsOpen] = useState(false)
   const [slackModalOpen, setSlackModalOpen] = useState(false)
-  const [feishuModalOpen, setFeishuModalOpen] = useState(false)
   const [schedulesPanelOpen, setSchedulesPanelOpen] = useState(false)
   const [mcpKeysModalOpen, setMcpKeysModalOpen] = useState(false)
   const isDesktop = isTauriApp()
@@ -128,11 +121,6 @@ export function ProfileDropdown({ isExpanded, onExpandSidebar }: ProfileDropdown
 
   const handleSlackClick = () => {
     setSlackModalOpen(true)
-    setIsOpen(false)
-  }
-
-  const handleCollaborationClick = () => {
-    navigate('/integrations')
     setIsOpen(false)
   }
 
@@ -309,26 +297,16 @@ export function ProfileDropdown({ isExpanded, onExpandSidebar }: ProfileDropdown
             )}
             {isSelfHosted && canManageTeam && (
               <button
-                onClick={handleCollaborationClick}
+                onClick={handleSlackClick}
                 className="w-full px-3 py-2.5 flex items-center gap-3 hover:bg-[#333333] transition-colors text-white"
               >
                 <MessageSquare className="w-4 h-4" />
-                <span className="text-sm flex-1 text-left">协作集成</span>
-                {!feishuLoading && (
-                  <span className={`text-xs ${isFeishuConnected ? 'text-green-400' : 'text-gray-500'}`}>
-                    {isFeishuConnected ? '● 飞书已连接' : '○ 飞书未连接'}
+                <span className="text-sm flex-1 text-left">Slack</span>
+                {!slackLoading && (
+                  <span className={`text-xs ${isSlackConnected ? 'text-green-400' : 'text-gray-500'}`}>
+                    {isSlackConnected ? '● Connected' : '○ Not connected'}
                   </span>
                 )}
-              </button>
-            )}
-            {isSelfHosted && canManageTeam && isSlackConnected && (
-              <button
-                onClick={handleSlackClick}
-                className="w-full px-3 py-2.5 flex items-center gap-3 hover:bg-[#333333] transition-colors text-gray-400"
-              >
-                <MessageSquare className="w-4 h-4" />
-                <span className="text-sm flex-1 text-left">Slack（兼容）</span>
-                {!slackLoading && <span className="text-xs text-green-400">● Connected</span>}
               </button>
             )}
             {isSelfHosted && canManageTeam && (
@@ -371,13 +349,6 @@ export function ProfileDropdown({ isExpanded, onExpandSidebar }: ProfileDropdown
         <SlackIntegrationModal
           open={slackModalOpen}
           onClose={() => setSlackModalOpen(false)}
-        />
-      )}
-
-      {isSelfHosted && (
-        <FeishuIntegrationModal
-          open={feishuModalOpen}
-          onClose={() => setFeishuModalOpen(false)}
         />
       )}
 

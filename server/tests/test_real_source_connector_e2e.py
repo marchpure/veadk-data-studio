@@ -88,16 +88,16 @@ async def test_real_tos_object_source_snapshot_evidence_dataset_e2e(test_session
     assert imported["succeeded"] == 1
     resource = imported["results"][0]["resource"]
     assert resource["status"] == "ready"
-    assert resource["latest_snapshot"]["raw_storage_uri"] == f"tos://{external_id}"
-    assert resource["latest_snapshot"]["metadata_json"]["bucket"] == env["BYAAN_REAL_TOS_BUCKET"]
-    assert resource["latest_snapshot"]["metadata_json"]["key"] == object_key
+    assert resource["latest_snapshot"]["raw_storage_uri"].startswith("url:ref:")
+    assert resource["latest_snapshot"]["metadata_json"]["bucket"].startswith("tos_bucket:ref:")
+    assert resource["latest_snapshot"]["metadata_json"]["key"].startswith("tos_key:ref:")
     assert resource["knowledge_resource"]["evidence_count"] >= 1
     assert resource["projected_dataset_id"]
     projection = resource["sync_config_json"]["projected_dataset"]
     assert projection["status"] == "ready"
     assert projection["source_snapshot_id"] == resource["latest_snapshot_id"]
-    assert projection["files"][0]["source_locator"]["bucket"] == env["BYAAN_REAL_TOS_BUCKET"]
-    assert projection["files"][0]["source_locator"]["key"] == object_key
+    assert projection["files"][0]["source_locator"]["bucket_ref"].startswith("tos_bucket:ref:")
+    assert projection["files"][0]["source_locator"]["key_ref"].startswith("tos_key:ref:")
 
 
 async def test_real_feishu_sheet_source_snapshot_evidence_dataset_e2e(test_session):
@@ -167,6 +167,6 @@ async def test_real_feishu_sheet_source_snapshot_evidence_dataset_e2e(test_sessi
     assert resource["projected_dataset_id"]
     projection = resource["sync_config_json"]["projected_dataset"]
     assert projection["status"] == "ready"
-    assert projection["files"][0]["source_locator"]["spreadsheet_token"] == env["BYAAN_REAL_FEISHU_SPREADSHEET_TOKEN"]
+    assert projection["files"][0]["source_locator"]["spreadsheet_ref"].startswith("feishu_spreadsheet:ref:")
     assert projection["files"][0]["source_locator"]["sheet_id"] == env["BYAAN_REAL_FEISHU_SHEET_ID"]
     assert projection["files"][0]["source_locator"]["range"] == env["BYAAN_REAL_FEISHU_RANGE"]

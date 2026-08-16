@@ -38,9 +38,6 @@ class Schedule(Base):
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     slack_channel_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    delivery_target_id: Mapped[UUID | None] = mapped_column(
-        GUID(), ForeignKey("collaboration_delivery_targets.id", ondelete="SET NULL"), nullable=True, index=True
-    )
     instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     next_run_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=False), nullable=True, index=True)

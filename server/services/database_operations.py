@@ -978,20 +978,6 @@ class AsyncSQLConnector:
 
         return base_url
 
-    def _selected_sql_schema(self) -> str | None:
-        schema = self.connection_obj.get("schema") or self.connection_obj.get("default_schema")
-        if not schema:
-            return None
-        return str(schema).strip() or None
-
-    @staticmethod
-    def _quote_pg_identifier(identifier: str) -> str:
-        return '"' + str(identifier).replace('"', '""') + '"'
-
-    @classmethod
-    def _pg_search_path(cls, schema: str) -> str:
-        return f"{cls._quote_pg_identifier(schema)}, public"
-
     @staticmethod
     def _get_oracle_driver():
         try:
@@ -1196,12 +1182,6 @@ class AsyncSQLConnector:
         try:
             async with asyncio.timeout(timeout):
                 async with self.engine.connect() as conn:
-                    selected_schema = self._selected_sql_schema()
-                    if selected_schema and self.db_type == "pg":
-                        await conn.execute(
-                            text("SELECT set_config('search_path', :search_path, true)"),
-                            {"search_path": self._pg_search_path(selected_schema)},
-                        )
                     total_count = None
 
                     # Get total count for SELECT queries with limit
@@ -3197,7 +3177,6 @@ class DatabaseOperationsService:
             # Create temporary connector to build connection URL
             temp_connector = AsyncSQLConnector(connection_obj, db_type=db_type)
             connection_url = temp_connector._build_connection_url()
-            selected_schema = str(connection_obj.get("schema") or connection_obj.get("default_schema") or "").strip() or None
             # Create temporary async engine for schema introspection
             engine = create_async_engine(connection_url, echo=False)
 
@@ -3208,12 +3187,11 @@ class DatabaseOperationsService:
                         inspector = sqlalchemy_inspect(sync_conn)
                         schema_info = {}
 
-                        for table_name in inspector.get_table_names(schema=selected_schema):
-                            columns = inspector.get_columns(table_name, schema=selected_schema)
-                            foreign_keys = inspector.get_foreign_keys(table_name, schema=selected_schema)
+                        for table_name in inspector.get_table_names():
+                            columns = inspector.get_columns(table_name)
+                            foreign_keys = inspector.get_foreign_keys(table_name)
 
                             schema_info[table_name] = {
-                                "schema": selected_schema,
                                 "columns": [
                                     {
                                         "name": col["name"],
@@ -3234,12 +3212,7 @@ class DatabaseOperationsService:
                     schema_info = await conn.run_sync(get_schema_sync)
 
                 database_name = connection_obj.get("database", "")
-                return {
-                    "datasource_type": db_type,
-                    "datasource_name": database_name,
-                    "selected_schema": selected_schema,
-                    "schema": schema_info,
-                }
+                return {"datasource_type": db_type, "datasource_name": database_name, "schema": schema_info}
 
             finally:
                 await engine.dispose()
@@ -3534,7 +3507,6 @@ class DatabaseOperationsService:
             database = connection_obj.get("database")
             user = connection_obj.get("user") or connection_obj.get("username")
             password = connection_obj.get("password")
-            selected_schema = str(connection_obj.get("schema") or connection_obj.get("default_schema") or "public").strip() or "public"
 
             if not all([database, user]):
                 raise ValueError("Database and user are required for PostgreSQL connection")
@@ -3547,10 +3519,9 @@ class DatabaseOperationsService:
                 tables = await conn.fetch("""
                     SELECT table_name
                     FROM information_schema.tables
-                    WHERE table_schema = $1
+                    WHERE table_schema = 'public'
                     AND table_type = 'BASE TABLE'
-                    ORDER BY table_name
-                """, selected_schema)
+                """)
 
                 schema_info = {}
 
@@ -3567,11 +3538,10 @@ class DatabaseOperationsService:
                             column_default
                         FROM information_schema.columns
                         WHERE table_name = $1
-                        AND table_schema = $2
+                        AND table_schema = 'public'
                         ORDER BY ordinal_position
                     """,
                         table_name,
-                        selected_schema,
                     )
 
                     # Get foreign keys
@@ -3587,10 +3557,8 @@ class DatabaseOperationsService:
                             ON ccu.constraint_name = tc.constraint_name
                         WHERE tc.constraint_type = 'FOREIGN KEY'
                         AND tc.table_name = $1
-                        AND tc.table_schema = $2
                     """,
                         table_name,
-                        selected_schema,
                     )
 
                     # Build column info and enrich json/jsonb columns with nested schema (sampled)
@@ -3604,12 +3572,9 @@ class DatabaseOperationsService:
                         if col_info["type"] in ("json", "jsonb"):
                             # Sample up to 10 non-null JSON values and infer nested schema
                             try:
-                                quoted_schema = AsyncSQLConnector._quote_pg_identifier(selected_schema)
-                                quoted_table = AsyncSQLConnector._quote_pg_identifier(table_name)
-                                quoted_column = AsyncSQLConnector._quote_pg_identifier(col_info["name"])
                                 sample_query = (
-                                    f"SELECT {quoted_column} AS v FROM {quoted_schema}.{quoted_table} "
-                                    f"WHERE {quoted_column} IS NOT NULL ORDER BY RANDOM() LIMIT 10"
+                                    f'SELECT "{col_info["name"]}" AS v FROM "{table_name}" '
+                                    f'WHERE "{col_info["name"]}" IS NOT NULL ORDER BY RANDOM() LIMIT 10'
                                 )
                                 rows = await conn.fetch(sample_query)
                                 merged_schema: dict[str, Any] | None = None
@@ -3636,19 +3601,13 @@ class DatabaseOperationsService:
                         columns_info.append(col_info)
 
                     schema_info[table_name] = {
-                        "schema": selected_schema,
                         "columns": columns_info,
                         "foreign_keys": [
                             {"column": fk["column_name"], "ref_table": fk["foreign_table_name"]} for fk in foreign_keys
                         ],
                     }
 
-                return {
-                    "datasource_type": "pg",
-                    "datasource_name": database,
-                    "selected_schema": selected_schema,
-                    "schema": schema_info,
-                }
+                return {"datasource_type": "pg", "datasource_name": database, "schema": schema_info}
 
             finally:
                 await conn.close()

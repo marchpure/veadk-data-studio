@@ -906,7 +906,7 @@ async def get_slack_config(
     workspace = await repo.get_by_tenant(auth.tenant_id)
 
     if not workspace:
-        return success_response(data=None, message="Slack not configured")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Slack not configured")
 
     return success_response(
         data=SlackConfigResponse.model_validate(workspace).model_dump(),

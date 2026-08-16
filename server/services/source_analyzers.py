@@ -32,7 +32,7 @@ from server.services.connections import ConnectionService
 from server.services.semantic_model_service import SemanticModelService
 
 DATABASE_ANALYZER_VERSION = "database-source-analyzer-v1"
-DATABASE_CONNECTION_TYPES = {"oracle", "pg", "postgres", "postgresql", "mysql", "sqlite"}
+DATABASE_CONNECTION_TYPES = {"oracle", "pg", "postgres", "postgresql", "mysql"}
 SOURCE_SKILL_CANDIDATE_VERSION = 1
 SOURCE_SKILL_GENERATOR = f"{DATABASE_ANALYZER_VERSION}:metadata-profile"
 
@@ -215,7 +215,7 @@ class SourceUnderstandingService:
     ) -> dict[str, Any]:
         connection = await self.resolve_connection(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
         if _normalize_connection_type(connection.type) not in DATABASE_CONNECTION_TYPES:
-            raise ValueError("Source Understanding currently supports Oracle, PostgreSQL, MySQL, and SQLite connections")
+            raise ValueError("Source Understanding currently supports Oracle, PostgreSQL, and MySQL connections")
 
         schema = await self._load_schema(session=session, connection=connection, refresh_schema=refresh_schema)
         normalized = self._normalize_schema(connection=connection, schema=schema, scope=scope or [])
@@ -504,7 +504,6 @@ class SourceUnderstandingService:
             applied_ids.append(candidate.id)
 
         await self._apply_dimensions_from_entities(session=session, model=model)
-        await self._apply_metric_dimension_links(session=session, model=model)
         review = json.loads(model.review_json or "{}")
         review["sourceUnderstandingLineage"] = lineage_entries
         model.review_json = _json_dump(review)
@@ -1756,58 +1755,6 @@ class SourceUnderstandingService:
                         sort_order=len(existing),
                     )
                 )
-
-    async def _apply_metric_dimension_links(self, *, session: AsyncSession, model: SemanticModel) -> None:
-        entities = (
-            (
-                await session.execute(select(SemanticModelEntity).where(SemanticModelEntity.model_id == model.id))
-            )
-            .scalars()
-            .all()
-        )
-        dimensions = (
-            (
-                await session.execute(select(SemanticModelDimension).where(SemanticModelDimension.model_id == model.id))
-            )
-            .scalars()
-            .all()
-        )
-        relationships = (
-            (
-                await session.execute(select(SemanticModelRelationship).where(SemanticModelRelationship.model_id == model.id))
-            )
-            .scalars()
-            .all()
-        )
-        metrics = (
-            (
-                await session.execute(select(SemanticModelMetric).where(SemanticModelMetric.model_id == model.id))
-            )
-            .scalars()
-            .all()
-        )
-        entity_slugs = {entity.slug for entity in entities}
-
-        for metric in metrics:
-            expression = f"{metric.formula or ''} {metric.filter_expr or ''} {metric.time_field or ''}".lower()
-            base_entity = next((slug for slug in entity_slugs if f"{slug.lower()}." in expression), None)
-            if not base_entity:
-                continue
-            reachable_entities = {base_entity}
-            for relationship in relationships:
-                if relationship.status == "rejected":
-                    continue
-                if relationship.from_entity == base_entity and relationship.validation_status == "valid":
-                    reachable_entities.add(relationship.to_entity)
-                if relationship.to_entity == base_entity and relationship.validation_status == "valid":
-                    reachable_entities.add(relationship.from_entity)
-            allowed = [
-                dimension.slug
-                for dimension in dimensions
-                if dimension.entity_slug in reachable_entities
-            ]
-            if allowed:
-                metric.dimensions_json = _json_dump(allowed)
 
     def _candidate_lineage(self, candidate: SourceSkillCandidate) -> dict[str, Any]:
         return {

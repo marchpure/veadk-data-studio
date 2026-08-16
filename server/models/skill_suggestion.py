@@ -39,19 +39,12 @@ class SkillSuggestion(Base):
     reviewed_by: Mapped[UUID | None] = mapped_column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     reviewed_via: Mapped[str | None] = mapped_column(String(10), nullable=True)
     reviewer_slack_user_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    reviewer_external_identity_id: Mapped[UUID | None] = mapped_column(
-        GUID(), ForeignKey("external_identities.id", ondelete="SET NULL"), nullable=True
-    )
     reviewer_display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=False), nullable=True)
 
     slack_channel_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     slack_message_ts: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    channel_delivery_target_id: Mapped[UUID | None] = mapped_column(
-        GUID(), ForeignKey("collaboration_delivery_targets.id", ondelete="SET NULL"), nullable=True
-    )
-    channel_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=False), default=datetime.now, server_default=func.current_timestamp()

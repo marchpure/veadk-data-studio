@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 litellm.drop_params = True
 
-from server.collaboration.slack.compatibility_adapter import SlackCompatibilityAdapter
 from server.constants.models import MODELS_BY_PROVIDER, SLACK_CLASSIFIER_MODEL_BY_PROVIDER
 from server.models.slack_conversation import SlackConversation
 from server.models.slack_event_log import SlackEventLog
@@ -33,6 +32,7 @@ from server.services.slack_thread_filter import (
     get_conversation,
     layer1_should_skip,
 )
+from server.services.unified_agent import stream_handoff_agent_response
 from server.utils.custom_logger import get_logger
 from server.utils.slack_block_elements import SlackBlockBuilder
 from server.utils.slack_chart_detector import SlackChartDetector
@@ -301,12 +301,49 @@ class SlackAgentService:
         tenant_id: UUID,
         user_id: UUID | None = None,
     ) -> tuple[str, UUID | None, bool, bool]:
-        """Compatibility shim over the platform-neutral ChannelAgentService."""
-        return await SlackCompatibilityAdapter.run_agent(
-            request=request,
-            session=session,
-            tenant_id=tenant_id,
-            user_id=user_id,
+        """Run the unified agent and collect the full response.
+
+        ``user_id`` is optional because Slack messages are workspace-scoped and may not map to
+        an individual Byaan user. The unified agent will fall back to org-scoped resources
+        (skills, GitHub repos/tokens) when ``user_id`` is None.
+
+        Returns:
+            Tuple of (response_text, notebook_id if created, dashboard_generated, query_executed)
+        """
+        response_parts = []
+        notebook_id: UUID | None = None
+        dashboard_generated = False
+        query_executed = False
+
+        async for event in stream_handoff_agent_response(request, session, tenant_id=tenant_id, user_id=user_id):
+            if event.startswith("data: "):
+                try:
+                    data = json.loads(event[6:])
+                    if data.get("type") == "content":
+                        response_parts.append(data.get("text", ""))
+                    elif data.get("type") == "notebook_created":
+                        notebook_id = UUID(str(data.get("notebook_id")))
+                    elif data.get("type") == "html_edit_complete":
+                        dashboard_generated = True
+                        logger.info("Dashboard generation detected (html_edit_complete event)")
+                    elif data.get("type") == "datasource_selected":
+                        query_executed = True
+                        logger.info("Query execution detected (datasource_selected event)")
+                    elif data.get("type") == "error":
+                        return (
+                            f"Error: {data.get('text', 'Unknown error occurred')}",
+                            notebook_id,
+                            dashboard_generated,
+                            query_executed,
+                        )
+                except json.JSONDecodeError:
+                    pass
+
+        return (
+            "".join(response_parts) or "I processed your request but have no response to share.",
+            notebook_id,
+            dashboard_generated,
+            query_executed,
         )
 
     @staticmethod
@@ -410,13 +447,32 @@ Output only the cleaned message in Markdown, nothing else."""
         tenant_id: UUID,
         session: AsyncSession,
     ) -> str:
-        """Build prompt with Slack compatibility instructions and inbound skills."""
-        return await SlackCompatibilityAdapter.build_slack_prompt(
-            question=question,
-            tenant_id=tenant_id,
-            session=session,
-            is_followup=False,
-        )
+        """Build prompt with Slack context instructions and inbound skills."""
+        inbound_skills = await CustomSkillRepository(session).get_by_type(tenant_id, "slack_inbound")
+
+        skill_instructions = ""
+        if inbound_skills:
+            combined = "\n\n".join(
+                f"### {skill.name}\n{skill.instructions}" for skill in inbound_skills if skill.is_active
+            )
+            skill_instructions = f"""
+SLACK INBOUND SKILLS (follow these instructions when processing this request):
+{combined}
+"""
+
+        return f"""This message came from Slack.
+{skill_instructions}
+When processing this request:
+- Format your response appropriately for Slack (use Slack markdown, keep it concise)
+- IMPORTANT: Always format query results as markdown tables using pipe (|) delimiters, even for small result sets
+- When creating tables with numeric data, include units in column headers (e.g., "Revenue (USD)", "Duration (hours)") rather than in cell values (e.g., "1500" not "$1500")
+- Example table format:
+  | Column1 | Column2 | Column3 |
+  |---------|---------|---------|
+  | Value1  | Value2  | Value3  |
+
+User's question:
+{question}"""
 
     @staticmethod
     async def _upload_dashboard_screenshot(
@@ -839,13 +895,35 @@ Output only the cleaned message in Markdown, nothing else."""
         tenant_id: UUID,
         session: AsyncSession,
     ) -> str:
-        """Build agent prompt for a thread follow-up (no explicit mention)."""
-        return await SlackCompatibilityAdapter.build_slack_prompt(
-            question=question,
-            tenant_id=tenant_id,
-            session=session,
-            is_followup=True,
-        )
+        """Build agent prompt for a thread follow-up (no explicit mention).
+
+        Mirrors the mention path: relies on the thread's notebook memory for
+        prior context so we do not double-inject Slack history the agent
+        already remembers.
+        """
+        inbound_skills = await CustomSkillRepository(session).get_by_type(tenant_id, "slack_inbound")
+
+        skill_instructions = ""
+        if inbound_skills:
+            combined = "\n\n".join(
+                f"### {skill.name}\n{skill.instructions}" for skill in inbound_skills if skill.is_active
+            )
+            skill_instructions = f"""
+SLACK INBOUND SKILLS (follow these instructions when processing this request):
+{combined}
+"""
+
+        return f"""This message came from Slack as a follow-up in an existing thread.
+{skill_instructions}
+When processing this request:
+- The user did NOT re-mention Byaan; treat this as a continuation of the thread's conversation
+- Use your notebook memory for prior context (queries, replies, data seen so far)
+- Format your response for Slack (use Slack markdown, keep it concise)
+- IMPORTANT: Always format query results as markdown tables using pipe (|) delimiters
+- Include units in column headers rather than cell values
+
+User's newest message:
+{question}"""
 
     @staticmethod
     async def process_generate_dashboard_request(

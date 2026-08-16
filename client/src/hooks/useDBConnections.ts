@@ -11,7 +11,6 @@ import {
   type SourceResourceCreateRequest,
   type ConnectorDefinition,
   type FeishuOAuthStartResponse,
-  type FeishuOAuthResult,
   type FeishuStatus,
   type SourceConnection,
   type SourceConnectionCreateRequest,
@@ -304,14 +303,6 @@ export function useStartFeishuOAuth() {
   })
 }
 
-export function useFeishuOAuthResult() {
-  return useMutation({
-    mutationFn: async (state: string): Promise<FeishuOAuthResult> => {
-      return ApiService.getFeishuOAuthResult(state)
-    },
-  })
-}
-
 export function useCreateSourceConnection() {
   const queryClient = useQueryClient()
 
@@ -405,8 +396,6 @@ export function useListSourceConnectionResources(params: {
     enabled: !!params.connectionId,
     staleTime: 10 * 1000,
     gcTime: 2 * 60 * 1000,
-    retry: (failureCount, error: Error & { code?: string }) =>
-      error.code !== 'reauthorization_required' && failureCount < 2,
   })
 }
 
@@ -422,16 +411,7 @@ export function useImportSourceResources() {
       queryClient.invalidateQueries({ queryKey: ['source-resources'] })
       queryClient.invalidateQueries({ queryKey: sourceConnectorKeys.all })
       if (data.failed > 0) {
-        const failedSummary = data.results
-          .filter(item => item.status !== 'ready')
-          .slice(0, 2)
-          .map(item => {
-            const name = item.selection.name || item.selection.external_id
-            const message = item.error?.message || item.status
-            return `${name}: ${message}`
-          })
-          .join('; ')
-        showToast.error(`Imported ${data.succeeded}; ${data.failed} failed${failedSummary ? ` - ${failedSummary}` : ''}`)
+        showToast.error(`Imported ${data.succeeded}; ${data.failed} failed`)
       } else {
         showToast.success(`Imported ${data.succeeded} source resource${data.succeeded !== 1 ? 's' : ''}`)
       }

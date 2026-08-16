@@ -4,8 +4,6 @@ set -e
 echo "=== Starting Backend ==="
 
 cd /app/server
-MIGRATION_LOCK_FILE="${MIGRATION_LOCK_FILE:-/data/logs/.migration.lock}"
-mkdir -p "$(dirname "$MIGRATION_LOCK_FILE")"
 
 # Wait for PostgreSQL to be ready
 echo "Waiting for PostgreSQL..."
@@ -27,29 +25,22 @@ if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
     exit 1
 fi
 
-# Record current revision before upgrading. Human-readable revision ids are used
-# in newer migrations, so do not restrict this to hexadecimal ids.
-CURRENT_REV=$(uv run --frozen --no-sync alembic current 2>/dev/null | awk '/^[^[:space:]]+/ {print $1; exit}')
+# Record current revision before upgrading
+CURRENT_REV=$(uv run --frozen --no-sync alembic current 2>/dev/null | grep -oE '^[a-f0-9]+' | head -1)
 
-# Run database migrations under a volume lock so replacement containers sharing
-# /data cannot both apply DDL at the same time.
+# Run database migrations
 echo "Running database migrations..."
-set +e
-flock "$MIGRATION_LOCK_FILE" uv run --frozen --no-sync alembic upgrade head
-MIGRATION_EXIT_CODE=$?
-set -e
+uv run --frozen --no-sync alembic upgrade head
 
+MIGRATION_EXIT_CODE=$?
 if [ $MIGRATION_EXIT_CODE -eq 0 ]; then
     echo "Migrations completed successfully"
 else
     echo "ERROR: Migration failed with exit code: $MIGRATION_EXIT_CODE"
     if [ -n "$CURRENT_REV" ]; then
         echo "Attempting to rollback to previous revision: $CURRENT_REV"
-        set +e
-        flock "$MIGRATION_LOCK_FILE" uv run --frozen --no-sync alembic downgrade "$CURRENT_REV"
-        ROLLBACK_EXIT_CODE=$?
-        set -e
-        if [ $ROLLBACK_EXIT_CODE -eq 0 ]; then
+        uv run --frozen --no-sync alembic downgrade "$CURRENT_REV"
+        if [ $? -eq 0 ]; then
             echo "Database rolled back successfully."
             echo "Please run: ./start.sh rollback"
         else
