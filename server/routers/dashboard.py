@@ -46,6 +46,13 @@ class DashboardPublishRequest(BaseModel):
     change_summary: str = Field(default="Publish structured dashboard", min_length=1)
 
 
+class DashboardReloadRequest(BaseModel):
+    base_etag: str = Field(min_length=1)
+    semantic_model_versions: dict[str, str] = Field(default_factory=dict)
+    source_snapshot_ids: list[str] | None = None
+    change_summary: str = Field(default="Reload Dashboard semantic bindings", min_length=1)
+
+
 class DashboardQueryRequest(BaseModel):
     filters: dict[str, Any] = Field(default_factory=dict)
     data_view_ids: list[str] | None = None
@@ -363,6 +370,35 @@ async def publish_dashboard_asset(
         actor_type="human",
     )
     return success_response(data=_version_payload(version), message="Dashboard published")
+
+
+@router.post("/dashboard-assets/{asset_id}/reload")
+async def reload_dashboard_asset(
+    asset_id: UUID,
+    payload: DashboardReloadRequest,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_EDIT)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    _require_non_viewer(auth)
+    repo = DashboardRepository(session)
+    asset = await _get_asset_or_404(repo, auth, asset_id)
+    if asset.notebook_id:
+        await _assert_notebook_access(session, asset.notebook_id, auth)
+    version, semantic_diff = await DashboardService().reload_dashboard(
+        session=session,
+        tenant_id=auth.tenant_id,
+        asset_id=asset_id,
+        actor_id=auth.user_id,
+        base_etag=payload.base_etag,
+        semantic_model_versions=payload.semantic_model_versions,
+        source_snapshot_ids=payload.source_snapshot_ids,
+        change_summary=payload.change_summary,
+        actor_type="human",
+    )
+    return success_response(
+        data={"draft": _version_payload(version), "semantic_diff": semantic_diff},
+        message="Dashboard reload draft created",
+    )
 
 
 @router.post("/dashboard-assets/{asset_id}/query")

@@ -307,6 +307,40 @@ Commit:
 
 - `33130f5` `dashboard: render structured dashboard workspace`
 
+### Phase 4 Workflow Slice: Review, Preview, Publish, Reload Draft
+
+Status: implemented.
+
+Allowlist:
+
+- `server/services/dashboard.py` - shared DashboardService lifecycle addition for governed reload draft creation and semantic diff metadata.
+- `server/routers/dashboard.py` - REST contract addition for `/api/dashboard-assets/{id}/reload`.
+- `server/tests/test_dashboard_rest_api.py`
+- `client/src/features/dashboard/pages/DashboardWorkspacePage.tsx`
+- `client/src/services/dashboard.ts`
+- `client/src/types/dashboard.ts`
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Behavior:
+
+- Added governed reload draft creation that requires current ETag, preserves the published immutable version, creates a new draft from the published manifest, stores semantic/source diff metadata, marks the asset `in_review`, and audits `dashboard.reload`.
+- Added REST `/api/dashboard-assets/{id}/reload` behind `dashboard.edit` scope and notebook access checks.
+- Extended the human workspace to switch versions, run published versions, preview draft versions, validate, patch title through JSON Patch, create reload review drafts, publish blocker-free drafts, and show semantic diff plus recent audit events.
+- Frontend calls remain bounded to the existing `/api/dashboard-assets` contract and still consume canonical `dashboard.manifest.v1` / `dashboard.run.v1`.
+- This slice does not yet implement share/export compatibility or browser screenshot acceptance.
+
+Tests:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> passed, `5 passed`.
+- `cd server && uv run ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed.
+- `cd client && pnpm build:check` -> passed.
+- `cd client && pnpm lint` -> passed with warnings only from existing frontend lint debt.
+- `git diff --check` -> passed.
+
+Commit:
+
+- pending `dashboard: add review reload workflow`
+
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
@@ -320,6 +354,7 @@ Commit:
 | `4de07e7` | `dashboard: expose dashboard rest contract` | Phase 3 REST slice | `pytest tests/test_dashboard_rest_api.py` -> 2 passed; `ruff check routers/dashboard.py main.py repositories/dashboard.py auth/scopes.py tests/test_dashboard_rest_api.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `c3e28b1` | `dashboard: expose dashboard mcp contract` | Phase 3 MCP slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_lifecycle_service.py` -> 7 passed; `ruff check services/dashboard.py routers/dashboard.py mcp/tool_wrappers.py mcp/tools.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `33130f5` | `dashboard: render structured dashboard workspace` | Phase 4 human workspace inventory/view slice | `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| pending | `dashboard: add review reload workflow` | Phase 4 review/preview/publish/reload slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> 5 passed; `ruff check services/dashboard.py routers/dashboard.py tests/test_dashboard_rest_api.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with warnings only; `git diff --check` -> passed | Pending push |
 
 ## Acceptance Evidence
 

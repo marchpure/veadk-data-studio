@@ -21,12 +21,14 @@ import { DashboardService } from '../../../services/dashboard'
 import type {
   DashboardAsset,
   DashboardAssetDetail,
+  DashboardAuditEvent,
   DashboardDataView,
   DashboardFilter,
   DashboardLineageRef,
   DashboardManifest,
   DashboardRun,
   DashboardRunView,
+  DashboardSemanticDiff,
   DashboardTile,
   DashboardVersion,
   DashboardVersionSummary,
@@ -38,9 +40,14 @@ type WorkspaceTab = 'dashboard' | 'data' | 'lineage'
 const statusTone: Record<string, string> = {
   published: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
   draft: 'border-sky-500/30 bg-sky-500/10 text-sky-200',
+  in_review: 'border-sky-500/30 bg-sky-500/10 text-sky-200',
   legacy_unstructured: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
   stale: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
   blocked: 'border-red-500/30 bg-red-500/10 text-red-200',
+  partial: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
+  success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
+  pending: 'border-[#3a444d] bg-[#20262b] text-[#cdd3d8]',
+  running: 'border-sky-500/30 bg-sky-500/10 text-sky-200',
 }
 
 export default function DashboardWorkspacePage() {
@@ -52,13 +59,17 @@ export default function DashboardWorkspacePage() {
   const [run, setRun] = useState<DashboardRun | null>(null)
   const [filters, setFilters] = useState<Record<string, unknown>>({})
   const [tab, setTab] = useState<WorkspaceTab>('dashboard')
+  const [versionNum, setVersionNum] = useState<number | null>(null)
   const [query, setQuery] = useState('')
   const [loadingAssets, setLoadingAssets] = useState(true)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [loadingRun, setLoadingRun] = useState(false)
+  const [loadingWorkflow, setLoadingWorkflow] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [validationMessage, setValidationMessage] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
+  const [semanticDiff, setSemanticDiff] = useState<DashboardSemanticDiff | null>(null)
+  const [auditEvents, setAuditEvents] = useState<DashboardAuditEvent[]>([])
 
   const loadAssets = useCallback(async () => {
     setLoadingAssets(true)
@@ -76,7 +87,16 @@ export default function DashboardWorkspacePage() {
     }
   }, [assetId, navigate])
 
-  const loadDetail = useCallback(async (id: string) => {
+  const loadAudit = useCallback(async (id: string) => {
+    try {
+      const response = await DashboardService.getAudit(id)
+      setAuditEvents(response.items)
+    } catch {
+      setAuditEvents([])
+    }
+  }, [])
+
+  const loadDetail = useCallback(async (id: string, requestedVersionNum?: number | null) => {
     setLoadingDetail(true)
     setError(null)
     setValidationMessage(null)
@@ -84,33 +104,37 @@ export default function DashboardWorkspacePage() {
       const asset = await DashboardService.getAsset(id)
       setSelectedAsset(asset)
       setEditingTitle(asset.name)
-      const versionSummary = chooseVersion(asset.versions)
+      const versionSummary = chooseVersion(asset.versions, requestedVersionNum)
       if (!versionSummary) {
         setSelectedVersion(null)
         setRun(null)
+        setVersionNum(null)
         return
       }
       const version = await DashboardService.getVersion(id, versionSummary.version_num)
       setSelectedVersion(version)
+      setVersionNum(version.version_num)
+      const diff = extractSemanticDiff(version)
+      setSemanticDiff(diff ?? extractSemanticDiff(asset))
+      void loadAudit(id)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load Dashboard')
     } finally {
       setLoadingDetail(false)
     }
-  }, [])
+  }, [loadAudit])
 
   const executeRun = useCallback(async (asset: DashboardAssetDetail, version: DashboardVersion, nextFilters: Record<string, unknown>) => {
-    if (!asset.published_version_id || version.status !== 'published') {
-      setRun(null)
-      return
-    }
     setLoadingRun(true)
     try {
-      const response = await DashboardService.query(asset.id, {
+      const payload = {
         filters: nextFilters,
         data_view_ids: version.manifest.data_views.map(view => view.id),
         correlation_id: 'human-dashboard-workspace',
-      })
+      }
+      const response = version.status === 'published'
+        ? await DashboardService.query(asset.id, payload)
+        : await DashboardService.preview(asset.id, payload)
       setRun(response)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to execute Dashboard')
@@ -126,7 +150,10 @@ export default function DashboardWorkspacePage() {
 
   useEffect(() => {
     if (assetId) {
-      void loadDetail(assetId)
+      setVersionNum(null)
+      setSemanticDiff(null)
+      setAuditEvents([])
+      void loadDetail(assetId, null)
     }
   }, [assetId, loadDetail])
 
@@ -144,7 +171,11 @@ export default function DashboardWorkspacePage() {
 
   const manifest = selectedVersion?.manifest ?? null
   const blockers = selectedVersion?.validation_result.blockers ?? manifest?.migration.blockers ?? []
-  const warnings = [...(selectedVersion?.validation_result.warnings ?? []), ...(run?.warnings ?? [])]
+  const semanticWarnings = semanticDiff?.warnings ?? []
+  const semanticBlockers = semanticDiff?.blockers ?? []
+  const allBlockers = [...blockers, ...semanticBlockers]
+  const warnings = [...(selectedVersion?.validation_result.warnings ?? []), ...semanticWarnings, ...(run?.warnings ?? [])]
+  const canPublish = Boolean(selectedAsset && selectedVersion?.status === 'draft' && allBlockers.length === 0)
 
   const handleFilterChange = (filter: DashboardFilter, value: string) => {
     setFilters(previous => {
@@ -160,30 +191,95 @@ export default function DashboardWorkspacePage() {
 
   const validateDraft = async () => {
     if (!selectedAsset) return
+    setLoadingWorkflow(true)
     setValidationMessage(null)
     try {
       const response = await DashboardService.validate(selectedAsset.id)
       const blockerCount = response.validation.blockers?.length ?? 0
       const warningCount = response.validation.warnings?.length ?? 0
       setValidationMessage(`${blockerCount} blockers, ${warningCount} warnings`)
+      await loadDetail(selectedAsset.id, versionNum)
     } catch (err) {
       setValidationMessage(err instanceof Error ? err.message : 'Validation failed')
+    } finally {
+      setLoadingWorkflow(false)
     }
   }
 
   const patchTitle = async () => {
     if (!selectedAsset || !selectedVersion || !editingTitle.trim()) return
+    setLoadingWorkflow(true)
     try {
       await DashboardService.patchDraft(selectedAsset.id, {
         base_etag: selectedAsset.etag,
         json_patch: [{ op: 'replace', path: '/title', value: editingTitle.trim() }],
         change_summary: 'Update Dashboard title from workspace',
       })
-      await loadDetail(selectedAsset.id)
+      await loadDetail(selectedAsset.id, null)
       await loadAssets()
       setValidationMessage('Draft title updated')
     } catch (err) {
       setValidationMessage(err instanceof Error ? err.message : 'Draft update failed')
+    } finally {
+      setLoadingWorkflow(false)
+    }
+  }
+
+  const createReloadDraft = async () => {
+    if (!selectedAsset || !selectedVersion) return
+    setLoadingWorkflow(true)
+    setValidationMessage(null)
+    try {
+      const nextModelVersions = Object.fromEntries(
+        selectedVersion.manifest.semantic_bindings.map(binding => [binding.id, binding.model_version]),
+      )
+      const response = await DashboardService.reload(selectedAsset.id, {
+        base_etag: selectedAsset.etag,
+        semantic_model_versions: nextModelVersions,
+        source_snapshot_ids: selectedVersion.pinned_source_snapshots,
+        change_summary: 'Reload Dashboard from workspace review',
+      })
+      setSemanticDiff(response.semantic_diff)
+      await loadDetail(selectedAsset.id, response.draft.version_num)
+      await loadAssets()
+      setValidationMessage('Reload draft ready for review')
+    } catch (err) {
+      setValidationMessage(err instanceof Error ? err.message : 'Reload draft failed')
+    } finally {
+      setLoadingWorkflow(false)
+    }
+  }
+
+  const publishDraft = async () => {
+    if (!selectedAsset || !selectedVersion || !canPublish) return
+    setLoadingWorkflow(true)
+    setValidationMessage(null)
+    try {
+      const version = await DashboardService.publish(selectedAsset.id, {
+        base_etag: selectedAsset.etag,
+        change_summary: 'Publish reviewed Dashboard from workspace',
+      })
+      await loadDetail(selectedAsset.id, version.version_num)
+      await loadAssets()
+      setValidationMessage(`Published v${version.version_num}`)
+    } catch (err) {
+      setValidationMessage(err instanceof Error ? err.message : 'Publish failed')
+    } finally {
+      setLoadingWorkflow(false)
+    }
+  }
+
+  const selectVersion = async (nextVersionNum: number) => {
+    if (!selectedAsset) return
+    setVersionNum(nextVersionNum)
+    await loadDetail(selectedAsset.id, nextVersionNum)
+  }
+
+  const executeSelectedVersion = async () => {
+    if (!selectedAsset || !selectedVersion) return
+    await executeRun(selectedAsset, selectedVersion, filters)
+    if (selectedVersion.status !== 'published') {
+      setValidationMessage('Preview executed against draft version')
     }
   }
 
@@ -254,9 +350,25 @@ export default function DashboardWorkspacePage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="min-w-0 truncate text-xl font-semibold">{manifest?.title || selectedAsset.name}</h1>
                     <StatusPill status={selectedAsset.lifecycle} />
+                    <StatusPill status={selectedVersion?.status} />
                     {selectedVersion?.is_published_immutable && <Badge tone="ready">Immutable</Badge>}
                   </div>
                   <p className="mt-2 max-w-4xl text-sm leading-6 text-[#a4adb5]">{manifest?.description || selectedAsset.description || 'No description'}</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <select
+                      value={versionNum ?? ''}
+                      onChange={event => void selectVersion(Number(event.target.value))}
+                      className="h-8 rounded border border-[#303940] bg-[#0e1114] px-2 text-xs text-[#eef2f3]"
+                      aria-label="Dashboard version"
+                    >
+                      {selectedAsset.versions.map(version => (
+                        <option key={version.id} value={version.version_num}>
+                          v{version.version_num} {version.status}
+                        </option>
+                      ))}
+                    </select>
+                    {run?.preview && <Badge tone="warning">Preview run</Badge>}
+                  </div>
                   <div className="mt-4 grid gap-2 text-xs text-[#9aa4ac] md:grid-cols-4">
                     <HeaderSignal icon={<ShieldCheck className="h-4 w-4" />} label="Version" value={selectedVersion ? `v${selectedVersion.version_num} ${selectedVersion.status}` : 'None'} />
                     <HeaderSignal icon={<GitBranch className="h-4 w-4" />} label="Filter Digest" value={run?.filter_digest ? shortHash(run.filter_digest) : 'Not run'} />
@@ -269,16 +381,18 @@ export default function DashboardWorkspacePage() {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <div className="text-xs font-medium uppercase text-[#818c95]">Review state</div>
-                      <div className="mt-1 text-sm text-[#d6dde2]">{blockers.length} blockers, {warnings.length} warnings</div>
+                      <div className="mt-1 text-sm text-[#d6dde2]">{allBlockers.length} blockers, {warnings.length} warnings</div>
                     </div>
-                    <Button variant="secondary" onClick={() => selectedAsset && selectedVersion && executeRun(selectedAsset, selectedVersion, filters)} disabled={loadingRun}>
+                    <Button variant="secondary" onClick={() => void executeSelectedVersion()} disabled={loadingRun}>
                       {loadingRun ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                      Reload
+                      {selectedVersion?.status === 'published' ? 'Run' : 'Preview'}
                     </Button>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button variant="secondary" onClick={validateDraft}>Validate</Button>
-                    <Button variant="secondary" onClick={patchTitle} disabled={!selectedVersion || selectedVersion.status === 'published'}>Patch Title</Button>
+                    <Button variant="secondary" onClick={() => void validateDraft()} disabled={loadingWorkflow}>Validate</Button>
+                    <Button variant="secondary" onClick={() => void patchTitle()} disabled={loadingWorkflow || !selectedVersion || selectedVersion.status === 'published'}>Patch Title</Button>
+                    <Button variant="secondary" onClick={() => void createReloadDraft()} disabled={loadingWorkflow || !selectedAsset.published_version_id}>Reload Draft</Button>
+                    <Button variant="secondary" onClick={() => void publishDraft()} disabled={loadingWorkflow || !canPublish}>Publish</Button>
                   </div>
                   <Input
                     value={editingTitle}
@@ -289,6 +403,11 @@ export default function DashboardWorkspacePage() {
                   {validationMessage && <div className="mt-2 text-xs text-[#a4adb5]">{validationMessage}</div>}
                 </section>
               </header>
+
+              <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <SemanticDiffPanel diff={semanticDiff} blockers={allBlockers} warnings={warnings} />
+                <AuditTrail events={auditEvents} />
+              </section>
 
               {manifest && (
                 <section className="rounded-md border border-[#293037] bg-[#14181c]">
@@ -316,8 +435,26 @@ export default function DashboardWorkspacePage() {
   )
 }
 
-function chooseVersion(versions: DashboardVersionSummary[]): DashboardVersionSummary | null {
+function chooseVersion(versions: DashboardVersionSummary[], requestedVersionNum?: number | null): DashboardVersionSummary | null {
+  if (requestedVersionNum) {
+    const requested = versions.find(version => version.version_num === requestedVersionNum)
+    if (requested) return requested
+  }
   return versions.find(version => version.status === 'published') ?? versions[0] ?? null
+}
+
+function extractSemanticDiff(source: DashboardVersion | DashboardAssetDetail | null): DashboardSemanticDiff | null {
+  if (!source) return null
+  if ('validation_result' in source) {
+    const diff = source.validation_result.semantic_diff
+    return isRecord(diff) ? diff as DashboardSemanticDiff : null
+  }
+  const diff = source.health_summary.semantic_diff
+  return isRecord(diff) ? diff as DashboardSemanticDiff : null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function FilterBar({ filters, values, onChange }: { filters: DashboardFilter[]; values: Record<string, unknown>; onChange: (filter: DashboardFilter, value: string) => void }) {
@@ -541,6 +678,65 @@ function EvidenceList({ evidence }: { evidence: Array<{ id: string; title: strin
         </div>
       )}
     </div>
+  )
+}
+
+function SemanticDiffPanel({ diff, blockers, warnings }: { diff: DashboardSemanticDiff | null; blockers: string[]; warnings: string[] }) {
+  const modelChanges = diff?.model_version_changes ?? []
+  const sourceChanges = diff?.source_snapshot_changes ?? []
+  const hasChanges = modelChanges.length > 0 || sourceChanges.length > 0
+  return (
+    <section className="rounded-md border border-[#293037] bg-[#14181c] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-[#f3f5f5]">Review diff</h2>
+        <StatusPill status={blockers.length > 0 ? 'blocked' : hasChanges ? 'in_review' : 'pending'} />
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <DiffList title="Model pins" items={modelChanges.map(item => `${item.model_slug}: ${item.from} -> ${item.to}`)} />
+        <DiffList title="Source snapshots" items={sourceChanges.map(item => `${item.model_slug}: ${item.from.join(', ') || 'none'} -> ${item.to.join(', ') || 'none'}`)} />
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <DiffList title="Blockers" items={blockers} tone="blocked" />
+        <DiffList title="Warnings" items={warnings} tone="warning" />
+      </div>
+    </section>
+  )
+}
+
+function DiffList({ title, items, tone = 'neutral' }: { title: string; items: string[]; tone?: 'neutral' | 'warning' | 'blocked' }) {
+  const textClass = tone === 'blocked' ? 'text-red-100' : tone === 'warning' ? 'text-amber-100' : 'text-[#d6dde2]'
+  return (
+    <div className="rounded border border-[#303940] bg-[#101316] p-3">
+      <div className="text-xs font-medium uppercase text-[#818c95]">{title}</div>
+      {items.length === 0 ? (
+        <div className="mt-2 text-sm text-[#7f8a93]">No changes</div>
+      ) : (
+        <div className="mt-2 space-y-1">
+          {items.slice(0, 4).map((item, index) => <div key={`${title}-${index}`} className={cn('truncate text-sm', textClass)}>{item}</div>)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AuditTrail({ events }: { events: DashboardAuditEvent[] }) {
+  return (
+    <section className="rounded-md border border-[#293037] bg-[#14181c] p-4">
+      <h2 className="text-sm font-semibold text-[#f3f5f5]">Audit</h2>
+      <div className="mt-3 space-y-2">
+        {events.length === 0 ? (
+          <div className="text-sm text-[#7f8a93]">No audit events</div>
+        ) : events.slice(0, 5).map(event => (
+          <div key={event.id} className="rounded border border-[#303940] bg-[#101316] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="truncate text-sm text-[#d6dde2]">{event.action}</div>
+              <StatusPill status={event.outcome} />
+            </div>
+            <div className="mt-1 truncate text-xs text-[#818c95]">{event.created_at ? formatDate(event.created_at) : 'No timestamp'}</div>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 

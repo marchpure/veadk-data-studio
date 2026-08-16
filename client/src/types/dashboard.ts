@@ -170,6 +170,7 @@ export interface DashboardVersionSummary {
     blockers?: string[]
     warnings?: string[]
     validated_at?: string
+    semantic_diff?: DashboardSemanticDiff
   }
   renderer_version: string | null
   migration_state: string
@@ -232,4 +233,52 @@ export interface DashboardRun {
   views: DashboardRunView[]
   warnings?: string[]
   errors?: unknown[]
+  preview?: boolean
+}
+
+export interface DashboardSemanticDiff {
+  base_version_id?: string | null
+  base_version_num?: number | null
+  draft_version_id?: string | null
+  draft_version_num?: number | null
+  model_version_changes?: Array<{
+    binding_id: string
+    model_slug: string
+    from: string
+    to: string
+  }>
+  source_snapshot_changes?: Array<{
+    binding_id: string
+    model_slug: string
+    from: string[]
+    to: string[]
+  }>
+  filter_changes?: unknown[]
+  tile_changes?: unknown[]
+  policy_changes?: unknown[]
+  warnings?: string[]
+  blockers?: string[]
+}
+
+export interface DashboardState {
+  asset: DashboardAsset
+  versions: DashboardVersionSummary[]
+  draft_version_id: string | null
+  published_version_id: string | null
+}
+
+export interface DashboardAuditEvent {
+  id: string
+  asset_id: string | null
+  version_id: string | null
+  run_id: string | null
+  actor_type: string
+  actor_id: string
+  action: string
+  correlation_id?: string | null
+  before_digest?: string | null
+  after_digest?: string | null
+  outcome: string
+  details: Record<string, unknown>
+  created_at: string | null
 }

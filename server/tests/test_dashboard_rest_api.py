@@ -194,6 +194,47 @@ async def test_dashboard_asset_rest_lifecycle_query_state_lineage_and_audit(
 
     monkeypatch.setattr("server.services.dashboard.QueryService.execute_saved_query", fake_execute_saved_query)
 
+    preview_response = await test_client.post(
+        f"/api/dashboard-assets/{asset['id']}/preview",
+        json={"data_view_ids": ["dv-saved-revenue"], "correlation_id": "corr-preview"},
+    )
+    assert preview_response.status_code == 200
+    preview_run = preview_response.json()["data"]
+    assert preview_run["preview"] is True
+    assert preview_run["dashboard_version_id"] == published["id"]
+
+    published_asset_response = await test_client.get(f"/api/dashboard-assets/{asset['id']}")
+    assert published_asset_response.status_code == 200
+    published_asset = published_asset_response.json()["data"]
+    reload_response = await test_client.post(
+        f"/api/dashboard-assets/{asset['id']}/reload",
+        json={
+            "base_etag": published_asset["etag"],
+            "semantic_model_versions": {"sales": "v2"},
+            "source_snapshot_ids": ["snapshot-2"],
+            "change_summary": "reload model pins",
+        },
+    )
+    assert reload_response.status_code == 200
+    reload_payload = reload_response.json()["data"]
+    reload_draft = reload_payload["draft"]
+    assert reload_draft["status"] == "draft"
+    assert reload_draft["version_num"] == 3
+    assert reload_draft["manifest"]["migration"]["state"] == "needs_review"
+    assert reload_draft["pinned_model_versions"] == {"sales": "v2"}
+    assert reload_draft["pinned_source_snapshots"] == ["snapshot-2"]
+    assert reload_payload["semantic_diff"]["model_version_changes"][0]["from"] == "v1"
+    assert reload_payload["semantic_diff"]["model_version_changes"][0]["to"] == "v2"
+    assert reload_payload["semantic_diff"]["source_snapshot_changes"][0]["from"] == ["snapshot-1"]
+    assert reload_payload["semantic_diff"]["source_snapshot_changes"][0]["to"] == ["snapshot-2"]
+
+    state_after_reload_response = await test_client.get(f"/api/dashboard-assets/{asset['id']}/state")
+    assert state_after_reload_response.status_code == 200
+    state_after_reload = state_after_reload_response.json()["data"]
+    assert state_after_reload["asset"]["lifecycle"] == "in_review"
+    assert state_after_reload["published_version_id"] == published["id"]
+    assert state_after_reload["draft_version_id"] == reload_draft["id"]
+
     query_response = await test_client.post(
         f"/api/dashboard-assets/{asset['id']}/query",
         json={
@@ -223,8 +264,10 @@ async def test_dashboard_asset_rest_lifecycle_query_state_lineage_and_audit(
     state_response = await test_client.get(f"/api/dashboard-assets/{asset['id']}/state")
     assert state_response.status_code == 200
     state_payload = state_response.json()["data"]
-    assert state_payload["asset"]["lifecycle"] == "published"
-    assert len(state_payload["versions"]) == 2
+    assert state_payload["asset"]["lifecycle"] == "in_review"
+    assert state_payload["published_version_id"] == published["id"]
+    assert state_payload["draft_version_id"] == reload_draft["id"]
+    assert len(state_payload["versions"]) == 3
 
     lineage_response = await test_client.get(f"/api/dashboard-assets/{asset['id']}/lineage")
     assert lineage_response.status_code == 200
@@ -238,6 +281,8 @@ async def test_dashboard_asset_rest_lifecycle_query_state_lineage_and_audit(
     assert "dashboard.draft.create" in audit_actions
     assert "dashboard.draft.patch" in audit_actions
     assert "dashboard.publish" in audit_actions
+    assert "dashboard.preview" in audit_actions
+    assert "dashboard.reload" in audit_actions
     assert "dashboard.query" in audit_actions
 
 

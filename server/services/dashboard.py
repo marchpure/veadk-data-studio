@@ -360,6 +360,107 @@ class DashboardService:
         await session.refresh(draft)
         return draft
 
+    async def reload_dashboard(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        asset_id: UUID,
+        actor_id: UUID,
+        base_etag: str,
+        change_summary: str,
+        semantic_model_versions: dict[str, str] | None = None,
+        source_snapshot_ids: list[str] | None = None,
+        actor_type: str = "human",
+    ) -> tuple[Dashboard, dict[str, Any]]:
+        repo = DashboardRepository(session)
+        asset = await repo.get_asset(asset_id, tenant_id)
+        if not asset:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard asset not found")
+        if asset.etag != base_etag:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "etag_conflict", "current_etag": asset.etag},
+            )
+        if not asset.published_version_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Dashboard has no published version to reload")
+
+        published = await repo.get_asset_version(
+            tenant_id=tenant_id,
+            asset_id=asset_id,
+            version_id=asset.published_version_id,
+        )
+        if not published or not published.manifest_json:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Published dashboard version not found")
+
+        manifest = json.loads(self.canonical_json(published.manifest_json))
+        semantic_diff = self._apply_reload_targets(
+            manifest=manifest,
+            base_version=published,
+            semantic_model_versions=semantic_model_versions or {},
+            source_snapshot_ids=source_snapshot_ids,
+        )
+        manifest.setdefault("provenance", {})["updated_at"] = datetime.utcnow().isoformat()
+        manifest.setdefault("migration", {})["state"] = "needs_review"
+        manifest = self.validate_manifest_payload(manifest)
+        validation = self.validation_summary(manifest)
+        semantic_diff["blockers"] = validation["blockers"]
+        semantic_diff["warnings"] = [*semantic_diff["warnings"], *validation["warnings"]]
+
+        content_hash = self.digest_payload(manifest)
+        next_version = await repo.get_asset_next_version_num(asset_id)
+        version = Dashboard(
+            tenant_id=tenant_id,
+            notebook_id=published.notebook_id,
+            asset_id=asset.id,
+            version_num=next_version,
+            html_content=published.html_content,
+            manifest_schema_version=manifest["schema_version"],
+            manifest_json=manifest,
+            content_hash=content_hash,
+            status="draft",
+            created_by=actor_id,
+            actor_type=actor_type,
+            change_summary=change_summary,
+            pinned_model_versions_json=self._manifest_model_versions(manifest),
+            pinned_source_snapshots_json=self._manifest_source_snapshots(manifest),
+            validation_result_json={**validation, "semantic_diff": semantic_diff},
+            migration_state=manifest["migration"]["state"],
+            is_published_immutable=False,
+        )
+        session.add(version)
+        await session.flush()
+
+        semantic_diff["draft_version_id"] = str(version.id)
+        semantic_diff["draft_version_num"] = version.version_num
+        version.validation_result_json = {**validation, "semantic_diff": semantic_diff}
+        asset.current_draft_version_id = version.id
+        asset.lifecycle = "in_review"
+        asset.etag = self.digest_payload({"reload": str(version.id), "base_etag": base_etag, "content_hash": content_hash})
+        asset.health_summary_json = {
+            **(asset.health_summary_json or {}),
+            "freshness": "unknown",
+            "last_reload_draft_version_id": str(version.id),
+            "last_reload_base_version_id": str(published.id),
+            "semantic_diff": semantic_diff,
+        }
+        await self._audit(
+            session=session,
+            tenant_id=tenant_id,
+            asset_id=asset.id,
+            version_id=version.id,
+            actor_type=actor_type,
+            actor_id=str(actor_id),
+            action="dashboard.reload",
+            outcome="blocked" if validation["blockers"] else "success",
+            before_digest=published.content_hash,
+            after_digest=content_hash,
+            details={"semantic_diff": semantic_diff},
+        )
+        await session.commit()
+        await session.refresh(version)
+        return version, semantic_diff
+
     async def query_dashboard(
         self,
         *,
@@ -711,6 +812,62 @@ class DashboardService:
         for binding in manifest.get("semantic_bindings", []):
             snapshots.extend(str(snapshot_id) for snapshot_id in binding.get("source_snapshot_ids", []))
         return sorted(set(snapshots))
+
+    def _apply_reload_targets(
+        self,
+        *,
+        manifest: dict[str, Any],
+        base_version: Dashboard,
+        semantic_model_versions: dict[str, str],
+        source_snapshot_ids: list[str] | None,
+    ) -> dict[str, Any]:
+        diff: dict[str, Any] = {
+            "base_version_id": str(base_version.id),
+            "base_version_num": base_version.version_num,
+            "draft_version_id": None,
+            "draft_version_num": None,
+            "model_version_changes": [],
+            "source_snapshot_changes": [],
+            "filter_changes": [],
+            "tile_changes": [],
+            "policy_changes": [],
+            "warnings": [],
+            "blockers": [],
+        }
+        for binding in manifest.get("semantic_bindings", []):
+            requested_model_version = semantic_model_versions.get(binding["id"]) or semantic_model_versions.get(
+                binding["model_slug"]
+            )
+            if requested_model_version and requested_model_version != binding["model_version"]:
+                diff["model_version_changes"].append(
+                    {
+                        "binding_id": binding["id"],
+                        "model_slug": binding["model_slug"],
+                        "from": binding["model_version"],
+                        "to": requested_model_version,
+                    }
+                )
+                binding["model_version"] = requested_model_version
+
+            if source_snapshot_ids is not None:
+                next_snapshots = sorted(set(source_snapshot_ids))
+                current_snapshots = sorted(set(binding.get("source_snapshot_ids", [])))
+                if next_snapshots != current_snapshots:
+                    diff["source_snapshot_changes"].append(
+                        {
+                            "binding_id": binding["id"],
+                            "model_slug": binding["model_slug"],
+                            "from": current_snapshots,
+                            "to": next_snapshots,
+                        }
+                    )
+                    binding["source_snapshot_ids"] = next_snapshots
+
+        if not diff["model_version_changes"] and not diff["source_snapshot_changes"]:
+            diff["warnings"].append(
+                "No semantic model or source snapshot changes were supplied; reload draft captures the current published baseline for review."
+            )
+        return diff
 
     async def _audit(
         self,

@@ -3,7 +3,10 @@ import { getBackendUrl, isTauriApp } from '../lib/tauri-api'
 import type {
   DashboardAsset,
   DashboardAssetDetail,
+  DashboardAuditEvent,
   DashboardRun,
+  DashboardSemanticDiff,
+  DashboardState,
   DashboardVersion,
 } from '../types/dashboard'
 import { getAccessToken } from './tokenStore'
@@ -88,6 +91,21 @@ export const DashboardService = {
     })
   },
 
+  async preview(assetId: string, payload: {
+    filters?: Record<string, unknown>
+    data_view_ids?: string[]
+    correlation_id?: string
+  }): Promise<DashboardRun> {
+    return dashboardFetch<DashboardRun>(`/${assetId}/preview`, {
+      method: 'POST',
+      body: JSON.stringify({
+        filters: payload.filters ?? {},
+        data_view_ids: payload.data_view_ids,
+        correlation_id: payload.correlation_id,
+      }),
+    })
+  },
+
   async validate(assetId: string): Promise<{ validation: DashboardVersion['validation_result']; manifest: DashboardVersion['manifest'] }> {
     return dashboardFetch<{ validation: DashboardVersion['validation_result']; manifest: DashboardVersion['manifest'] }>(
       `/${assetId}/validate`,
@@ -107,6 +125,41 @@ export const DashboardService = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     })
+  },
+
+  async publish(assetId: string, payload: {
+    base_etag: string
+    change_summary: string
+  }): Promise<DashboardVersion> {
+    return dashboardFetch<DashboardVersion>(`/${assetId}/publish`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  async reload(assetId: string, payload: {
+    base_etag: string
+    semantic_model_versions?: Record<string, string>
+    source_snapshot_ids?: string[] | null
+    change_summary: string
+  }): Promise<{ draft: DashboardVersion; semantic_diff: DashboardSemanticDiff }> {
+    return dashboardFetch<{ draft: DashboardVersion; semantic_diff: DashboardSemanticDiff }>(`/${assetId}/reload`, {
+      method: 'POST',
+      body: JSON.stringify({
+        base_etag: payload.base_etag,
+        semantic_model_versions: payload.semantic_model_versions ?? {},
+        source_snapshot_ids: payload.source_snapshot_ids ?? null,
+        change_summary: payload.change_summary,
+      }),
+    })
+  },
+
+  async getState(assetId: string): Promise<DashboardState> {
+    return dashboardFetch<DashboardState>(`/${assetId}/state`)
+  },
+
+  async getAudit(assetId: string): Promise<{ items: DashboardAuditEvent[]; total: number }> {
+    return dashboardFetch<{ items: DashboardAuditEvent[]; total: number }>(`/${assetId}/audit`)
   },
 }
 
