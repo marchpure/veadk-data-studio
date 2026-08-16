@@ -93,7 +93,7 @@ def build_matrix_rows() -> list[MatrixRow]:
             lineage_evidence="SourceSnapshot, KnowledgeResource/EvidenceFragment, projected_dataset_id, projection_manifest, projection_review",
             retry_revoke="POST /api/source-resources/{id}/sync reindexes raw artifact; DELETE tombstones source",
             final_status="beta",
-            blocker_reason="Governed upload, projection review, and projected-dataset semantic draft handoff exist; large-file resumable upload and projected-source MCP query execution remain beta hardening",
+            blocker_reason="Governed upload, projection review, projected-dataset semantic draft handoff, and projected-source MCP query execution exist; large-file resumable upload remains beta hardening",
         ),
         MatrixRow(
             source_type="local_file_xlsx_xlsm",
@@ -110,7 +110,7 @@ def build_matrix_rows() -> list[MatrixRow]:
             lineage_evidence="SourceSnapshot, KnowledgeResource/EvidenceFragment, projected_dataset_id, projection_manifest/projection_review with source locator",
             retry_revoke="POST /api/source-resources/{id}/sync reindexes raw artifact; DELETE tombstones source",
             final_status="beta",
-            blocker_reason="Source upload excludes legacy .xls even though legacy dataset upload supports it; projected-source MCP query execution remains beta",
+            blocker_reason="Source upload excludes legacy .xls even though legacy dataset upload supports it; Excel-specific projection edge cases remain beta",
         ),
         MatrixRow(
             source_type="local_file_pdf_docx_pptx",
@@ -144,7 +144,7 @@ def build_matrix_rows() -> list[MatrixRow]:
             lineage_evidence="SourceSnapshot, KnowledgeResource/EvidenceFragment, projected_dataset_id, projection_manifest/projection_review with local file source locator",
             retry_revoke="POST /api/source-resources/{id}/sync reindexes raw artifact; DELETE tombstones source",
             final_status="beta",
-            blocker_reason="Governed upload, projection review, and projected-dataset semantic draft handoff exist; nested/semi-structured JSON flattening policy and projected-source MCP query execution remain beta hardening",
+            blocker_reason="Governed upload, projection review, projected-dataset semantic draft handoff, and projected-source MCP query execution exist; nested/semi-structured JSON flattening policy remains beta hardening",
         ),
         MatrixRow(
             source_type="web_url",
@@ -195,7 +195,7 @@ def build_matrix_rows() -> list[MatrixRow]:
             lineage_evidence="Projection manifest/review includes spreadsheet/app/table/range/field/cell locators",
             retry_revoke="refresh token and reauthorization states; source sync retries; DELETE disconnects resources",
             final_status="beta",
-            blocker_reason="Projection review and projected-dataset semantic draft handoff exist with lineage; projected-source MCP query execution remains beta",
+            blocker_reason="Projection review, projected-dataset semantic draft handoff, and projected-source MCP query execution exist with lineage; live tenant credentials and real-service E2E remain beta",
         ),
         MatrixRow(
             source_type="volcengine_tos_bucket_prefix",
@@ -229,7 +229,7 @@ def build_matrix_rows() -> list[MatrixRow]:
             lineage_evidence="Projection manifest/review with bucket/key/version/etag locator",
             retry_revoke="permission_lost/source_unavailable/source_sync_failed states; manual retry; DELETE disconnects",
             final_status="beta",
-            blocker_reason="Object projection review and projected-dataset semantic draft handoff exist; S3-compatible vendor normalization and projected-source MCP query execution remain beta",
+            blocker_reason="Object projection review, projected-dataset semantic draft handoff, and projected-source MCP query execution exist; S3-compatible vendor normalization remains beta",
         ),
         MatrixRow(
             source_type="volcengine_tos_object_context",
@@ -425,7 +425,7 @@ def render_markdown() -> str:
             "",
             "## Current Gap Report",
             "",
-            "- Local Parquet/JSON/JSONL now enter the governed `SourceResource` upload contract with snapshots, evidence, projected datasets, projection manifests, projection review, and projected-dataset semantic draft handoff; nested/semi-structured JSON flattening and projected-source MCP query execution remain beta hardening.",
+            "- Local Parquet/JSON/JSONL now enter the governed `SourceResource` upload contract with snapshots, evidence, projected datasets, projection manifests, projection review, projected-dataset semantic draft handoff, and projected-source MCP query execution; nested/semi-structured JSON flattening remains beta hardening.",
             "- SQL Server now enters the structured Source Understanding path from cached/refreshable schema evidence; live-driver E2E credentials and dialect-specific profiling remain beta hardening.",
             "- MongoDB and DynamoDB now create Source Understanding profile snapshots and evidence with a `document_projection` handoff; reviewed projection materialization and semantic drafts remain beta hardening.",
             "- Planned catalog tiles are intentionally read-only roadmap entries until adapter, auth, picker, snapshot, parser/profile, fixture, and UI journey evidence exists.",

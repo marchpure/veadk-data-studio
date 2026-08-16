@@ -773,14 +773,34 @@ async def test_published_sqlite_metric_query_omits_synthetic_schema(
     assert query_response.json()["data"]["result"][0]["paid_revenue"] == 120.5
 
 
-async def test_projected_dataset_semantic_model_publish_and_mcp_query(test_client, monkeypatch):
+@pytest.mark.parametrize(
+    ("filename", "content", "content_type", "model_slug"),
+    [
+        (
+            "revenue.csv",
+            b"order_id,region,revenue,paid_at\n1,East,120,2026-08-01\n2,West,80,2026-08-02\n",
+            "text/csv",
+            "projected-revenue-csv-mcp",
+        ),
+        (
+            "revenue.jsonl",
+            b'{"order_id":1,"region":"East","revenue":120,"paid_at":"2026-08-01"}\n'
+            b'{"order_id":2,"region":"West","revenue":80,"paid_at":"2026-08-02"}\n',
+            "application/x-ndjson",
+            "projected-revenue-jsonl-mcp",
+        ),
+    ],
+)
+async def test_projected_dataset_semantic_model_publish_and_mcp_query(
+    test_client, monkeypatch, filename, content, content_type, model_slug
+):
     uploaded = await test_client.post(
         "/api/source-resources/files",
         files={
             "file": (
-                "revenue.csv",
-                b"order_id,region,revenue,paid_at\n1,East,120,2026-08-01\n2,West,80,2026-08-02\n",
-                "text/csv",
+                filename,
+                content,
+                content_type,
             )
         },
         data={"name": "projected revenue"},
@@ -811,7 +831,7 @@ async def test_projected_dataset_semantic_model_publish_and_mcp_query(test_clien
     drafted = await test_client.post(
         f"/api/datasources/{projected_dataset_id}/understanding/semantic-model-draft",
         json={
-            "model_id": "projected-revenue-mcp",
+            "model_id": model_slug,
             "name": "Projected Revenue MCP",
             "domain": "Sales / Orders",
             "owner": "Revenue Analytics",
@@ -823,11 +843,11 @@ async def test_projected_dataset_semantic_model_publish_and_mcp_query(test_clien
     assert draft["datasourceId"] == projected_dataset_id
     assert draft["datasourceKind"] == "duckdb"
 
-    validated = await test_client.post("/api/data-models/projected-revenue-mcp/validate")
+    validated = await test_client.post(f"/api/data-models/{model_slug}/validate")
     assert validated.status_code == 200
     assert validated.json()["data"]["readinessDetail"]["blockers"] == []
 
-    published = await test_client.post("/api/data-models/projected-revenue-mcp/publish")
+    published = await test_client.post(f"/api/data-models/{model_slug}/publish")
     assert published.status_code == 200
     assert published.json()["data"]["status"] == "Published"
 
@@ -850,7 +870,7 @@ async def test_projected_dataset_semantic_model_publish_and_mcp_query(test_clien
     )
 
     query_response = await test_client.post(
-        "/api/data-models/projected-revenue-mcp/mcp/query_metric",
+        f"/api/data-models/{model_slug}/mcp/query_metric",
         json={"metric": "revenue_revenue", "dimension": "revenue_region", "limit": 10},
     )
     assert query_response.status_code == 200
