@@ -1,144 +1,230 @@
 # Data Studio Commercial P0 Integration
 
-CURRENT_PHASE: Phase 3 — latest Connector/Modeling `142837f` and Dashboard `ef7ad32` are merged and locally verified on the unified branch. Next: close commercial gaps for Dashboard legacy 8080 path and Evaluation create/import/run fixture, then build the final commercial 8080 image.
+CURRENT_PHASE: Final commercial integration evidence ledger. Connector/Modeling, Dashboard, Evaluation, and Sharing are unified on `integration/data-studio-commercial-p0`. Dashboard and Evaluation/Sharing have passed 8080 release gates. Connector/Modeling is honestly classified as commercial beta / partial, not production-ready for every catalog row.
 
 ## Immutable Inputs
 
-| Stream | Branch | Input SHA | Status at capture |
+| Stream | Branch | Input SHA | Integration status |
 | --- | --- | --- | --- |
-| Connector / Modeling | `veadk-data-studio/agent/data-studio-p0` | `142837f7587dd1519d4287c1cb26c8e2840fc39a` | clean, pushed; documented `PARTIAL` / `8080_PARTIAL` |
-| Dashboard | `veadk-data-studio/agent/dashboard-human-agent-p0` | `ef7ad32d031fcd5dea7102536720abd54b46ecdb` | clean, pushed; documented `DASHBOARD_BRANCH_READY_FOR_INTEGRATION / 8080_PENDING_INTEGRATION` |
-| Evaluation / Sharing Governance | `veadk-data-studio/integration/evaluation-sharing-governance-p0` | `0c5b517381eedbc5c9a1181f82ab84d9965f2453` | clean, pushed; documented `RELEASE_READY` |
+| Connector / Modeling | `veadk-data-studio/agent/data-studio-p0` | `142837f7587dd1519d4287c1cb26c8e2840fc39a` | Merged. Source matrix remains `PARTIAL`: `0 ready / 14 beta / 26 planned / 0 blocked / 40 total`. |
+| Dashboard | `veadk-data-studio/agent/dashboard-human-agent-p0` | `ef7ad32d031fcd5dea7102536720abd54b46ecdb` | Merged. 8080 Dashboard browser smoke passed, including explicit legacy asset coverage. |
+| Evaluation / Sharing Governance | `veadk-data-studio/integration/evaluation-sharing-governance-p0` | `0c5b517381eedbc5c9a1181f82ab84d9965f2453` | Preserved and extended. Evaluation and Sharing 8080 release gates passed. |
 
 ## Unified Branch
 
 - Branch: `integration/data-studio-commercial-p0`
 - Worktree: `/Users/bytedance/worktrees/byaan-commercial-integration-p0`
-- Remote: `veadk-data-studio`
+- Remote used for integration branch: `veadk-data-studio`
 - Initial base: `0c5b517381eedbc5c9a1181f82ab84d9965f2453`
-- Initial push: branch created and tracking `veadk-data-studio/integration/data-studio-commercial-p0`.
+- Runtime candidate verified before this evidence update: `5215db0d7a3cd3331978c97c49119a9f7e20eabc`
+- Release SHA source of truth: latest pushed branch HEAD at final deployment time, verified by `git rev-parse HEAD` and the matching OCI label `org.opencontainers.image.revision`.
 
-## Current 8080 Baseline
+## 8080 Runtime Evidence
 
-- Current URL: `http://127.0.0.1:8080`
-- Current image: `byaan:selfhosted-governance-p0-2881367`
-- Current container: `byaan-governance-p0-2881367-8080`
-- Current `BYAAN_VERSION`: `governance-p0-2881367`
-- Current migration: `add_canonical_sharing_model (head)`
+Runtime candidate verified before this evidence update:
 
-This 8080 runtime is not the final commercial baseline. It predates the unified commercial branch and does not include latest Connector/Modeling `142837f` or Dashboard `ef7ad32`.
+- URL: `http://127.0.0.1:8080`
+- Image: `byaan:selfhosted-data-studio-commercial-p0-5215db0d7a3c`
+- Container: `byaan-data-studio-commercial-p0-5215db0d7a3c-8080`
+- OCI revision label: `5215db0d7a3cd3331978c97c49119a9f7e20eabc`
+- `BYAAN_VERSION`: `data-studio-commercial-p0-5215db0d7a3c`
+- Actual tenant selected after login: `38246331-19b7-480f-8c6e-2f6afd6b8033`
+- Actual user from token: `3f376c15-cf9c-4a86-b952-ca13a45aa9a5`
+- Persistent volume reused: `byaan_data_studio_p0_9718bf6_8080`
 
-## Merge Plan
+The final release step must rebuild and redeploy the same container shape with the latest branch HEAD short SHA after this evidence document commit.
 
-1. Merge latest Connector/Modeling input `142837f7587dd1519d4287c1cb26c8e2840fc39a`.
-2. Merge latest Dashboard input `ef7ad32d031fcd5dea7102536720abd54b46ecdb`.
-3. Preserve all Evaluation/Sharing Governance code and migrations from `0c5b517381eedbc5c9a1181f82ab84d9965f2453`.
-4. Resolve shared files explicitly:
-   - `server/main.py`
-   - `server/models/__init__.py`
-   - `server/auth/scopes.py`
-   - `server/routers/folders.py`
-   - `server/routers/exports.py`
-   - `server/mcp/tools.py`
-   - `server/mcp/tool_wrappers.py`
-   - `server/tests/test_migration_chain_hardening.py`
-   - `client/src/App.tsx`
-   - `client/src/components/CollapsibleSidebar.tsx`
-   - `client/src/services/api.ts`
-   - `client/package.json`
-   - `client/pnpm-lock.yaml`
-5. Re-run migration, backend, frontend, browser, REST/MCP parity, and 8080 Release Gate from this branch. Historical outputs from the source branches are evidence inputs only, not final pass criteria.
+## Merge And Conflict Resolution
 
-## Known Starting Risks
+- Created a unified integration branch from the Evaluation/Sharing governance branch.
+- Merged Connector/Modeling input `142837f7587dd1519d4287c1cb26c8e2840fc39a`.
+- Merged Dashboard input `ef7ad32d031fcd5dea7102536720abd54b46ecdb`.
+- Preserved Evaluation/Sharing models, routers, services, MCP contracts, and migrations from governance.
+- Resolved shared ownership in `server/main.py`, `server/models/__init__.py`, auth/scopes, folder/export routes, MCP registry/wrappers, Alembic chain tests, `client/src/App.tsx`, sidebar routes, client API service, package metadata, and smoke scripts.
+- Alembic head remained a single commercial head: `add_canonical_sharing_model`.
 
-- Connector/Modeling is intentionally not ready-complete: the source matrix records `0 ready / 14 beta / 26 planned / 0 blocked / 40 total`.
-- The latest Dashboard branch includes post-governance browser/editor coverage commits that are not in the old Governance 8080 image.
-- The merge must not let either source branch delete Evaluation/Sharing artifacts from the Governance branch.
-- External credentials for several connector rows are unavailable; those rows must remain `beta` or `planned`, not be promoted to `ready`.
+## Dashboard Status
 
-## 2026-08-17 03:18 CST - Connector / Modeling Merge
+Status: 8080-ready for P0 commercial integration.
 
-Merged input:
+Implemented / preserved behavior:
 
-- `veadk-data-studio/agent/data-studio-p0`
-- SHA: `142837f7587dd1519d4287c1cb26c8e2840fc39a`
+- The explicit legacy asset `6b388ea5-9586-41a2-8ab9-51fd580d71af` no longer falls through to a generic app error.
+- Legacy unstructured dashboards display lifecycle/status, asset/version identity, migration blocker text, and safe review / notebook preview actions.
+- Structured actions remain blocked for legacy assets until structured manifest review is complete.
+- Existing legacy HTML MCP/tool deprecation and security limits are preserved.
+- Structured dashboard data views cover `saved_query`, `semantic_metric`, and `context_search`.
+- Stale, partial, blocked, permission-denied, malformed, and policy-blocked states have explicit UI states.
 
-Conflict resolution:
+8080 browser evidence:
 
-- `server/tests/test_migration_chain_hardening.py` was the only content conflict.
-- Kept the commercial/governance final Alembic head assertion: `add_canonical_sharing_model`.
-- Kept the Connector/Modeling migration chain assertion for `add_blocked_source_resource_status -> add_file_source_resource_type`.
-- Preserved Dashboard, Evaluation, and Sharing migration lineage through `merge_ds_dash_20260816`, `add_evaluation_authoritative_model`, and `add_canonical_sharing_model`.
+- Command: `BASE_URL=http://127.0.0.1:8080 API_URL=http://127.0.0.1:8080 LEGACY_ASSET_ID=6b388ea5-9586-41a2-8ab9-51fd580d71af SCREEN_DIR=/tmp/byaan-dashboard-final-legacy-5215db0d7a3c pnpm smoke:dashboard`
+- Result: `ok: true`
+- Browser stats: `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`
+- Screenshots: `/tmp/byaan-dashboard-final-legacy-5215db0d7a3c`
 
-Evidence:
+Focused backend evidence:
 
-- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_migration_chain_hardening.py tests/test_data_studio_p0_source_matrix.py -q` -> `8 passed, 8 warnings`.
-- `cd server && PYTHONPATH=..:tests uv run alembic heads` -> `add_canonical_sharing_model (head)`.
-- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_source_connectors_api.py::test_source_connection_browse_requires_authorization_without_fake_empty_success tests/test_multi_source_artifacts_api.py::test_source_processing_step_schema_is_typed_contract tests/test_multi_source_artifacts_api.py::test_web_source_blocks_private_urls tests/test_sources_overview_api.py::test_sources_overview_maps_blocked_and_needs_confirmation_to_product_states tests/test_data_studio_p0_source_matrix.py -q` -> `7 passed, 9 warnings`.
-- `cd server && uv run ruff check models/source_resources.py routers/source_connections.py schemas/source_resources.py schemas/source_overview.py services/source_connections.py services/source_overview.py services/source_resources.py tests/test_multi_source_artifacts_api.py tests/test_source_connectors_api.py tests/test_sources_overview_api.py tests/test_data_studio_p0_source_matrix.py migrations/versions/add_blocked_source_resource_status.py scripts/generate_data_studio_p0_source_matrix.py tests/test_migration_chain_hardening.py` -> passed with the existing removed-rule warning.
+- Command: `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_contract_schemas.py tests/test_dashboard_execution_service.py tests/test_dashboard_lifecycle_service.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_persistence_migration.py tests/test_dashboard_rest_api.py tests/test_dashboard_security_regressions.py tests/test_dashboard_legacy_tool_gating.py tests/test_migration_chain_hardening.py tests/test_data_studio_p0_source_matrix.py -q`
+- Result: `60 passed, 103 warnings`
 
-Commercial readiness note:
+## Evaluation Status
 
-- Connector/Modeling remains `PARTIAL`, not ready-complete. The merged source matrix still reports `0 ready / 14 beta / 26 planned / 0 blocked / 40 total`.
+Status: 8080-ready for P0 commercial integration.
 
-## 2026-08-17 03:35 CST - Dashboard Merge
+Implemented / preserved behavior:
 
-Merged input:
+- Empty inventory has actionable onboarding instead of a blank list.
+- UI supports suite creation, explicit demo fixture loading, case import/demo cases, draft version creation, publish, and preflight run creation.
+- REST supports create suite, create draft version, create/import/list cases, publish suite version, create/claim/heartbeat/complete runs, failures, comparison, advisor verification/regression, and promotion decision.
+- Release fixture is explicit: it is invoked by release gate or developer seed command only, not by production startup.
+- Tenant isolation, scope protection, idempotency, redaction, and REST/MCP parity are covered by tests and gates.
 
-- `veadk-data-studio/agent/dashboard-human-agent-p0`
-- SHA: `ef7ad32d031fcd5dea7102536720abd54b46ecdb`
+8080 release gate evidence:
 
-Conflict resolution:
+- Command: `BASE_URL=http://127.0.0.1:8080 CONTAINER=byaan-data-studio-commercial-p0-5215db0d7a3c-8080 RUN_ID=5215db0d7a3c FINAL_SHA=$(git rev-parse HEAD) IMAGE_DIGEST=$(docker image inspect byaan:selfhosted-data-studio-commercial-p0-5215db0d7a3c --format '{{.Id}}') PYTHONPATH=. uv run python server/scripts/evaluation_release_gate_8080.py`
+- Result: `ok: true`
+- Created cases: `2`
+- Published status: `published`
+- Run status: `failed`
+- Gate decision: `failed`
+- Failure count: `1`
+- Sensitive payload redaction: verified by gate assertions.
 
-- `client/scripts/dashboard-workspace-smoke.mjs` was the only content conflict.
-- Kept the newer Dashboard branch browser acceptance matrix for inventory, view, edit/review, stale/partial, permission-denied, and legacy scenes at `1440x900` and `390x844`.
-- Preserved the commercial/governance notebook preview smoke route by returning `notebookId` from the fixture seed and capturing `notebook-preview-route-1440.png` before the governed Dashboard scene matrix.
-- Alembic remained a single commercial/governance head after merge: `add_canonical_sharing_model (head)`.
+8080 browser evidence:
 
-Fixes during verification:
+- Seed command: `docker exec ... EVALUATION_SMOKE_TENANT_ID=38246331-19b7-480f-8c6e-2f6afd6b8033 EVALUATION_SMOKE_USER_ID=3f376c15-cf9c-4a86-b952-ca13a45aa9a5 ... server/scripts/seed_evaluation_smoke.py`
+- Browser command: `BASE_URL=http://127.0.0.1:8080 API_URL=http://127.0.0.1:8080 EVALUATION_SMOKE_FIXTURE_FILE=/tmp/byaan-evaluation-fixture-5215db0d7a3c-rerun.json SCREEN_DIR=/tmp/byaan-evaluation-ui-5215db0d7a3c-rerun2 pnpm smoke:evaluation`
+- Result: `ok: true`
+- Browser stats: `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`
+- Screenshots: `/tmp/byaan-evaluation-ui-5215db0d7a3c-rerun2`
 
-- `tests/test_dashboard_rest_api.py::test_dashboard_rest_query_matches_mcp_contract_for_same_principal` initially failed because its fake query used fixed `as_of=2026-08-16T12:34:56`; the Dashboard service correctly marked it stale under the current clock. The test fixture now uses a fresh runtime `as_of` so the assertion verifies REST/MCP parity without masking stale detection.
-- Initial frontend `pnpm build:check` and `pnpm lint` failed because this new worktree had no `client/node_modules`. Ran `cd client && pnpm install --frozen-lockfile`; `client/node_modules` is ignored and not staged. Re-runs passed.
+Focused backend evidence:
 
-Evidence from unified branch:
+- Command: `cd server && PYTHONPATH=..:tests uv run pytest tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_evaluation_runner_service.py tests/test_evaluation_rest_api.py tests/test_evaluation_feedback_advisor_api.py tests/test_evaluation_mcp_contract.py -q`
+- Result: `24 passed, 22 warnings`
 
-- `cd server && PYTHONPATH=..:tests uv run alembic heads` -> `add_canonical_sharing_model (head)`.
-- `node --check client/scripts/dashboard-workspace-smoke.mjs` -> passed.
-- `git diff --check` -> passed.
-- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_contract_schemas.py tests/test_dashboard_execution_service.py tests/test_dashboard_lifecycle_service.py tests/test_dashboard_mcp_contract.py tests/test_dashboard_persistence_migration.py tests/test_dashboard_rest_api.py tests/test_dashboard_security_regressions.py tests/test_dashboard_legacy_tool_gating.py tests/test_migration_chain_hardening.py tests/test_data_studio_p0_source_matrix.py -q` -> `60 passed, 103 warnings`.
-- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_source_connectors_api.py::test_source_connection_browse_requires_authorization_without_fake_empty_success tests/test_multi_source_artifacts_api.py::test_source_processing_step_schema_is_typed_contract tests/test_multi_source_artifacts_api.py::test_web_source_blocks_private_urls tests/test_sources_overview_api.py::test_sources_overview_maps_blocked_and_needs_confirmation_to_product_states tests/test_data_studio_p0_source_matrix.py -q` -> `7 passed, 9 warnings`.
-- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_evaluation_runner_service.py tests/test_evaluation_rest_api.py tests/test_evaluation_feedback_advisor_api.py tests/test_evaluation_mcp_contract.py -q` -> `22 passed, 18 warnings`.
-- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_sharing_persistence_migration.py tests/test_sharing_canonical_service.py tests/test_sharing_read_surface.py -q` -> `8 passed, 9 warnings`.
-- `cd server && uv run ruff check services/dashboard.py tests/test_dashboard_execution_service.py tests/test_dashboard_lifecycle_service.py tests/test_dashboard_rest_api.py` -> passed with the existing removed-rule warning.
-- `cd client && pnpm build:check` -> passed with existing Browserslist, CSS minify, dynamic import, and chunk-size warnings.
-- `cd client && pnpm lint` -> `357 problems (0 errors, 357 warnings)`.
+## Sharing Status
 
-Commercial readiness note:
+Status: 8080-ready for P0 commercial integration.
 
-- Dashboard latest code is now in the unified branch, including REST/MCP governed asset contracts, browser acceptance matrix, legacy backfill, structured data-view execution for `saved_query`, `semantic_metric`, and `context_search`, unresolved policy guards, and legacy HTML tool gating.
-- This is still not final `READY`: the real `127.0.0.1:8080` container is still the old Governance image, and the commercial branch has not yet passed a final image Release Gate.
-- The explicit legacy asset `6b388ea5-9586-41a2-8ab9-51fd580d71af` still must be verified against the final commercial 8080 image with Playwright before marking Dashboard 8080 ready.
-- Evaluation APIs and UI surfaces are present and focused tests pass, but the final commercial gate still needs an explicit non-production fixture proving create/import/publish/run/failure/promotion blocking on the latest image.
+Implemented / preserved behavior:
 
-## 2026-08-17 04:05 CST - Evaluation Commercial Loop
+- Canonical grants back Notebook, Dashboard, Folder, and worker-backed surfaces.
+- Folder notebook and folder dashboard shares create canonical evidence and revoke cleanly.
+- External sharing policy is explicit in self-hosted mode.
+- Secret/token/password/verifier values are redacted by service tests and release gate.
 
-Implemented on unified branch after Dashboard merge:
+8080 release gate evidence:
 
-- Added REST write APIs for Evaluation suite creation, draft suite-version creation, case draft creation, JSON/JSONL/CSV case import, and suite-version publish.
-- Suite creation now creates an initial draft version explicitly; publish requires at least one case, marks cases immutable, updates the suite published version pointer, and clears the draft pointer for that version.
-- Added Evaluation UI actions for empty-state suite creation, explicit demo fixture loading, case import, demo cases, draft version creation, publish, and preflight run creation.
-- Added `server/scripts/evaluation_release_gate_8080.py`, which only runs when invoked by release gate or a developer. It creates a temporary explicit fixture through REST, imports cases, publishes, creates/claims/completes a run, and verifies failure readout with redaction checks. It does not seed production tenants on startup.
+- Command: `BASE_URL=http://127.0.0.1:8080 CONTAINER=byaan-data-studio-commercial-p0-5215db0d7a3c-8080 RUN_ID=5215db0d7a3c FINAL_SHA=$(git rev-parse HEAD) IMAGE_DIGEST=$(docker image inspect byaan:selfhosted-data-studio-commercial-p0-5215db0d7a3c --format '{{.Id}}') PYTHONPATH=. uv run python server/scripts/sharing_release_gate_8080.py`
+- Result: `ok: true`
+- Tenant: `38246331-19b7-480f-8c6e-2f6afd6b8033`
+- Folder notebook share/revoke: verified.
+- Folder dashboard share/revoke: verified.
+- Worker-backed notebook sharing in self-hosted mode: `403`, message `External sharing is not available in this deployment mode`.
 
-Evidence from unified branch:
+Focused backend evidence:
 
-- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_evaluation_runner_service.py tests/test_evaluation_rest_api.py tests/test_evaluation_feedback_advisor_api.py tests/test_evaluation_mcp_contract.py -q` -> `23 passed, 21 warnings`.
-- `cd server && python -m py_compile scripts/evaluation_release_gate_8080.py && uv run ruff check repositories/evaluation.py services/evaluation.py routers/evaluation.py tests/test_evaluation_rest_api.py tests/test_evaluation_service.py scripts/evaluation_release_gate_8080.py` -> passed with the existing removed-rule warning.
-- `cd client && pnpm build:check` -> passed with existing Browserslist, CSS minify, dynamic import, and chunk-size warnings.
-- `cd client && pnpm lint` -> `357 problems (0 errors, 357 warnings)`.
-- `cd client && node --check scripts/evaluation-workspace-smoke.mjs && node --check scripts/dashboard-workspace-smoke.mjs` -> passed.
-- `git diff --check` -> passed.
+- Command: `cd server && PYTHONPATH=..:tests uv run pytest tests/test_sharing_persistence_migration.py tests/test_sharing_canonical_service.py tests/test_sharing_read_surface.py -q`
+- Result: `8 passed, 9 warnings`
 
-Commercial readiness note:
+## Connector / Modeling Status
 
-- Evaluation now has a real create/import/publish/preflight/runner/failure closed loop in REST and UI. It is no longer just an empty inventory with read-only surfaces.
-- Final `READY` still requires running `server/scripts/evaluation_release_gate_8080.py` against the final commercial `127.0.0.1:8080` image, not the current old Governance image.
+Status: commercial beta / partial. Do not mark connector catalog ready-complete.
+
+Matrix basis:
+
+- `docs/product/data-studio-p0-source-matrix.md`
+- Summary: `0 ready / 14 beta / 26 planned / 0 blocked / 40 total`
+- OpenHuman runtime adapter provenance remains `UNVERIFIED`; semi-structured extraction rows must remain beta until runtime metadata records algorithm name/version, config digest, source revision, confidence, evidence locator, provenance, and warnings.
+
+Backend evidence:
+
+- Command: `cd server && PYTHONPATH=..:tests uv run pytest tests/test_async_sql_connector.py tests/test_databricks_connector.py tests/test_mongo_connector.py tests/test_web_source_adapter.py tests/test_source_understanding_api.py tests/test_semantic_modeling_api.py tests/test_real_source_connector_e2e.py tests/test_source_connectors_api.py tests/test_multi_source_artifacts_api.py tests/test_sources_overview_api.py tests/test_data_studio_p0_source_matrix.py -q`
+- Result: `192 passed, 2 skipped, 275 warnings`
+- The two skipped tests are real external source connector E2E checks gated by unavailable credentials. They are not counted as ready evidence.
+
+8080 projected-source browser/API evidence:
+
+- Command: `BASE_URL=http://127.0.0.1:8080 API_URL=http://127.0.0.1:8080 E2E_EMAIL=admin@example.com E2E_PASSWORD=password RUN_ID=5215db0d7a3c-1786912490 SCREEN_DIR=/tmp/byaan-data-studio-projected-source-5215db0d7a3c node client/scripts/data-studio-p0-projected-source-e2e.mjs`
+- Result: `ok: true`
+- Covered: authenticated CSV source upload, raw snapshot, projection review, semantic draft, publish, MCP `query_metric`, reload persistence, source detail desktop/mobile, model desktop/mobile.
+- Browser stats: `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`
+- Evidence: `/tmp/byaan-data-studio-projected-source-5215db0d7a3c/result.json`
+
+Residual connector/modeling risks:
+
+- Live tenant credentials are still missing for several beta connector rows, including real Feishu/Lark tenant E2E, real TOS objects, and real Databricks OAuth/catalog drill-down.
+- MongoDB and DynamoDB have document profile evidence; they must not be promoted to semantic-ready until reviewed tabular projection materialization and semantic draft handoff are proven with real data.
+- Semi-structured context extraction uses native evidence today; OpenHuman-compatible runtime provenance is not yet verified in persisted metadata.
+- Large/resumable upload, richer crawler/page-group policy, dialect-specific profiling, and real customer-scale fixtures remain beta hardening.
+
+## Migration Status
+
+Current verified head:
+
+- Command: `cd server && PYTHONPATH=..:tests uv run alembic heads`
+- Result: `add_canonical_sharing_model (head)`
+
+Focused migration evidence:
+
+- Command: `cd server && PYTHONPATH=..:tests uv run pytest tests/test_migration_chain_hardening.py -q`
+- Result: `5 passed, 8 warnings`
+
+Previously verified during this integration run:
+
+- Fresh SQLite upgrade to `add_canonical_sharing_model`.
+- Existing SQLite upgrade to `add_canonical_sharing_model`.
+- Disposable PostgreSQL upgrade to `add_canonical_sharing_model`.
+- Existing persistent 8080 volume upgraded by the self-hosted entrypoint.
+- Dashboard legacy backfill, Evaluation tables, and canonical Sharing tables are included in the single Alembic chain.
+
+No manual Alembic stamp was used to hide migration failures.
+
+## Frontend / Build Evidence
+
+- Command: `cd client && pnpm build:check`
+- Result: passed.
+- Accepted pre-existing warnings: stale Browserslist data, CSS minifier warnings for escaped autofill selectors, dynamic import/static import chunking warnings, and large final bundle warning.
+- Command: `cd client && pnpm lint`
+- Result from earlier integration run: `357 problems (0 errors, 357 warnings)`, accepted as pre-existing warnings.
+- Command: `node --check client/scripts/evaluation-workspace-smoke.mjs && git diff --check`
+- Result: passed after tightening Evaluation smoke locators to avoid JSON-panel text ambiguity.
+
+## Final Release Checklist
+
+| # | Requirement | Status |
+| ---: | --- | --- |
+| 1 | Four streams unified in one branch | Done |
+| 2 | Final SHA pushed to remote integration branch | Pending final post-documentation commit/push |
+| 3 | Worktree clean | Pending final commit |
+| 4 | Upstream equals HEAD | Pending final push verification |
+| 5 | Alembic single head | Done: `add_canonical_sharing_model` |
+| 6 | Fresh/existing migration proof | Done for integration run; rerun final focused checks after final image if code changes |
+| 7 | Legacy dashboard avoids generic error | Done |
+| 8 | Structured dashboard works | Done |
+| 9 | Evaluation empty state actionable | Done |
+| 10 | Evaluation explicit create/run loop | Done |
+| 11 | Connector/modeling states honest | Done: `0 ready / 14 beta / 26 planned / 0 blocked` |
+| 12 | OpenHuman provenance or beta | Done: provenance unverified, rows remain beta |
+| 13 | REST/MCP parity | Done in focused tests and release gates |
+| 14 | 1440x900 and 390x844 browser smoke | Done for Dashboard, Evaluation, projected-source Modeling |
+| 15 | Latest image deployed to 8080 | Pending rebuild after final commit |
+| 16 | 8080 release gate on latest image | Pending rerun after final image |
+| 17 | Results written here | In progress |
+| 18 | Final commit and push | Pending |
+
+## Final Report Fields
+
+The final operator report must include the concrete values after the last build and push:
+
+- `FINAL_SHA`
+- Branch: `integration/data-studio-commercial-p0`
+- Image: `byaan:selfhosted-data-studio-commercial-p0-${FINAL_SHA:0:12}`
+- Container: `byaan-data-studio-commercial-p0-${FINAL_SHA:0:12}-8080`
+- Migration head: `add_canonical_sharing_model`
+- 8080 URL: `http://127.0.0.1:8080`
+- Connector matrix: `0 ready / 14 beta / 26 planned / 0 blocked / 40 total`
+- Browser evidence directories for Dashboard, Evaluation, and projected-source Modeling
+- Residual risks listed above
