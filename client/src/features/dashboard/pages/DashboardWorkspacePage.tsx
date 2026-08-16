@@ -462,7 +462,7 @@ export default function DashboardWorkspacePage() {
                 <AuditTrail events={auditEvents} />
               </section>
 
-              {selectedAsset.lifecycle === 'legacy_unstructured' && (
+              {(selectedAsset.lifecycle === 'legacy_unstructured' || selectedVersion?.migration_state === 'legacy_unstructured') && (
                 <LegacyFallbackPanel notebookId={selectedAsset.notebook_id} />
               )}
 
@@ -665,8 +665,11 @@ function LineageTab({ manifest, run, version }: { manifest: DashboardManifest; r
       <section className="space-y-3">
         {manifest.data_views.map(dataView => {
           const view = runViews.get(dataView.id)
-          const lineage = [...(dataView.lineage ?? []), ...(dataView.saved_query?.lineage ?? []), ...(view?.lineage ?? [])]
-          const evidence = [...(dataView.evidence ?? []), ...(view?.evidence ?? [])]
+          const lineage = uniqueBy(
+            [...(dataView.lineage ?? []), ...(dataView.saved_query?.lineage ?? []), ...(view?.lineage ?? [])],
+            lineageKey,
+          )
+          const evidence = uniqueBy([...(dataView.evidence ?? []), ...(view?.evidence ?? [])], evidenceKey)
           return (
             <div key={dataView.id} className="rounded-md border border-[#2d3338] bg-[#101316] p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -684,6 +687,24 @@ function LineageTab({ manifest, run, version }: { manifest: DashboardManifest; r
       </section>
     </div>
   )
+}
+
+function uniqueBy<T>(items: T[], getKey: (item: T) => string): T[] {
+  const seen = new Set<string>()
+  return items.filter(item => {
+    const key = getKey(item)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function lineageKey(item: DashboardLineageRef): string {
+  return `${item.kind}-${item.ref}-${item.id}`
+}
+
+function evidenceKey(item: { id: string; title: string; kind: string }): string {
+  return `${item.kind}-${item.id}-${item.title}`
 }
 
 function MiniTable({ rows, fields }: { rows: Record<string, unknown>[]; fields: Array<{ name: string; data_type?: string }> }) {

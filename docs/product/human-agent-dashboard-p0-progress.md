@@ -465,6 +465,55 @@ Commit:
 
 - `6e0decc` `dashboard: guard unresolved policy refs`
 
+### Phase 6 Acceptance Slice: Browser Workspace Smoke
+
+Status: implemented, evidence captured, commit pending.
+
+Allowlist:
+
+- `client/scripts/dashboard-workspace-smoke.mjs`
+- `client/package.json`
+- `client/pnpm-lock.yaml`
+- `client/src/features/dashboard/pages/DashboardWorkspacePage.tsx`
+- `docs/product/dashboard-browser-smoke/dashboard-data-1440.png`
+- `docs/product/dashboard-browser-smoke/dashboard-lineage-1440.png`
+- `docs/product/dashboard-browser-smoke/dashboard-permission-denied-1440.png`
+- `docs/product/dashboard-browser-smoke/dashboard-legacy-1440.png`
+- `docs/product/dashboard-browser-smoke/dashboard-mobile-390.png`
+- `docs/product/human-agent-dashboard-p0-progress.md`
+
+Behavior:
+
+- Added a reproducible `pnpm smoke:dashboard` script backed by a local `playwright` dev dependency.
+- The smoke seeds real fixtures through REST APIs, then visits real governed Dashboard workspace routes in Chromium at `1440x900` and `390x844`.
+- The journey covers structured published data, Data tab, Lineage/Evidence tab, unresolved policy permission-denied state, and legacy-review fallback state.
+- The runner asserts zero page errors, console errors, failed requests, and HTTP 5xx responses; it also checks horizontal overflow and desktop interactive-element overlap.
+- Tightened the Dashboard workspace to dedupe repeated manifest/run lineage and evidence display, preventing React duplicate-key console errors without changing canonical IDs.
+- Legacy fallback now renders when the selected version migration state is `legacy_unstructured`, so review drafts visibly preserve rollback/legacy status even if the stable asset lifecycle is `draft`.
+
+Evidence:
+
+- Screenshot directory: `docs/product/dashboard-browser-smoke/`
+- Captured `dashboard-data-1440.png`, `dashboard-lineage-1440.png`, `dashboard-permission-denied-1440.png`, `dashboard-legacy-1440.png`, and `dashboard-mobile-390.png`.
+- `sips -g pixelWidth -g pixelHeight docs/product/dashboard-browser-smoke/*.png` -> desktop screenshots are `1440x900`; mobile screenshot is `390x844`.
+
+Commands and results:
+
+- Initial fresh SQLite startup on `.tmp/dashboard-browser-smoke/app.db` exposed an unrelated source-resource migration-chain blocker: `add_file_source_resource_type` attempted to drop SQLite check constraint `ck_source_resources_ck_source_resources_resource_type`. No source/modeling/connector migration was modified in this Dashboard browser slice.
+- For browser evidence only, the temp DB was inspected and already had `resource_type IN (..., 'file', ...)` in `source_resources`; it was stamped from `add_knowledge_provider_metadata` to `add_file_source_resource_type`, then upgraded to Dashboard head.
+- `cd server && DATABASE_URL=sqlite+aiosqlite:///$PWD/../.tmp/dashboard-browser-smoke/app.db uv run alembic current` -> `backfill_legacy_dashboard_assets (head)`.
+- Backend: `DATABASE_URL=sqlite+aiosqlite:///$PWD/.tmp/dashboard-browser-smoke/app.db APP_MODE=community CORS_ORIGINS=http://127.0.0.1:5179,http://localhost:5179 uv run uvicorn server.main:app --host 127.0.0.1 --port 8123`; `/health` -> healthy.
+- Frontend: `cd client && FRONTEND_PORT=5179 VITE_API_URL=http://127.0.0.1:8123 pnpm dev --host 127.0.0.1 --port 5179` -> Vite ready.
+- `cd client && BASE_URL=http://127.0.0.1:5179 API_URL=http://127.0.0.1:8123 SCREEN_DIR=../docs/product/dashboard-browser-smoke pnpm smoke:dashboard` -> passed with `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`.
+- `cd client && node --check scripts/dashboard-workspace-smoke.mjs` -> passed.
+- `cd client && pnpm lint` -> passed with existing `355 warnings`, `0 errors`.
+- `cd client && pnpm build:check` -> passed with existing CSS/chunk warnings.
+- `git diff --check` -> passed.
+
+Commit:
+
+- pending `dashboard: add browser smoke evidence`
+
 ## Commit Ledger
 
 | SHA | Subject | Phase | Tests | Push |
@@ -483,7 +532,8 @@ Commit:
 | `817fca6` | `dashboard: backfill legacy dashboard assets` | Phase 5 legacy asset backfill slice | `pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> 7 passed; `ruff check migrations/versions/backfill_legacy_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed; `pnpm build:check` -> passed; `pnpm lint` -> passed with existing 355 warnings; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `17588a6` | `dashboard: add rest mcp query parity` | Phase 6 REST/MCP query parity slice | `pytest tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py` -> 6 passed; `ruff check services/dashboard.py mcp/tool_wrappers.py tests/test_dashboard_rest_api.py tests/test_dashboard_mcp_contract.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `6e0decc` | `dashboard: guard unresolved policy refs` | Phase 6 policy/ref security slice | `pytest tests/test_dashboard_execution_service.py tests/test_dashboard_rest_api.py` -> 8 passed; `ruff check services/dashboard.py tests/test_dashboard_execution_service.py tests/test_dashboard_rest_api.py` -> passed; `git diff --check` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
+| pending | `dashboard: add browser smoke evidence` | Phase 6 browser workspace smoke slice | `pnpm smoke:dashboard` -> passed against real REST/UI on `8123`/`5179` with 0 page errors, console errors, failed requests, and HTTP 5xx; `node --check scripts/dashboard-workspace-smoke.mjs` -> passed; `pnpm lint` -> passed with existing 355 warnings; `pnpm build:check` -> passed with existing CSS/chunk warnings; `git diff --check` -> passed | Pending push |
 
 ## Acceptance Evidence
 
-No final acceptance evidence yet. Current branch is not ready for integration and has not verified real `8080`.
+Browser workspace evidence captured under `docs/product/dashboard-browser-smoke/` for structured data, lineage/evidence, permission-denied policy guard, legacy fallback, and mobile layout. Current branch is not ready for integration and has not verified real `8080`.
