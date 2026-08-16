@@ -885,6 +885,7 @@ export interface SourceProjectionReview {
   evidence_locator: Record<string, any>
   current: boolean
   stale_reason?: string | null
+  semantic_handoff?: Record<string, any>
 }
 
 export interface SourceProjectionReviewRequest {

@@ -23,6 +23,7 @@ from server.models.semantic_models import SemanticModel
 from server.models.source_connections import SourceConnection
 from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
+from server.models.source_understanding import SourceUnderstandingRun
 from server.models.user import User
 from server.schemas.source_overview import SourceOverviewItem
 
@@ -218,14 +219,40 @@ class SourceOverviewService:
             evidence_counts = {str(knowledge_id): int(count) for knowledge_id, count in evidence_result.all()}
 
         context: dict[str, dict[str, Any]] = {}
+        projected_dataset_ids: set[str] = set()
         for resource in resources:
             snapshot = snapshots_by_id.get(str(resource.latest_snapshot_id)) if resource.latest_snapshot_id else None
+            snapshot_metadata = snapshot.metadata_json if snapshot and isinstance(snapshot.metadata_json, dict) else {}
+            projected_dataset_id = (resource.sync_config_json or {}).get(
+                "projected_dataset_id"
+            ) or snapshot_metadata.get("projected_dataset_id")
+            if projected_dataset_id:
+                projected_dataset_ids.add(str(projected_dataset_id))
             knowledge = knowledge_by_resource.get(str(resource.id))
             context[str(resource.id)] = {
                 "latest_snapshot": snapshot,
                 "knowledge_resource": knowledge,
                 "evidence_count": evidence_counts.get(str(knowledge.id), 0) if knowledge else 0,
+                "projected_dataset_id": str(projected_dataset_id) if projected_dataset_id else None,
             }
+
+        projected_runs: dict[str, SourceUnderstandingRun] = {}
+        if projected_dataset_ids:
+            run_result = await session.execute(
+                select(SourceUnderstandingRun)
+                .where(
+                    SourceUnderstandingRun.tenant_id == tenant_id,
+                    SourceUnderstandingRun.datasource_id.in_(projected_dataset_ids),
+                    SourceUnderstandingRun.status == "completed",
+                )
+                .order_by(SourceUnderstandingRun.created_at.desc())
+            )
+            for run in run_result.scalars().all():
+                projected_runs.setdefault(str(run.datasource_id), run)
+            for item in context.values():
+                projected_dataset_id = item.get("projected_dataset_id")
+                if projected_dataset_id:
+                    item["projected_understanding_run"] = projected_runs.get(projected_dataset_id)
         return context
 
     async def _consumer_index(self, *, session: AsyncSession, tenant_id: UUID) -> _ConsumerIndex:
@@ -427,6 +454,10 @@ class SourceOverviewService:
             latest_snapshot=latest_snapshot,
             projected_dataset_id=str(projected_dataset_id) if projected_dataset_id else None,
             projection=projection,
+        )
+        projection_review = self._with_projection_semantic_handoff(
+            projection_review,
+            projected_understanding_run=context.get("projected_understanding_run"),
         )
         notebooks = set()
         if knowledge_resource:
@@ -774,6 +805,8 @@ class SourceOverviewService:
                 if projection_review and projection_review.get("current") is False:
                     return ["Review stale projection", "Generate semantic model"]
                 if self._projection_review_is_verified(projection_review):
+                    if self._projection_semantic_handoff_ready(projection_review):
+                        return ["Generate semantic model", "Review semantic handoff"]
                     return ["Review semantic handoff", "Generate semantic model"]
                 return ["Review projection", "Generate semantic model"]
             if knowledge_resource and knowledge_resource.index_status == "indexed":
@@ -790,6 +823,8 @@ class SourceOverviewService:
                 if projection_review and projection_review.get("current") is False:
                     return ["Review stale projection", "Generate semantic model"]
                 if self._projection_review_is_verified(projection_review):
+                    if self._projection_semantic_handoff_ready(projection_review):
+                        return ["Generate semantic model", "Review semantic handoff"]
                     return ["Review semantic handoff", "Generate semantic model"]
                 return ["Review projection", "Generate semantic model"]
             return ["Review schema profile"]
@@ -799,6 +834,8 @@ class SourceOverviewService:
             if projection_review and projection_review.get("current") is False:
                 return ["Review stale projection", "Generate semantic model"]
             if self._projection_review_is_verified(projection_review):
+                if self._projection_semantic_handoff_ready(projection_review):
+                    return ["Generate semantic model", "Review semantic handoff"]
                 return ["Review semantic handoff", "Generate semantic model"]
             return ["Review projection", "Generate semantic model"]
         if has_snapshot:
@@ -909,6 +946,37 @@ class SourceOverviewService:
     def _projection_review_is_verified(self, review: dict[str, Any] | None) -> bool:
         return bool(review and review.get("status") == "verified" and review.get("current") is not False)
 
+    def _projection_semantic_handoff_ready(self, review: dict[str, Any] | None) -> bool:
+        handoff = review.get("semantic_handoff") if isinstance(review, dict) else None
+        return bool(isinstance(handoff, dict) and handoff.get("status") == "completed")
+
+    def _with_projection_semantic_handoff(
+        self,
+        review: dict[str, Any] | None,
+        *,
+        projected_understanding_run: SourceUnderstandingRun | None,
+    ) -> dict[str, Any] | None:
+        if review is None:
+            return None
+        if projected_understanding_run is None:
+            return review
+        summary = projected_understanding_run.summary_json or {}
+        return {
+            **review,
+            "semantic_handoff": {
+                "status": "completed",
+                "run_id": str(projected_understanding_run.id),
+                "datasource_id": projected_understanding_run.datasource_id,
+                "analyzer_version": projected_understanding_run.analyzer_version,
+                "completed_at": projected_understanding_run.completed_at.isoformat()
+                if projected_understanding_run.completed_at
+                else None,
+                "candidate_counts": summary.get("candidate_counts", {}),
+                "table_count": summary.get("tables", 0),
+                "column_count": summary.get("columns", 0),
+            },
+        }
+
     def _projection_manifest_hash(self, projection: dict[str, Any]) -> str:
         manifest = {
             "dataset_id": projection.get("dataset_id"),
@@ -967,6 +1035,15 @@ class SourceOverviewService:
             )
         if self._is_projection_source(item):
             if self._projection_review_is_verified(item.projection_review):
+                if self._projection_semantic_handoff_ready(item.projection_review):
+                    return _ModelingHandoff(
+                        status="supported",
+                        mode="projection",
+                        reason="Reviewed projection has a completed Source Understanding handoff and can generate a semantic draft from projected dataset evidence.",
+                        next_action=item.next_actions[0] if item.next_actions else "Generate semantic model",
+                        evidence_summary=self._modeling_evidence_summary(item),
+                        can_load_profile=True,
+                    )
                 return _ModelingHandoff(
                     status="needs_projection",
                     mode="projection",

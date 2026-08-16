@@ -765,3 +765,94 @@ async def test_source_understanding_enforces_tenant_and_own_resource_rbac(test_c
         headers={"x-tenant-id": str(other_tenant.id)},
     )
     assert cross_tenant.status_code == 404
+
+
+async def test_projected_dataset_source_understanding_creates_semantic_draft_with_projection_lineage(
+    test_client, test_session
+):
+    uploaded = await test_client.post(
+        "/api/source-resources/files",
+        files={
+            "file": (
+                "revenue.csv",
+                b"order_id,region,revenue,paid_at\n1,East,120,2026-08-01\n2,West,80,2026-08-02\n",
+                "text/csv",
+            )
+        },
+        data={"name": "projected revenue"},
+    )
+    assert uploaded.status_code == 201
+    resource = uploaded.json()["data"]
+    projected_dataset_id = resource["projected_dataset_id"]
+    assert projected_dataset_id
+
+    analyze_response = await test_client.post(
+        f"/api/datasources/{projected_dataset_id}/understanding/analyze",
+        json={},
+    )
+
+    assert analyze_response.status_code == 200
+    understanding = analyze_response.json()["data"]
+    assert understanding["datasource_id"] == projected_dataset_id
+    assert understanding["datasource_type"] == "duckdb"
+    assert understanding["latest_run"]["status"] == "completed"
+    assert understanding["latest_run"]["analyzer_version"] == "tabular-projection-source-analyzer-v1"
+    assert understanding["latest_run"]["summary_json"]["modeling_mode"] == "tabular_projection"
+    assert understanding["overview"]["source_family"] == "tabular_projection"
+    assert understanding["profile"]["table_count"] == 1
+    assert understanding["profile"]["candidate_counts"]["schema_map"] == 1
+    assert {item["resource_type"] for item in understanding["resources"]} >= {
+        "database_catalog",
+        "database_schema",
+        "database_table",
+    }
+
+    schema_candidate = next(item for item in understanding["candidates"] if item["candidate_type"] == "schema_map")
+    assert schema_candidate["generator"] == "tabular-projection-source-analyzer-v1:dataset-profile"
+    assert schema_candidate["structured_payload_json"]["modeling_handoff"] == "tabular_projection"
+    assert schema_candidate["structured_payload_json"]["projection_lineage"]["source_resource_id"] == resource["id"]
+    assert (
+        schema_candidate["structured_payload_json"]["projection_lineage"]["source_snapshot_id"]
+        == resource["latest_snapshot_id"]
+    )
+    assert schema_candidate["evidence"]
+    assert schema_candidate["evidence"][0]["locator_json"]["source_family"] == "tabular_projection"
+
+    selected = [
+        item
+        for item in understanding["candidates"]
+        if item["candidate_type"] in {"schema_map", "data_truth", "relationship"}
+    ]
+    assert {item["candidate_type"] for item in selected} >= {"schema_map", "data_truth"}
+    for candidate in selected:
+        review_response = await test_client.post(
+            f"/api/datasources/{projected_dataset_id}/understanding/candidates/{candidate['id']}/review",
+            json={"action": "accept"},
+        )
+        assert review_response.status_code == 200
+
+    apply_response = await test_client.post(
+        f"/api/datasources/{projected_dataset_id}/understanding/semantic-model-draft",
+        json={
+            "model_id": "projected-revenue-draft",
+            "name": "Projected Revenue Draft",
+            "domain": "Sales / Orders",
+            "owner": "Revenue Analytics",
+            "candidate_ids": [item["id"] for item in selected],
+        },
+    )
+
+    assert apply_response.status_code == 200
+    payload = apply_response.json()["data"]
+    model = payload["model"]
+    assert model["datasourceId"] == projected_dataset_id
+    assert model["datasourceKind"] == "duckdb"
+    assert any(entity["table"] == "revenue" for entity in model["entities"])
+    assert any(metric["id"] == "revenue_revenue" for metric in model["metrics"])
+    assert payload["lineage"]["dataset_id"] == projected_dataset_id
+    assert payload["lineage"]["source_family"] == "tabular_projection"
+
+    row = await test_session.scalar(select(SemanticModel).where(SemanticModel.slug == "projected-revenue-draft"))
+    assert row is not None
+    review = json.loads(row.review_json)
+    assert review["sourceUnderstandingLineage"][0]["source_snapshot_id"]

@@ -29,15 +29,18 @@ from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
 from server.models.source_understanding import SourceSkillCandidate, SourceUnderstandingRun
 from server.services.connections import ConnectionService
+from server.services.dataset import DatasetService
 from server.services.semantic_model_service import SemanticModelService
 
 DATABASE_ANALYZER_VERSION = "database-source-analyzer-v1"
+TABULAR_PROJECTION_ANALYZER_VERSION = "tabular-projection-source-analyzer-v1"
 DATABASE_CONNECTION_TYPES = {"oracle", "pg", "postgres", "postgresql", "mysql", "sqlite", "mssql"}
 NOSQL_CONNECTION_TYPES = {"mongo", "dynamodb"}
 SOURCE_UNDERSTANDING_CONNECTION_TYPES = DATABASE_CONNECTION_TYPES | NOSQL_CONNECTION_TYPES
 SOURCE_SKILL_CANDIDATE_VERSION = 1
 SOURCE_SKILL_GENERATOR = f"{DATABASE_ANALYZER_VERSION}:metadata-profile"
 NOSQL_SOURCE_SKILL_GENERATOR = f"{DATABASE_ANALYZER_VERSION}:document-profile"
+TABULAR_PROJECTION_SOURCE_SKILL_GENERATOR = f"{TABULAR_PROJECTION_ANALYZER_VERSION}:dataset-profile"
 
 
 def _json_dump(value: Any) -> str:
@@ -134,6 +137,16 @@ class NormalizedDatabaseSchema:
     raw_schema: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class DatasourceTarget:
+    datasource_id: str
+    datasource_name: str
+    datasource_type: str
+    kind: str
+    connection: Connection | None = None
+    dataset: Dataset | None = None
+
+
 class SourceAnalyzer(Protocol):
     provider: str
     supported_connection_types: set[str]
@@ -164,10 +177,16 @@ class SourceUnderstandingService:
         datasource_id: str,
         tenant_id: UUID,
     ) -> dict[str, Any]:
-        connection = await self.resolve_connection(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
+        target = await self.resolve_datasource_target(
+            session=session,
+            datasource_id=datasource_id,
+            tenant_id=tenant_id,
+        )
         latest_run = await self._latest_run(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
-        resources = await self._list_database_resources(
-            session=session, connection_id=connection.id, tenant_id=tenant_id
+        resources = await self._list_understanding_resources(
+            session=session,
+            target=target,
+            tenant_id=tenant_id,
         )
         candidates = await self._list_candidates(session=session, run_id=latest_run.id if latest_run else None)
         evidence_ids = {
@@ -185,8 +204,8 @@ class SourceUnderstandingService:
 
         return {
             "datasource_id": datasource_id,
-            "datasource_name": connection.name or f"{connection.type.upper()} datasource",
-            "datasource_type": connection.type,
+            "datasource_name": target.datasource_name,
+            "datasource_type": target.datasource_type,
             "latest_run": self._run_to_payload(latest_run) if latest_run else None,
             "resources": [self._resource_to_payload(resource) for resource in resources],
             "candidates": [
@@ -202,7 +221,7 @@ class SourceUnderstandingService:
             ],
             "evidence": [self._evidence_to_payload(item) for item in evidence],
             "overview": self._overview_payload(
-                connection=connection,
+                target=target,
                 latest_run=latest_run,
                 resources=resources,
                 candidates=candidates,
@@ -222,7 +241,23 @@ class SourceUnderstandingService:
         refresh_schema: bool = False,
         scope: list[str] | None = None,
     ) -> dict[str, Any]:
-        connection = await self.resolve_connection(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
+        target = await self.resolve_datasource_target(
+            session=session,
+            datasource_id=datasource_id,
+            tenant_id=tenant_id,
+        )
+        if target.kind == "file_dataset":
+            return await self.analyze_tabular_projection(
+                session=session,
+                datasource_id=datasource_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                refresh_schema=refresh_schema,
+                scope=scope,
+            )
+        connection = target.connection
+        if connection is None:
+            raise ValueError("Datasource must be a database connection or projected file dataset")
         normalized_connection_type = _normalize_connection_type(connection.type)
         if normalized_connection_type in NOSQL_CONNECTION_TYPES:
             return await self.analyze_nosql_database(
@@ -619,6 +654,242 @@ class SourceUnderstandingService:
 
         return await self.get_understanding(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
 
+    async def analyze_tabular_projection(
+        self,
+        *,
+        session: AsyncSession,
+        datasource_id: str,
+        tenant_id: UUID,
+        user_id: UUID | None,
+        refresh_schema: bool = False,
+        scope: list[str] | None = None,
+    ) -> dict[str, Any]:
+        dataset = await self.resolve_file_dataset(
+            session=session,
+            datasource_id=datasource_id,
+            tenant_id=tenant_id,
+        )
+        schema = await self._load_file_dataset_schema(
+            session=session,
+            dataset=dataset,
+            refresh_schema=refresh_schema,
+        )
+        normalized = self._normalize_file_dataset_schema(dataset=dataset, schema=schema, scope=scope or [])
+        projection_lineage = await self._projection_lineage_for_dataset(
+            session=session,
+            tenant_id=tenant_id,
+            dataset=dataset,
+        )
+
+        run = SourceUnderstandingRun(
+            tenant_id=tenant_id,
+            connection_id=None,
+            datasource_id=datasource_id,
+            provider="database",
+            status="running",
+            analyzer_version=TABULAR_PROJECTION_ANALYZER_VERSION,
+            source_snapshot_ids_json=[],
+            summary_json={},
+            drift_json={},
+            created_at=datetime.utcnow(),
+        )
+        session.add(run)
+        await session.flush()
+
+        drift_events: list[dict[str, Any]] = []
+        snapshot_ids: list[str] = []
+        evidence_by_table: dict[str, dict[str, Any]] = {}
+        table_snapshots: dict[str, SourceSnapshot] = {}
+        table_resources: dict[str, SourceResource] = {}
+
+        catalog_resource, catalog_snapshot = await self._snapshot_resource(
+            session=session,
+            tenant_id=tenant_id,
+            connection_id=None,
+            resource_type="database_catalog",
+            external_id=f"projection:{dataset.id}:catalog:{normalized.catalog}",
+            name=normalized.catalog,
+            owner_id=user_id,
+            payload={
+                "catalog": normalized.catalog,
+                "datasource_type": normalized.datasource_type,
+                "source_family": "tabular_projection",
+                "modeling_handoff": "tabular_projection",
+                "dataset_id": str(dataset.id),
+                "tables": [table.name for table in normalized.tables],
+            },
+            drift_events=drift_events,
+            raw_storage_uri=f"dataset://{dataset.id}/catalog/{normalized.catalog}",
+            parser_version=TABULAR_PROJECTION_ANALYZER_VERSION,
+        )
+        snapshot_ids.append(str(catalog_snapshot.id))
+
+        schema_resource, schema_snapshot = await self._snapshot_resource(
+            session=session,
+            tenant_id=tenant_id,
+            connection_id=None,
+            resource_type="database_schema",
+            external_id=f"projection:{dataset.id}:schema:{normalized.schema}",
+            name=f"{normalized.catalog}.{normalized.schema}",
+            owner_id=user_id,
+            payload={
+                "catalog": normalized.catalog,
+                "schema": normalized.schema,
+                "source_family": "tabular_projection",
+                "modeling_handoff": "tabular_projection",
+                "dataset_id": str(dataset.id),
+                "table_count": len(normalized.tables),
+            },
+            drift_events=drift_events,
+            raw_storage_uri=f"dataset://{dataset.id}/schema/{normalized.schema}",
+            parser_version=TABULAR_PROJECTION_ANALYZER_VERSION,
+        )
+        snapshot_ids.append(str(schema_snapshot.id))
+
+        await self._create_knowledge_and_evidence(
+            session=session,
+            tenant_id=tenant_id,
+            resource=catalog_resource,
+            snapshot=catalog_snapshot,
+            fragments=[
+                {
+                    "fragment_type": "database_catalog",
+                    "title_path": [normalized.catalog],
+                    "text": f"Projected dataset {normalized.catalog} contains {len(normalized.tables)} analyzed tables.",
+                    "locator_json": {
+                        "kind": "projected_dataset_catalog",
+                        "datasource_id": datasource_id,
+                        "dataset_id": str(dataset.id),
+                        "catalog": normalized.catalog,
+                        "source_family": "tabular_projection",
+                    },
+                    "confidence": "high",
+                }
+            ],
+            provider="tabular_projection",
+        )
+        await self._create_knowledge_and_evidence(
+            session=session,
+            tenant_id=tenant_id,
+            resource=schema_resource,
+            snapshot=schema_snapshot,
+            fragments=[
+                {
+                    "fragment_type": "database_schema",
+                    "title_path": [normalized.catalog, normalized.schema],
+                    "text": f"Projected dataset schema {normalized.schema} has {len(normalized.tables)} analyzed tables.",
+                    "locator_json": {
+                        "kind": "projected_dataset_schema",
+                        "datasource_id": datasource_id,
+                        "dataset_id": str(dataset.id),
+                        "catalog": normalized.catalog,
+                        "schema": normalized.schema,
+                        "source_family": "tabular_projection",
+                    },
+                    "confidence": "high",
+                }
+            ],
+            provider="tabular_projection",
+        )
+
+        for table in normalized.tables:
+            table_resource, table_snapshot = await self._snapshot_resource(
+                session=session,
+                tenant_id=tenant_id,
+                connection_id=None,
+                resource_type="database_table",
+                external_id=f"projection:{dataset.id}:table:{table.schema}.{table.name}",
+                name=f"{table.schema}.{table.name}",
+                owner_id=user_id,
+                payload={
+                    **self._table_snapshot_payload(table),
+                    "source_family": "tabular_projection",
+                    "modeling_handoff": "tabular_projection",
+                    "dataset_id": str(dataset.id),
+                    "projection_lineage": {**projection_lineage, "table": table.name},
+                },
+                drift_events=drift_events,
+                raw_storage_uri=f"dataset://{dataset.id}/table/{table.schema}.{table.name}",
+                parser_version=TABULAR_PROJECTION_ANALYZER_VERSION,
+            )
+            table_resources[table.name] = table_resource
+            table_snapshots[table.name] = table_snapshot
+            snapshot_ids.append(str(table_snapshot.id))
+            evidence_by_table[table.name] = await self._create_knowledge_and_evidence(
+                session=session,
+                tenant_id=tenant_id,
+                resource=table_resource,
+                snapshot=table_snapshot,
+                fragments=self._table_evidence_fragments(
+                    datasource_id=datasource_id,
+                    connection_id=None,
+                    table=table,
+                    source_family="tabular_projection",
+                ),
+                provider="tabular_projection",
+            )
+
+        candidates = self._build_candidates(normalized, evidence_by_table)
+        for candidate in candidates:
+            table_name = candidate["table"]
+            table_resource = table_resources[table_name]
+            table_snapshot = table_snapshots[table_name]
+            session.add(
+                SourceSkillCandidate(
+                    tenant_id=tenant_id,
+                    run_id=run.id,
+                    resource_id=table_resource.id,
+                    snapshot_id=table_snapshot.id,
+                    source_id=datasource_id,
+                    candidate_type=candidate["candidate_type"],
+                    title=candidate["title"],
+                    statement=candidate["statement"],
+                    structured_payload_json={
+                        **candidate["structured_payload"],
+                        "source_id": datasource_id,
+                        "source_snapshot_id": str(table_snapshot.id),
+                        "source_resource_id": str(table_resource.id),
+                        "modeling_handoff": "tabular_projection",
+                        "projection_lineage": {**projection_lineage, "table": table_name},
+                    },
+                    evidence_ids_json=candidate["evidence_ids"],
+                    confidence=candidate["confidence"],
+                    validation_status=candidate["validation_status"],
+                    validation_json=candidate["validation"],
+                    review_status="suggested",
+                    generator=TABULAR_PROJECTION_SOURCE_SKILL_GENERATOR,
+                    version=SOURCE_SKILL_CANDIDATE_VERSION,
+                )
+            )
+
+        if drift_events:
+            await self._mark_previous_verified_stale(
+                session=session,
+                tenant_id=tenant_id,
+                datasource_id=datasource_id,
+                current_run_id=run.id,
+            )
+
+        run.status = "completed"
+        run.completed_at = datetime.utcnow()
+        run.source_snapshot_ids_json = snapshot_ids
+        run.summary_json = {
+            **self._summary_payload(normalized, candidates),
+            "modeling_mode": "tabular_projection",
+            "dataset_id": str(dataset.id),
+            "source_family": "tabular_projection",
+            "projection_lineage": projection_lineage,
+        }
+        run.drift_json = {
+            "status": "drift_detected" if drift_events else "stable",
+            "events": drift_events,
+            "resource_count": len(snapshot_ids),
+            "checked_at": datetime.utcnow().isoformat(),
+        }
+        await session.commit()
+
+        return await self.get_understanding(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
+
     async def review_candidate(
         self,
         *,
@@ -632,7 +903,7 @@ class SourceUnderstandingService:
         structured_payload: dict[str, Any] | None = None,
         note: str | None = None,
     ) -> dict[str, Any]:
-        await self.resolve_connection(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
+        await self.resolve_datasource_target(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
         candidate = await self._get_candidate(session=session, candidate_id=candidate_id, tenant_id=tenant_id)
         if candidate is None or candidate.run.datasource_id != datasource_id:
             raise ValueError("Source Skill candidate not found")
@@ -671,7 +942,11 @@ class SourceUnderstandingService:
         owner: str,
         candidate_ids: list[UUID],
     ) -> dict[str, Any]:
-        connection = await self.resolve_connection(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
+        target = await self.resolve_datasource_target(
+            session=session,
+            datasource_id=datasource_id,
+            tenant_id=tenant_id,
+        )
         candidates = await self._verified_candidates(
             session=session,
             datasource_id=datasource_id,
@@ -681,20 +956,24 @@ class SourceUnderstandingService:
         if not candidates:
             raise ValueError("No verified Source Skill candidates selected")
 
-        slug = model_id or _slugify(name or f"{connection.name or connection.type} semantic model")
+        slug = model_id or _slugify(name or f"{target.datasource_name} semantic model")
         model = await SemanticModelService.load_model(session, tenant_id, slug)
         if model is None:
             model = SemanticModel(
                 tenant_id=tenant_id,
                 created_by=user_id,
                 slug=slug,
-                name=name or f"{connection.name or connection.type.upper()} Semantic Model",
+                name=name or f"{target.datasource_name} Semantic Model",
                 domain=domain,
                 owner=owner,
                 datasource_id=datasource_id,
-                datasource_name=connection.name or f"{connection.type.upper()} datasource",
-                datasource_kind=connection.type,
-                description="Draft initialized from verified database Source Understanding candidates.",
+                datasource_name=target.datasource_name,
+                datasource_kind=target.datasource_type,
+                description=(
+                    "Draft initialized from verified projected dataset Source Understanding candidates."
+                    if target.kind == "file_dataset"
+                    else "Draft initialized from verified database Source Understanding candidates."
+                ),
                 status="Draft",
                 draft_revision="draft-source-1",
                 published_version="v0",
@@ -712,8 +991,8 @@ class SourceUnderstandingService:
             model.status = "Draft"
             model.draft_revision = "draft-source-updated"
             model.datasource_id = datasource_id
-            model.datasource_name = connection.name or model.datasource_name
-            model.datasource_kind = connection.type
+            model.datasource_name = target.datasource_name or model.datasource_name
+            model.datasource_kind = target.datasource_type
 
         applied_ids: list[UUID] = []
         lineage_entries: list[dict[str, Any]] = []
@@ -760,34 +1039,101 @@ class SourceUnderstandingService:
             "applied_candidate_ids": applied_ids,
             "lineage": {
                 "datasource_id": datasource_id,
-                "connection_id": str(connection.id),
+                "connection_id": str(target.connection.id) if target.connection else None,
+                "dataset_id": str(target.dataset.id) if target.dataset else None,
+                "source_family": "tabular_projection" if target.kind == "file_dataset" else "database",
                 "candidates": lineage_entries,
             },
         }
 
-    async def resolve_connection(self, *, session: AsyncSession, datasource_id: str, tenant_id: UUID) -> Connection:
+    async def resolve_datasource_target(
+        self,
+        *,
+        session: AsyncSession,
+        datasource_id: str,
+        tenant_id: UUID,
+    ) -> DatasourceTarget:
         try:
             parsed_id = UUID(str(datasource_id))
         except ValueError:
-            raise ValueError("Datasource must be a database connection or connection-backed dataset")
+            raise ValueError(
+                "Datasource must be a database connection, connection-backed dataset, or projected file dataset"
+            )
 
         connection = await session.get(Connection, parsed_id)
         if connection is not None:
             if connection.tenant_id != tenant_id:
                 raise ValueError("Datasource not found")
-            return connection
+            return DatasourceTarget(
+                datasource_id=datasource_id,
+                datasource_name=connection.name or f"{connection.type.upper()} datasource",
+                datasource_type=connection.type,
+                kind="connection",
+                connection=connection,
+            )
 
         dataset = await session.get(Dataset, parsed_id)
         if dataset is None:
-            raise ValueError("Datasource must be a database connection or connection-backed dataset")
+            raise ValueError(
+                "Datasource must be a database connection, connection-backed dataset, or projected file dataset"
+            )
         if dataset.tenant_id != tenant_id:
             raise ValueError("Datasource not found")
-        if dataset.type != "connection" or dataset.connection_id is None:
+        if dataset.type == "connection" and dataset.connection_id is not None:
+            connection = await session.get(Connection, dataset.connection_id)
+            if connection is None or connection.tenant_id != tenant_id:
+                raise ValueError("Datasource connection not found")
+            return DatasourceTarget(
+                datasource_id=datasource_id,
+                datasource_name=connection.name or dataset.name or f"{connection.type.upper()} datasource",
+                datasource_type=connection.type,
+                kind="connection_dataset",
+                connection=connection,
+                dataset=dataset,
+            )
+        if dataset.type == "file":
+            return DatasourceTarget(
+                datasource_id=datasource_id,
+                datasource_name=dataset.name or f"Projected Dataset {str(dataset.id)[:8]}",
+                datasource_type="duckdb",
+                kind="file_dataset",
+                dataset=dataset,
+            )
+        raise ValueError(
+            "Datasource must be a database connection, connection-backed dataset, or projected file dataset"
+        )
+
+    async def resolve_connection(self, *, session: AsyncSession, datasource_id: str, tenant_id: UUID) -> Connection:
+        target = await self.resolve_datasource_target(
+            session=session,
+            datasource_id=datasource_id,
+            tenant_id=tenant_id,
+        )
+        if target.connection is None:
             raise ValueError("Datasource must be a database connection or connection-backed dataset")
-        connection = await session.get(Connection, dataset.connection_id)
-        if connection is None or connection.tenant_id != tenant_id:
-            raise ValueError("Datasource connection not found")
-        return connection
+        return target.connection
+
+    async def resolve_file_dataset(
+        self,
+        *,
+        session: AsyncSession,
+        datasource_id: str,
+        tenant_id: UUID,
+    ) -> Dataset:
+        target = await self.resolve_datasource_target(
+            session=session,
+            datasource_id=datasource_id,
+            tenant_id=tenant_id,
+        )
+        if target.kind != "file_dataset" or target.dataset is None:
+            raise ValueError("Datasource must be a projected file dataset")
+        result = await session.execute(
+            select(Dataset).where(Dataset.id == target.dataset.id).options(selectinload(Dataset.files))
+        )
+        dataset = result.scalars().first()
+        if dataset is None or dataset.tenant_id != tenant_id or dataset.type != "file":
+            raise ValueError("Datasource must be a projected file dataset")
+        return dataset
 
     async def can_update_datasource(
         self,
@@ -800,8 +1146,16 @@ class SourceUnderstandingService:
     ) -> bool:
         if update_all:
             return True
-        connection = await self.resolve_connection(session=session, datasource_id=datasource_id, tenant_id=tenant_id)
-        return connection.created_by is not None and str(connection.created_by) == str(user_id)
+        target = await self.resolve_datasource_target(
+            session=session,
+            datasource_id=datasource_id,
+            tenant_id=tenant_id,
+        )
+        if target.connection is not None:
+            return target.connection.created_by is not None and str(target.connection.created_by) == str(user_id)
+        if target.dataset is not None:
+            return target.dataset.created_by is not None and str(target.dataset.created_by) == str(user_id)
+        return False
 
     async def _load_schema(
         self, *, session: AsyncSession, connection: Connection, refresh_schema: bool
@@ -814,6 +1168,195 @@ class SourceUnderstandingService:
             return cached
         _, schema = await ConnectionService.refresh_connection_schema(str(connection.id), session)
         return schema
+
+    async def _load_file_dataset_schema(
+        self,
+        *,
+        session: AsyncSession,
+        dataset: Dataset,
+        refresh_schema: bool,
+    ) -> dict[str, Any]:
+        from server.services.file_operations import DataFrameFileService
+
+        if refresh_schema or not dataset.schema_cache:
+            _, schema = await DatasetService.refresh_dataset_schema(session, str(dataset.id))
+            return schema
+        cached = DataFrameFileService.get_cached_schema(dataset)
+        if cached:
+            return cached
+        _, schema = await DatasetService.refresh_dataset_schema(session, str(dataset.id))
+        return schema
+
+    def _normalize_file_dataset_schema(
+        self,
+        *,
+        dataset: Dataset,
+        schema: dict[str, Any],
+        scope: list[str],
+    ) -> NormalizedDatabaseSchema:
+        root = schema if isinstance(schema, dict) else {}
+        raw_tables = root.get("schema") if isinstance(root.get("schema"), dict) else {}
+        sample_by_table = root.get("sample_data") if isinstance(root.get("sample_data"), dict) else {}
+        datasource_name = str(root.get("datasource_name") or dataset.name or f"Dataset {dataset.id}")
+        catalog = str(dataset.name or root.get("datasource_name") or f"dataset_{str(dataset.id)[:8]}")
+        wanted = {item.upper() for item in scope if item}
+
+        tables: list[NormalizedTable] = []
+        for table_name, table_info in sorted(raw_tables.items(), key=lambda item: str(item[0]).lower()):
+            if wanted and str(table_name).upper() not in wanted:
+                continue
+            if not isinstance(table_info, dict):
+                table_info = {"columns": table_info if isinstance(table_info, list) else []}
+            samples = (
+                sample_by_table.get(table_name) or table_info.get("sample_rows") or table_info.get("sample_data") or []
+            )
+            sample_rows = tuple(row for row in samples if isinstance(row, dict))
+            row_count = self._coerce_int(
+                table_info.get("row_count")
+                or table_info.get("rowCount")
+                or (table_info.get("profile") or {}).get("row_count")
+                or len(sample_rows)
+            )
+            table_info = {
+                **table_info,
+                "sample_data": list(sample_rows),
+                "description": table_info.get("description")
+                or self._projected_table_description(
+                    dataset=dataset, table_name=str(table_name), table_info=table_info
+                ),
+            }
+            columns = self._normalize_columns(table_info, sample_rows=sample_rows, row_count=row_count)
+            primary_key = tuple(self._normalize_primary_key(table_info, columns))
+            category = self._classify_table(str(table_name), columns, primary_key)
+            tables.append(
+                NormalizedTable(
+                    catalog=catalog,
+                    schema="projection",
+                    name=str(table_name),
+                    table_type=str(table_info.get("type") or table_info.get("file_type") or "table"),
+                    category=category,
+                    description=str(table_info.get("description") or ""),
+                    row_count=row_count,
+                    primary_key=primary_key,
+                    columns=tuple(columns),
+                    foreign_keys=(),
+                    indexes=tuple(item for item in table_info.get("indexes") or [] if isinstance(item, dict)),
+                    sample_rows=sample_rows,
+                )
+            )
+
+        table_by_name = {table.name.lower(): table for table in tables}
+        pk_by_table = {table.name.lower(): table.primary_key for table in tables}
+        with_relationships: list[NormalizedTable] = []
+        for table in tables:
+            table_info = raw_tables.get(table.name) if isinstance(raw_tables.get(table.name), dict) else {}
+            relationships = self._normalize_relationships(
+                table=table,
+                table_info=table_info,
+                table_by_name=table_by_name,
+                pk_by_table=pk_by_table,
+            )
+            with_relationships.append(
+                NormalizedTable(
+                    catalog=table.catalog,
+                    schema=table.schema,
+                    name=table.name,
+                    table_type=table.table_type,
+                    category=table.category,
+                    description=table.description,
+                    row_count=table.row_count,
+                    primary_key=table.primary_key,
+                    columns=table.columns,
+                    foreign_keys=tuple(relationships),
+                    indexes=table.indexes,
+                    sample_rows=table.sample_rows,
+                )
+            )
+
+        return NormalizedDatabaseSchema(
+            datasource_name=datasource_name,
+            datasource_type="duckdb",
+            catalog=catalog,
+            schema="projection",
+            tables=tuple(with_relationships),
+            raw_schema=root,
+        )
+
+    def _projected_table_description(self, *, dataset: Dataset, table_name: str, table_info: dict[str, Any]) -> str:
+        filename = table_info.get("filename")
+        sheet_name = table_info.get("sheet_name")
+        source = f" from {filename}" if filename else ""
+        sheet = f" sheet {sheet_name}" if sheet_name else ""
+        return f"Projected table {table_name}{source}{sheet} in dataset {dataset.id}."
+
+    async def _projection_lineage_for_dataset(
+        self,
+        *,
+        session: AsyncSession,
+        tenant_id: UUID,
+        dataset: Dataset,
+    ) -> dict[str, Any]:
+        lineage: dict[str, Any] = {
+            "dataset_id": str(dataset.id),
+            "source_family": "tabular_projection",
+        }
+        files = []
+        for file in getattr(dataset, "files", []) or []:
+            files.append(
+                {
+                    "file_id": str(file.id),
+                    "filename": file.name,
+                    "file_type": file.type,
+                    "checksum": file.checksum,
+                    "storage_path": file.storage_path,
+                    "source_url": file.source_url,
+                }
+            )
+        if files:
+            lineage["files"] = files
+        resource_result = await session.execute(
+            select(SourceResource)
+            .where(
+                SourceResource.tenant_id == tenant_id,
+                SourceResource.resource_type.in_(
+                    (
+                        "file",
+                        "feishu_sheet",
+                        "feishu_base",
+                        "tos_object",
+                        "extracted_table",
+                    )
+                ),
+            )
+            .order_by(SourceResource.updated_at.desc())
+        )
+        resource = next(
+            (
+                item
+                for item in resource_result.scalars().all()
+                if str((item.sync_config_json or {}).get("projected_dataset_id") or "") == str(dataset.id)
+            ),
+            None,
+        )
+        if resource is None:
+            return lineage
+
+        lineage["source_resource_id"] = str(resource.id)
+        lineage["source_resource_type"] = resource.resource_type
+        lineage["source_resource_name"] = resource.name
+        lineage["source_url"] = resource.source_url
+        lineage["external_id"] = resource.external_id
+        if resource.latest_snapshot_id:
+            snapshot = await session.get(SourceSnapshot, resource.latest_snapshot_id)
+            if snapshot is not None and snapshot.tenant_id == tenant_id:
+                metadata = snapshot.metadata_json if isinstance(snapshot.metadata_json, dict) else {}
+                lineage["source_snapshot_id"] = str(snapshot.id)
+                lineage["raw_artifact_uri"] = snapshot.raw_storage_uri
+                lineage["source_content_hash"] = snapshot.content_hash
+                lineage["projection_manifest"] = metadata.get("projection_manifest") or metadata.get(
+                    "projected_dataset"
+                )
+        return lineage
 
     def _normalize_schema(
         self,
@@ -1642,23 +2185,27 @@ class SourceUnderstandingService:
         *,
         session: AsyncSession,
         tenant_id: UUID,
-        connection_id: UUID,
+        connection_id: UUID | None,
         resource_type: str,
         external_id: str,
         name: str,
         owner_id: UUID | None,
         payload: dict[str, Any],
         drift_events: list[dict[str, Any]],
+        raw_storage_uri: str | None = None,
+        parser_version: str = DATABASE_ANALYZER_VERSION,
     ) -> tuple[SourceResource, SourceSnapshot]:
         previous_hash: str | None = None
-        result = await session.execute(
-            select(SourceResource).where(
-                SourceResource.tenant_id == tenant_id,
-                SourceResource.connection_id == connection_id,
-                SourceResource.resource_type == resource_type,
-                SourceResource.external_id == external_id,
-            )
-        )
+        conditions = [
+            SourceResource.tenant_id == tenant_id,
+            SourceResource.resource_type == resource_type,
+            SourceResource.external_id == external_id,
+        ]
+        if connection_id is None:
+            conditions.append(SourceResource.connection_id.is_(None))
+        else:
+            conditions.append(SourceResource.connection_id == connection_id)
+        result = await session.execute(select(SourceResource).where(*conditions))
         resource = result.scalar_one_or_none()
         if resource is None:
             resource = SourceResource(
@@ -1684,8 +2231,8 @@ class SourceUnderstandingService:
             resource_id=resource.id,
             external_revision=content_hash,
             content_hash=content_hash,
-            raw_storage_uri=f"db://{connection_id}/{external_id}",
-            parser_version=DATABASE_ANALYZER_VERSION,
+            raw_storage_uri=raw_storage_uri or f"db://{connection_id}/{external_id}",
+            parser_version=parser_version,
             metadata_json=payload,
             status="indexed",
         )
@@ -1759,18 +2306,21 @@ class SourceUnderstandingService:
         self,
         *,
         datasource_id: str,
-        connection_id: UUID,
+        connection_id: UUID | None,
         table: NormalizedTable,
         source_family: str = "database",
     ) -> list[dict[str, Any]]:
         base_locator = {
             "datasource_id": datasource_id,
-            "connection_id": str(connection_id),
             "catalog": table.catalog,
             "schema": table.schema,
             "table": table.name,
             "source_family": source_family,
         }
+        if connection_id is not None:
+            base_locator["connection_id"] = str(connection_id)
+        else:
+            base_locator["dataset_id"] = datasource_id
         object_label = "collection" if source_family == "nosql" else "table"
         fragments = [
             {
@@ -1908,18 +2458,36 @@ class SourceUnderstandingService:
         )
         return result.scalars().first()
 
-    async def _list_database_resources(
+    async def _list_understanding_resources(
         self,
         *,
         session: AsyncSession,
-        connection_id: UUID,
+        target: DatasourceTarget,
         tenant_id: UUID,
     ) -> list[SourceResource]:
+        if target.connection is None:
+            prefixes = [f"projection:{target.datasource_id}:"]
+            result = await session.execute(
+                select(SourceResource)
+                .where(
+                    SourceResource.tenant_id == tenant_id,
+                    SourceResource.connection_id.is_(None),
+                    SourceResource.resource_type.in_(("database_catalog", "database_schema", "database_table")),
+                )
+                .order_by(SourceResource.resource_type.asc(), SourceResource.name.asc())
+            )
+            resources = list(result.scalars().all())
+            return [
+                resource
+                for resource in resources
+                if any(str(resource.external_id or "").startswith(prefix) for prefix in prefixes)
+            ]
+
         result = await session.execute(
             select(SourceResource)
             .where(
                 SourceResource.tenant_id == tenant_id,
-                SourceResource.connection_id == connection_id,
+                SourceResource.connection_id == target.connection.id,
                 SourceResource.resource_type.in_(("database_catalog", "database_schema", "database_table")),
             )
             .order_by(SourceResource.resource_type.asc(), SourceResource.name.asc())
@@ -2325,7 +2893,7 @@ class SourceUnderstandingService:
     def _overview_payload(
         self,
         *,
-        connection: Connection,
+        target: DatasourceTarget,
         latest_run: SourceUnderstandingRun | None,
         resources: list[SourceResource],
         candidates: list[SourceSkillCandidate],
@@ -2335,7 +2903,10 @@ class SourceUnderstandingService:
         suggested = sum(1 for item in candidates if item.review_status == "suggested")
         summary = latest_run.summary_json if latest_run else {}
         return {
-            "connection_id": str(connection.id),
+            "connection_id": str(target.connection.id) if target.connection else None,
+            "dataset_id": str(target.dataset.id) if target.dataset else None,
+            "source_family": "tabular_projection" if target.kind == "file_dataset" else "database",
+            "schema": summary.get("schema"),
             "status": latest_run.status if latest_run else "not_analyzed",
             "resource_count": len(resources),
             "snapshot_count": len(latest_run.source_snapshot_ids_json) if latest_run else 0,
@@ -2354,6 +2925,8 @@ class SourceUnderstandingService:
             "column_count": summary.get("columns", 0),
             "relationship_count": summary.get("relationships", 0),
             "candidate_counts": summary.get("candidate_counts", {}),
+            "schema": summary.get("schema"),
+            "modeling_mode": summary.get("modeling_mode"),
         }
 
     def _quality_payload(self, candidates: list[SourceSkillCandidate]) -> dict[str, Any]:

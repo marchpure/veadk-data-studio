@@ -45,6 +45,7 @@ export interface DataModelingDatasource {
   provider?: string
   canLoadProfile: boolean
   projectedDatasetId?: string | null
+  sourceResourceId?: string | null
   contextIndexStatus?: string
   parseStatus?: string
 }

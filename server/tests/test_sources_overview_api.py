@@ -846,7 +846,7 @@ async def test_sources_overview_uses_snapshot_projection_manifest_for_asset_coun
     assert item["modeling_can_load_profile"] is False
 
 
-async def test_sources_overview_marks_verified_projection_review_without_semantic_draft_handoff(test_client):
+async def test_sources_overview_marks_verified_projection_review_after_semantic_handoff(test_client):
     uploaded = await test_client.post(
         "/api/source-resources/files",
         files={"file": ("revenue.csv", b"region,revenue\nEast,120\nWest,80\n", "text/csv")},
@@ -876,12 +876,33 @@ async def test_sources_overview_marks_verified_projection_review_without_semanti
 
     assert item["projection_review"]["status"] == "verified"
     assert item["projection_review"]["current"] is True
+    assert item["projection_review"].get("semantic_handoff") is None
     assert item["next_actions"] == ["Review semantic handoff", "Generate semantic model"]
     assert item["modeling_status"] == "needs_projection"
     assert item["modeling_mode"] == "projection"
     assert item["modeling_next_action"] == "Review semantic handoff"
     assert item["modeling_can_load_profile"] is True
     assert "dedicated handoff contract" in item["modeling_reason"]
+
+    analyzed = await test_client.post(
+        f"/api/datasources/{resource['projected_dataset_id']}/understanding/analyze",
+        json={},
+    )
+    assert analyzed.status_code == 200
+
+    with_handoff = await test_client.get("/api/sources/overview")
+    assert with_handoff.status_code == 200
+    supported = next(item for item in with_handoff.json()["data"]["items"] if item["id"] == resource["id"])
+
+    assert supported["projection_review"]["status"] == "verified"
+    assert supported["projection_review"]["semantic_handoff"]["status"] == "completed"
+    assert supported["projection_review"]["semantic_handoff"]["datasource_id"] == resource["projected_dataset_id"]
+    assert supported["next_actions"] == ["Generate semantic model", "Review semantic handoff"]
+    assert supported["modeling_status"] == "supported"
+    assert supported["modeling_mode"] == "projection"
+    assert supported["modeling_next_action"] == "Generate semantic model"
+    assert supported["modeling_can_load_profile"] is True
+    assert "completed Source Understanding handoff" in supported["modeling_reason"]
 
 
 async def test_sources_overview_counts_tos_prefix_manifest_files(test_client, test_session):

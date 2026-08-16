@@ -233,16 +233,20 @@ export const dataModelingAdapter: DataModelingAdapter = {
 }
 
 export function sourceOverviewToModelingDatasource(item: SourceOverviewItem): DataModelingDatasource {
+  const reviewedProjectionTarget = item.modeling_status === 'supported'
+    && item.modeling_mode === 'projection'
+    && item.projected_dataset_id
   const base = {
-    id: item.id,
+    id: reviewedProjectionTarget ? item.projected_dataset_id as string : item.id,
     name: item.name,
     kind: normalizeSourceOverviewKind(item),
-    sourceType: item.source_kind,
+    sourceType: reviewedProjectionTarget ? 'dataset' as const : item.source_kind,
     status: item.status,
     sourceFamily: item.family,
     provider: item.provider,
     nextActions: item.next_actions ?? [],
     projectedDatasetId: item.projected_dataset_id,
+    sourceResourceId: reviewedProjectionTarget ? item.id : undefined,
     contextIndexStatus: item.context_index_status,
     parseStatus: item.parse_status,
   }
