@@ -10,9 +10,12 @@ const modelId = `p0-projected-revenue-${runId}`
 const modelName = `P0 Projected Revenue ${runId}`
 const email = process.env.E2E_EMAIL
 const password = process.env.E2E_PASSWORD
+const MAX_NAVIGATION_EXEMPTIONS = 3
+const allowedNavigationAbortPath = `/api/semantic-models/${modelId}`
 
 let accessToken = ''
 let browserContext
+const navigationStateByPage = new WeakMap()
 
 if ((email && !password) || (!email && password)) {
   throw new Error('Set both E2E_EMAIL and E2E_PASSWORD, or leave both unset for local no-auth mode.')
@@ -34,6 +37,7 @@ const observed = {
   http5xx: [],
   ignoredAborts: [],
   ignoredConsoleErrors: [],
+  navigationExemptionLimitExceeded: false,
 }
 
 const evidence = {
@@ -49,6 +53,78 @@ const evidence = {
 
 function record(step, data = {}) {
   evidence.steps.push({ step, at: new Date().toISOString(), ...data })
+}
+
+function getNavigationState(page) {
+  const state = navigationStateByPage.get(page)
+  if (!state) {
+    throw new Error('Missing navigation state for page')
+  }
+  return state
+}
+
+async function duringNavigation(page, screen, action) {
+  const state = getNavigationState(page)
+  state.navigating = true
+  state.screen = screen
+  try {
+    return await action()
+  } finally {
+    state.navigating = false
+  }
+}
+
+function trackedSettlingRequest(request) {
+  try {
+    const parsed = new URL(request.url())
+    const method = request.method()
+    if (parsed.pathname === allowedNavigationAbortPath && method === 'GET') return 'semantic-model-load'
+    if (parsed.pathname === `/api/data-models/${modelId}` && method === 'PATCH') return 'semantic-model-autosave'
+    if (parsed.pathname === '/api/knowledge/search' && method === 'POST') return 'source-evidence-search'
+  } catch {
+    return null
+  }
+  return null
+}
+
+async function waitForTrackedRequests(page, screen, timeoutMs = 10000) {
+  const state = getNavigationState(page)
+  const start = Date.now()
+  while (state.pendingRequests.size > 0) {
+    if (Date.now() - start > timeoutMs) {
+      const pending = [...state.pendingRequests.values()]
+      throw new Error(`Timed out waiting for ${screen} tracked requests: ${JSON.stringify(pending)}`)
+    }
+    await page.waitForTimeout(100)
+  }
+  await page.waitForTimeout(250)
+  if (state.pendingRequests.size > 0) {
+    return waitForTrackedRequests(page, screen, timeoutMs - (Date.now() - start))
+  }
+}
+
+function isAllowedSemanticModelNavigationAbort(url, errorText, screen, reason) {
+  if (!screen) return false
+  try {
+    const parsed = new URL(url)
+    return parsed.pathname === allowedNavigationAbortPath && errorText === 'net::ERR_ABORTED' && reason === 'navigation-cancelled-semantic-model-fetch'
+  } catch {
+    return false
+  }
+}
+
+function semanticModelUrlFromConsoleText(text) {
+  const expectedPrefix = `Error fetching semantic model ${modelId}: TypeError: Failed to fetch`
+  if (!text.startsWith(expectedPrefix)) return null
+  return new URL(allowedNavigationAbortPath, baseURL).toString()
+}
+
+function recordNavigationExemption(collection, entry) {
+  collection.push(entry)
+  const count = observed.ignoredAborts.length + observed.ignoredConsoleErrors.length
+  if (count > MAX_NAVIGATION_EXEMPTIONS) {
+    observed.navigationExemptionLimitExceeded = true
+  }
 }
 
 async function api(path, options = {}) {
@@ -230,6 +306,7 @@ async function makePage(browser, viewport) {
     }
   }
   const page = await browserContext.newPage()
+  navigationStateByPage.set(page, { navigating: false, screen: '', pendingRequests: new Map() })
   await page.setViewportSize(viewport)
   await browserContext.route('https://accounts.google.com/**', route => {
     route.fulfill({ status: 204, body: '' })
@@ -239,11 +316,28 @@ async function makePage(browser, viewport) {
     observed.pageErrors.push(error.message)
     console.error('pageerror:', error.message)
   })
+  page.on('request', request => {
+    const reason = trackedSettlingRequest(request)
+    if (!reason) return
+    const state = getNavigationState(page)
+    state.pendingRequests.set(request, { url: request.url(), method: request.method(), reason })
+  })
+  page.on('requestfinished', request => {
+    const state = getNavigationState(page)
+    state.pendingRequests.delete(request)
+  })
   page.on('console', msg => {
     if (msg.type() !== 'error') return
     const text = msg.text()
-    if (text.includes('TypeError: Failed to fetch')) {
-      observed.ignoredConsoleErrors.push(text)
+    const state = getNavigationState(page)
+    const url = semanticModelUrlFromConsoleText(text)
+    if (state.navigating && url) {
+      recordNavigationExemption(observed.ignoredConsoleErrors, {
+        url,
+        errorText: text,
+        reason: 'navigation-cancelled-semantic-model-fetch',
+        screen: state.screen,
+      })
       return
     }
     stats.consoleError += 1
@@ -253,14 +347,23 @@ async function makePage(browser, viewport) {
   page.on('requestfailed', request => {
     const url = request.url()
     if (url.startsWith('https://accounts.google.com/')) return
-    const failure = request.failure()?.errorText
-    if (failure === 'net::ERR_ABORTED') {
-      observed.ignoredAborts.push({ url, failure })
+    const errorText = request.failure()?.errorText
+    const state = getNavigationState(page)
+    const reason = 'navigation-cancelled-semantic-model-fetch'
+    if (state.navigating && isAllowedSemanticModelNavigationAbort(url, errorText, state.screen, reason)) {
+      state.pendingRequests.delete(request)
+      recordNavigationExemption(observed.ignoredAborts, {
+        url,
+        errorText,
+        reason,
+        screen: state.screen,
+      })
       return
     }
+    state.pendingRequests.delete(request)
     stats.requestfailed += 1
-    observed.failedRequests.push({ url, failure })
-    console.error('requestfailed:', url, failure)
+    observed.failedRequests.push({ url, errorText })
+    console.error('requestfailed:', url, errorText)
   })
   page.on('response', response => {
     if (response.status() >= 500) {
@@ -278,19 +381,27 @@ async function noHorizontalOverflow(page) {
 
 async function runDesktopJourney(browser, resource) {
   const page = await makePage(browser, { width: 1440, height: 900 })
-  await page.goto(`${baseURL}/sources/${resource.id}`, { waitUntil: 'domcontentloaded' })
+  await duringNavigation(page, '01-source-detail-projection-1440', () =>
+    page.goto(`${baseURL}/sources/${resource.id}`, { waitUntil: 'domcontentloaded' }),
+  )
   await page.getByRole('heading', { name: sourceName }).waitFor({ timeout: 30000 })
   await page.getByText('Projection review').first().waitFor()
   await page.getByText('Verified').first().waitFor()
   await page.getByText('Projected dataset').first().waitFor()
   await page.screenshot({ path: `${screenDir}/01-source-detail-projection-1440.png`, fullPage: true })
+  await waitForTrackedRequests(page, '01-source-detail-projection-1440')
 
-  await page.goto(`${baseURL}/data-models`, { waitUntil: 'domcontentloaded' })
+  await duringNavigation(page, '02-data-models-home-1440', () =>
+    page.goto(`${baseURL}/data-models`, { waitUntil: 'domcontentloaded' }),
+  )
   await page.getByRole('heading', { name: 'Data Models' }).waitFor({ timeout: 30000 })
   await page.getByRole('link', { name: modelName, exact: true }).waitFor({ timeout: 30000 })
   await page.screenshot({ path: `${screenDir}/02-data-models-home-1440.png`, fullPage: true })
+  await waitForTrackedRequests(page, '02-data-models-home-1440')
 
-  await page.goto(`${baseURL}/data-models/${modelId}`, { waitUntil: 'domcontentloaded' })
+  await duringNavigation(page, '03-explore-mcp-result-1440', () =>
+    page.goto(`${baseURL}/data-models/${modelId}`, { waitUntil: 'domcontentloaded' }),
+  )
   await page.getByRole('heading', { name: modelName }).waitFor({ timeout: 30000 })
   await page.getByRole('button', { name: 'Explore' }).click()
   await page.getByText('query result', { exact: true }).waitFor({ timeout: 30000 })
@@ -300,18 +411,23 @@ async function runDesktopJourney(browser, resource) {
   await page.getByRole('cell', { name: '150', exact: true }).waitFor()
   await page.getByRole('cell', { name: '80', exact: true }).waitFor()
   await page.screenshot({ path: `${screenDir}/03-explore-mcp-result-1440.png`, fullPage: true })
+  await waitForTrackedRequests(page, '03-explore-mcp-result-1440')
 
   await page.getByRole('button', { name: 'Publish' }).first().click()
   await page.getByText('Review / Publish').waitFor({ timeout: 30000 })
   await page.getByText('MCP Test Console').waitFor()
   await page.getByText('policy decision').waitFor()
   await page.screenshot({ path: `${screenDir}/04-publish-mcp-console-1440.png`, fullPage: true })
+  await waitForTrackedRequests(page, '04-publish-mcp-console-1440')
 
-  await page.reload({ waitUntil: 'domcontentloaded' })
+  await duringNavigation(page, '05-reload-persistence-1440', () =>
+    page.reload({ waitUntil: 'domcontentloaded' }),
+  )
   await page.getByRole('heading', { name: modelName }).waitFor({ timeout: 30000 })
   await page.getByRole('button', { name: 'Publish' }).first().click()
   await page.getByText('policy decision').waitFor({ timeout: 30000 })
   await page.screenshot({ path: `${screenDir}/05-reload-persistence-1440.png`, fullPage: true })
+  await waitForTrackedRequests(page, '05-reload-persistence-1440')
 
   const overflowOk = await noHorizontalOverflow(page)
   await page.close()
@@ -322,17 +438,23 @@ async function runDesktopJourney(browser, resource) {
 
 async function runMobileJourney(browser, resource) {
   const page = await makePage(browser, { width: 390, height: 844 })
-  await page.goto(`${baseURL}/sources/${resource.id}`, { waitUntil: 'domcontentloaded' })
+  await duringNavigation(page, '06-source-detail-mobile-390', () =>
+    page.goto(`${baseURL}/sources/${resource.id}`, { waitUntil: 'domcontentloaded' }),
+  )
   await page.getByRole('heading', { name: sourceName }).waitFor({ timeout: 30000 })
   await page.getByText('Verified').first().waitFor()
   const sourceOk = await noHorizontalOverflow(page)
   await page.screenshot({ path: `${screenDir}/06-source-detail-mobile-390.png`, fullPage: true })
+  await waitForTrackedRequests(page, '06-source-detail-mobile-390')
 
-  await page.goto(`${baseURL}/data-models/${modelId}`, { waitUntil: 'domcontentloaded' })
+  await duringNavigation(page, '07-data-model-mobile-390', () =>
+    page.goto(`${baseURL}/data-models/${modelId}`, { waitUntil: 'domcontentloaded' }),
+  )
   await page.getByRole('heading', { name: modelName }).waitFor({ timeout: 30000 })
   await page.getByRole('button', { name: 'Explore' }).waitFor()
   const modelOk = await noHorizontalOverflow(page)
   await page.screenshot({ path: `${screenDir}/07-data-model-mobile-390.png`, fullPage: true })
+  await waitForTrackedRequests(page, '07-data-model-mobile-390')
   await page.close()
 
   if (!sourceOk || !modelOk) {
@@ -361,7 +483,12 @@ async function main() {
   }
 
   const result = {
-    ok: stats.pageerror === 0 && stats.consoleError === 0 && stats.requestfailed === 0 && stats.http5xx === 0,
+    ok:
+      stats.pageerror === 0 &&
+      stats.consoleError === 0 &&
+      stats.requestfailed === 0 &&
+      stats.http5xx === 0 &&
+      !observed.navigationExemptionLimitExceeded,
     ...evidence,
     stats,
     observed,

@@ -1,6 +1,6 @@
 # Data Studio Commercial P0 Integration
 
-CURRENT_PHASE: Phase 1 — commercial integration worktree initialized from Governance P0 release-ready head. Next: merge latest Connector/Modeling `142837f` and Dashboard `ef7ad32` into this single branch while preserving Evaluation/Sharing.
+CURRENT_PHASE: Phase 2 — latest Connector/Modeling `142837f` is merged and locally verified. Next: merge Dashboard `ef7ad32` while preserving Evaluation/Sharing.
 
 ## Immutable Inputs
 
@@ -55,3 +55,28 @@ This 8080 runtime is not the final commercial baseline. It predates the unified 
 - The latest Dashboard branch includes post-governance browser/editor coverage commits that are not in the old Governance 8080 image.
 - The merge must not let either source branch delete Evaluation/Sharing artifacts from the Governance branch.
 - External credentials for several connector rows are unavailable; those rows must remain `beta` or `planned`, not be promoted to `ready`.
+
+## 2026-08-17 03:18 CST - Connector / Modeling Merge
+
+Merged input:
+
+- `veadk-data-studio/agent/data-studio-p0`
+- SHA: `142837f7587dd1519d4287c1cb26c8e2840fc39a`
+
+Conflict resolution:
+
+- `server/tests/test_migration_chain_hardening.py` was the only content conflict.
+- Kept the commercial/governance final Alembic head assertion: `add_canonical_sharing_model`.
+- Kept the Connector/Modeling migration chain assertion for `add_blocked_source_resource_status -> add_file_source_resource_type`.
+- Preserved Dashboard, Evaluation, and Sharing migration lineage through `merge_ds_dash_20260816`, `add_evaluation_authoritative_model`, and `add_canonical_sharing_model`.
+
+Evidence:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_migration_chain_hardening.py tests/test_data_studio_p0_source_matrix.py -q` -> `8 passed, 8 warnings`.
+- `cd server && PYTHONPATH=..:tests uv run alembic heads` -> `add_canonical_sharing_model (head)`.
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_source_connectors_api.py::test_source_connection_browse_requires_authorization_without_fake_empty_success tests/test_multi_source_artifacts_api.py::test_source_processing_step_schema_is_typed_contract tests/test_multi_source_artifacts_api.py::test_web_source_blocks_private_urls tests/test_sources_overview_api.py::test_sources_overview_maps_blocked_and_needs_confirmation_to_product_states tests/test_data_studio_p0_source_matrix.py -q` -> `7 passed, 9 warnings`.
+- `cd server && uv run ruff check models/source_resources.py routers/source_connections.py schemas/source_resources.py schemas/source_overview.py services/source_connections.py services/source_overview.py services/source_resources.py tests/test_multi_source_artifacts_api.py tests/test_source_connectors_api.py tests/test_sources_overview_api.py tests/test_data_studio_p0_source_matrix.py migrations/versions/add_blocked_source_resource_status.py scripts/generate_data_studio_p0_source_matrix.py tests/test_migration_chain_hardening.py` -> passed with the existing removed-rule warning.
+
+Commercial readiness note:
+
+- Connector/Modeling remains `PARTIAL`, not ready-complete. The merged source matrix still reports `0 ready / 14 beta / 26 planned / 0 blocked / 40 total`.

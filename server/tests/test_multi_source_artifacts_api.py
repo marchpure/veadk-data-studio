@@ -49,6 +49,7 @@ def test_source_processing_step_schema_is_typed_contract():
         "understanding",
         "authorization_required",
         "reauthorization_required",
+        "blocked",
         "source_unavailable",
         "permission_lost",
         "needs_confirmation",
@@ -59,6 +60,7 @@ def test_source_processing_step_schema_is_typed_contract():
         "waiting_for_connector",
         "captured",
         "needs_confirmation",
+        "blocked",
         "failed",
         "indexed",
     ]
@@ -780,18 +782,23 @@ async def test_web_source_blocks_private_urls(test_client):
 
     assert response.status_code == 201
     resource = response.json()["data"]
-    assert resource["status"] == "failed"
+    assert resource["status"] == "blocked"
     assert resource["latest_snapshot"] is None
+    assert resource["latest_snapshot_id"] is None
+    assert resource["knowledge_resource"] is None
     assert resource["sync_config_json"]["last_error"]["code"] == "blocked_private_url"
 
     processing = await test_client.get(f"/api/source-resources/{resource['id']}/processing")
     assert processing.status_code == 200
     payload = processing.json()["data"]
-    assert payload["stage"] == "failed"
+    assert payload["stage"] == "blocked"
     assert payload["connector_required"] is False
     assert payload["last_error"]["code"] == "blocked_private_url"
+    assert payload["status"] == "blocked"
+    assert payload["latest_snapshot_id"] is None
+    assert payload["evidence_count"] == 0
     assert payload["message"].startswith("Access to private or non-routable address is not allowed")
-    assert payload["next_actions"] == ["Review source settings", "Retry sync"]
+    assert payload["next_actions"] == ["Review source settings", "Choose an allowed source"]
     _assert_product_processing_copy(payload)
 
 

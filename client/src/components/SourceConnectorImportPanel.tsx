@@ -23,6 +23,7 @@ import type {
   SourceResourceProcessing,
   SourceResourceImportSelection,
   SourceResourcePickerItem,
+  SourceResourceQuickLocateResponse,
   SourceResourcePickerType,
   SourceResourceType,
 } from '../services/api'
@@ -268,8 +269,10 @@ export function SourceConnectorImportPanel({
 
   const connected = !!activeConnection && activeConnection.status === 'connected'
   const requiresReauth = !!activeConnection && activeConnection.status === 'reauthorization_required'
-  const resourceErrorCode = (resources.error as (Error & { code?: string }) | null)?.code
-  const resourceRequiresReauth = provider === 'feishu' && resourceErrorCode === 'reauthorization_required'
+  const resourceError = resources.error as (Error & { code?: string }) | null
+  const resourceErrorCode = resourceError?.code
+  const resourceRequiresAuthorization =
+    provider === 'feishu' && (resourceErrorCode === 'needs_authorization' || resourceErrorCode === 'reauthorization_required')
   const selectedList = Object.values(selectedItems)
   const supportedTypes = definition?.supported_resource_types || []
   const scopeTabs = provider === 'feishu' ? feishuScopes : tosScopes
@@ -434,10 +437,19 @@ export function SourceConnectorImportPanel({
 
   const handleQuickLocate = async () => {
     if (provider !== 'feishu' || !activeConnection || !quickLocateUrl.trim()) return
-    const result = await locateSourceResource.mutateAsync({
-      connectionId: activeConnection.id,
-      url: quickLocateUrl.trim(),
-    })
+    let result: SourceResourceQuickLocateResponse
+    try {
+      result = await locateSourceResource.mutateAsync({
+        connectionId: activeConnection.id,
+        url: quickLocateUrl.trim(),
+      })
+    } catch (error) {
+      const code = (error as Error & { code?: string }).code
+      if (code === 'needs_authorization' || code === 'reauthorization_required') {
+        setQuickLocateMessage('Authorization required. Reauthorize source before locating Feishu resources.')
+      }
+      return
+    }
     if (result.connection_status !== 'connected') {
       setQuickLocateMessage(`Connection status is ${result.connection_status}; reconnect before locating resources.`)
       return
@@ -829,13 +841,16 @@ export function SourceConnectorImportPanel({
       <div className="min-h-[260px] rounded-lg border border-[#444444] bg-[#1a1a1a]">
         {resources.isLoading ? (
           <LoadingBox label="Loading resources..." />
-        ) : resourceRequiresReauth ? (
+        ) : resourceRequiresAuthorization ? (
           <div className="p-5 text-sm text-amber-100">
             <div className="flex items-start gap-3">
               <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-300" />
               <div>
-                <p className="font-medium">当前飞书授权不包含云盘读取权限</p>
-                <p className="mt-1 text-amber-100/75">管理员配置权限后，已有用户令牌不会自动升级。请重新授权并在飞书页面确认本次新增权限。</p>
+                <p className="font-medium">Authorization required</p>
+                <p className="mt-1 text-amber-100/75">
+                  Reauthorize source before browsing Feishu resources. The picker does not treat missing credentials as an empty result.
+                  {resourceError?.message ? <span className="mt-1 block">{resourceError.message}</span> : null}
+                </p>
                 <Button
                   type="button"
                   size="sm"
@@ -844,7 +859,7 @@ export function SourceConnectorImportPanel({
                   className="mt-3 bg-brand-orange hover:bg-brand-orange/90"
                 >
                   {startFeishuOAuth.isPending || waitingForFeishuOAuth ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                  重新授权飞书
+                  Reauthorize Feishu
                 </Button>
               </div>
             </div>

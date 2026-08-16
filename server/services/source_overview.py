@@ -48,6 +48,7 @@ SOURCE_STATUS_LABELS = {
     "understanding": "Analyzing",
     "authorization_required": "Authorization required",
     "reauthorization_required": "Reauthorization required",
+    "blocked": "Blocked",
     "permission_lost": "Permission lost",
     "source_unavailable": "Source unavailable",
     "needs_confirmation": "Needs confirmation",
@@ -575,6 +576,8 @@ class SourceOverviewService:
             return "auth"
         if status == "permission_lost":
             return "permission"
+        if status == "blocked":
+            return "policy"
         if status in {"needs_confirmation", "failed"}:
             return "parse"
         if status == "source_unavailable":
@@ -591,6 +594,7 @@ class SourceOverviewService:
             in {
                 "authorization_required",
                 "reauthorization_required",
+                "blocked",
                 "permission_lost",
                 "source_unavailable",
                 "failed",
@@ -603,7 +607,7 @@ class SourceOverviewService:
 
     def _context_index_status(self, *, status: str, knowledge_resource: KnowledgeResource | None) -> str:
         if knowledge_resource is None:
-            return "unavailable" if status in {"needs_confirmation", "failed"} else "pending"
+            return "unavailable" if status in {"needs_confirmation", "blocked", "failed"} else "pending"
         if knowledge_resource.index_status == "indexed":
             return "indexed"
         if knowledge_resource.index_status == "failed":
@@ -784,6 +788,8 @@ class SourceOverviewService:
             return ["Review resource permissions", "Reauthorize source"]
         if status == "source_unavailable":
             return ["Retry sync", "Check upstream source"]
+        if status == "blocked":
+            return ["Review source settings", "Choose an allowed source"]
         if status == "failed":
             return ["Review parser warning", "Retry sync"]
         if status == "needs_confirmation" and family == "object_storage":
@@ -1120,6 +1126,14 @@ class SourceOverviewService:
                 mode=self._modeling_mode_for_item(item),
                 reason="The upstream source is unavailable. Retry sync or check the upstream resource.",
                 next_action=next_action or "Retry sync",
+                evidence_summary=self._modeling_evidence_summary(item),
+            )
+        if status == "blocked":
+            return _ModelingHandoff(
+                status="blocked",
+                mode=self._modeling_mode_for_item(item),
+                reason="Source capture is blocked by policy or upstream safety controls.",
+                next_action=next_action or "Review source settings",
                 evidence_summary=self._modeling_evidence_summary(item),
             )
         if status == "failed":

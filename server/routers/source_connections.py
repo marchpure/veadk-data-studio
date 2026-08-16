@@ -16,7 +16,12 @@ from server.schemas.source_connections import (
 )
 from server.schemas.standard_response import StandardResponse, success_response
 from server.services.source_connections import SourceConnectionService
-from server.services.source_connectors import ConnectorError, FeishuAdminConfigService, FeishuOAuthStateStore, feishu_callback_url
+from server.services.source_connectors import (
+    ConnectorError,
+    FeishuAdminConfigService,
+    FeishuOAuthStateStore,
+    feishu_callback_url,
+)
 
 router = APIRouter()
 source_connection_service = SourceConnectionService()
@@ -27,7 +32,7 @@ def _http_error(error: Exception) -> HTTPException:
     if isinstance(error, ConnectorError):
         if error.code in {"admin_config_required", "missing_token", "unsupported_provider"}:
             code = status.HTTP_400_BAD_REQUEST
-        elif error.code in {"permission_lost", "reauthorization_required"}:
+        elif error.code in {"needs_authorization", "permission_lost", "reauthorization_required"}:
             code = status.HTTP_403_FORBIDDEN
         else:
             code = status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -42,7 +47,6 @@ def _require_admin(auth: AuthContext) -> None:
 
 
 def _oauth_callback_html(*, state: str | None, status_value: str, message: str, connection_id: str | None = None) -> str:
-    safe_state = html.escape(state or "")
     safe_status = html.escape(status_value)
     safe_message = html.escape(message)
     safe_connection_id = html.escape(connection_id or "")
