@@ -24,10 +24,11 @@ whole-product READY claim is made here.
 | Field | Evidence |
 |---|---|
 | BASE_SHA | `e9358ea56554cc0ecdf93b723359eee711cb13b1` |
-| Verification HEAD | `1f7fa63fbda9f987adb1cf56b7fea3a4d7552afa` |
+| Verification HEAD | `d78c6aa866410764bf844f0caf9d2a38fbfef702` |
 | Verification branch | `verification/data-studio-commercial-p0` |
-| Pushed safe remote branch | `veadk-data-studio/verification/data-studio-commercial-p0-e9358ea` |
-| Exact remote branch push | Rejected non-fast-forward because remote `verification/data-studio-commercial-p0` contains old wrong-baseline history at `9c2a2d9`; no force push was performed. |
+| Exact remote branch | `veadk-data-studio/verification/data-studio-commercial-p0` -> `d78c6aa866410764bf844f0caf9d2a38fbfef702` |
+| Stale wrong-baseline backup | Old remote tip `9c2a2d9cfb1280569df927ded583bfec7c7a591c` preserved as `veadk-data-studio/backup/verification-data-studio-commercial-p0-86fbace-remote`. |
+| Auxiliary safe branch | `veadk-data-studio/verification/data-studio-commercial-p0-e9358ea` also points to `d78c6aa866410764bf844f0caf9d2a38fbfef702`. |
 | Worktree | `/Users/bytedance/worktrees/byaan-commercial-verification-p0` |
 | Backend port | `18123` |
 | Frontend port | `15179` |
@@ -169,10 +170,6 @@ databases.
 
 ## Open Items
 
-- Decide whether to force-update the exact remote branch
-  `verification/data-studio-commercial-p0` over its old wrong-baseline history,
-  or keep using the pushed safe branch
-  `verification/data-studio-commercial-p0-e9358ea`.
 - Product follow-up: add/redirect the requested `/data-modeling` route or amend
   the acceptance contract to use `/data-models`.
 - Product follow-up: seed/provide a concrete dashboard asset path for the
