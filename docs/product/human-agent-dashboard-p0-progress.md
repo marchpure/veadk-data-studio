@@ -210,7 +210,7 @@ Tests:
 
 Commit:
 
-- Pending.
+- `0d05215` `dashboard: bind dashboard run execution`
 
 ## Commit Ledger
 
@@ -221,7 +221,7 @@ Commit:
 | `be5e4a7` | `dashboard: add manifest run schemas` | Phase 1 schema slice | `pytest tests/test_dashboard_contract_schemas.py` -> 7 passed; `ruff check schemas/dashboard.py tests/test_dashboard_contract_schemas.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `ad4f6f3` | `dashboard: persist governed asset foundation` | Phase 1 persistence slice | `pytest tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> 6 passed; `ruff check models/dashboard.py models/__init__.py migrations/versions/add_governed_dashboard_assets.py tests/test_dashboard_persistence_migration.py tests/test_migration_chain_hardening.py` -> passed; `alembic heads` -> `add_governed_dashboard_assets` | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 | `da3b2d2` | `dashboard: add lifecycle service primitives` | Phase 1 lifecycle slice | `pytest tests/test_dashboard_lifecycle_service.py` -> 3 passed; `ruff check repositories/dashboard.py services/dashboard.py tests/test_dashboard_lifecycle_service.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
-| Pending | `dashboard: bind dashboard run execution` | Phase 2 execution slice | `pytest tests/test_dashboard_execution_service.py` -> 3 passed; `ruff check services/dashboard.py tests/test_dashboard_execution_service.py` -> passed | Pending |
+| `0d05215` | `dashboard: bind dashboard run execution` | Phase 2 execution slice | `pytest tests/test_dashboard_execution_service.py` -> 3 passed; `ruff check services/dashboard.py tests/test_dashboard_execution_service.py` -> passed | Pushed to `veadk-data-studio/agent/dashboard-human-agent-p0`; HEAD matched upstream after push |
 
 ## Acceptance Evidence
 
