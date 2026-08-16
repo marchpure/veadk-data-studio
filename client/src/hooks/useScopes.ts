@@ -113,7 +113,7 @@ export function useScopes() {
   // Folder helpers
   const canCreateFolder = hasScope(Scopes.FOLDER_CREATE)
   const canManageFolderMembers = hasScope(Scopes.FOLDER_MANAGE_MEMBERS)
-  const canShareNotebookToFolder = hasScope(Scopes.FOLDER_SHARE_NOTEBOOK)
+  const canShareNotebookToFolder = hasScope(Scopes.DASHBOARD_SHARE)
 
   const canEditFolder = (createdBy: string | null | undefined): boolean => {
     // User can edit if they have FOLDER_UPDATE scope or are the creator with admin/owner role

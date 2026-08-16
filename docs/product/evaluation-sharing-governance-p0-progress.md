@@ -1,12 +1,12 @@
 # Evaluation + Sharing Governance P0 Progress
 
-CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration worktree init, dashboard merge integration gates, focused migration/security gates, share/manage secret redaction, worker-backed notebook share/export object authorization, viewer session governed-asset binding, structured dashboard manifest data-view/filter validation, share/MCP error redaction. Next slice: Phase 0 completion audit, then Phase 1 Evaluation authoritative model.
+CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration worktree init, dashboard merge integration gates, focused migration/security gates, share/manage secret redaction, worker-backed notebook share/export object authorization, folder-backed notebook/dashboard share authorization, viewer session governed-asset binding, structured dashboard manifest data-view/filter validation, share/MCP error redaction. Next slice: Phase 0 completion audit, then Phase 1 Evaluation authoritative model.
 
 ## Phase 0 Slice Checklist
 
 - [x] `GET /notebooks/{id}/share`, JSON share list, and manage endpoints never return `password`, `verifier`, or raw token.
 - [x] `ShareModal.tsx` removes display/copy of saved passwords; password is input-only during create/rotate and is never read back.
-- [~] share/create/delete/rotate/export use correct share/export action scope and unified object authorization for tenant, owner/grant, asset, version, and action. Worker-backed notebook share/export/manage endpoints now enforce tenant + owner + action scope through `server.auth.object_authorizer`; folder share/version manage and future canonical grant checks remain.
+- [x] share/create/delete/rotate/export use correct share/export action scope and unified object authorization for tenant, owner/grant, asset, version, and action. Worker-backed notebook share/export/manage endpoints and folder-backed notebook/dashboard share/version/snapshot manage endpoints now enforce tenant + owner + action scope through `server.auth.object_authorizer`; future canonical grant checks remain for Phase 5.
 - [x] viewer sessions bind and validate issuer, audience, user, tenant, grant, asset, version, token id, issued-at, not-before, expiry, and revocation/rotation identity.
 - [x] structured dashboard query only accepts immutable manifest `data_view_id` plus validated filters; legacy path is tenant/dashboard-version/notebook bound.
 - [x] errors, logs, and audit events never leak password, token, verifier, credentials, cross-tenant objects, or unauthorized SQL.
@@ -222,3 +222,21 @@ Evidence:
 - `BASE_URL=http://127.0.0.1:15173 API_URL=http://127.0.0.1:18080 SCREEN_DIR=/tmp/byaan-dashboard-full-verify-NNsQJt/screens pnpm smoke:dashboard` -> `ok: true`, `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`.
 - `BASE_URL=http://127.0.0.1:15174 API_URL=http://127.0.0.1:18080 SCREEN_DIR=/tmp/byaan-dashboard-full-verify-NNsQJt/screens-preview pnpm smoke:dashboard` -> `ok: true`, `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`.
 - Screenshots retained under `/tmp/byaan-dashboard-full-verify-NNsQJt/screens` and `/tmp/byaan-dashboard-full-verify-NNsQJt/screens-preview`.
+
+## 2026-08-16 15:55 CST - Phase 0 Folder-Backed Share Object Authorization
+
+Scope:
+
+- Folder notebook share/unshare now uses `dashboard.share` and the shared notebook object authorizer before writing folder share rows.
+- Folder notebook snapshot refresh now uses `dashboard.export` and the shared notebook object authorizer before exporting snapshot data.
+- Folder dashboard share/unshare/version update now resolves the dashboard version to its notebook and uses `dashboard.share` plus the same tenant/owner/action authorizer before mutating the folder grant.
+- Frontend folder-share affordances now follow `dashboard.share` rather than the legacy `folder.share_notebook` scope.
+- Added regression coverage proving a same-tenant member with legacy folder scope cannot folder-share their own notebook/dashboard without `dashboard.share`, cannot refresh an owner notebook snapshot before object authorization, and cannot manage folder dashboard grants; owner positive sharing remains valid.
+
+Evidence:
+
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m pytest tests/test_share_object_authorization.py tests/test_share_secret_redaction.py tests/test_dashboard_security_regressions.py -q` -> `24 passed, 8 warnings`.
+- `PYTHONPATH=..:tests /Users/bytedance/worktrees/byaan-data-studio-p0/.venv/bin/python -m ruff check routers/folders.py auth/object_authorizer.py tests/test_share_object_authorization.py` -> passed with existing removed-rule warning.
+- `cd client && pnpm lint` -> passed with existing `0 errors, 357 warnings`.
+- `cd client && pnpm build:check` -> passed with existing CSS/chunk warnings.
+- `git diff --check` -> passed.

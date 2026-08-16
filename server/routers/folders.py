@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.auth.dependencies import AuthContext, require_any_scope, require_scope
+from server.auth.object_authorizer import NotebookAction, authorize_notebook_action
 from server.auth.scopes import Scope
 from server.db.session import get_async_session
 from server.models.queries import Query
@@ -562,11 +563,25 @@ async def list_folder_notebooks(
 async def share_notebook_to_folder(
     folder_id: UUID,
     payload: FolderNotebookShare,
-    auth: AuthContext = Depends(require_scope(Scope.FOLDER_SHARE_NOTEBOOK)),
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_SHARE)),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Share a notebook to a folder. User must own the notebook and be a folder member (or folder must be public)."""
     try:
+        await authorize_notebook_action(
+            session=session,
+            auth=auth,
+            notebook_id=str(payload.notebook_id),
+            action=NotebookAction.SHARE_MANAGE,
+        )
+        if payload.is_snapshot:
+            await authorize_notebook_action(
+                session=session,
+                auth=auth,
+                notebook_id=str(payload.notebook_id),
+                action=NotebookAction.EXPORT,
+            )
+
         folder = await FolderService.get_folder(folder_id, session)
         if not folder:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
@@ -600,11 +615,17 @@ async def share_notebook_to_folder(
 async def unshare_notebook_from_folder(
     folder_id: UUID,
     notebook_id: UUID,
-    auth: AuthContext = Depends(require_scope(Scope.FOLDER_SHARE_NOTEBOOK)),
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_SHARE)),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Remove a notebook from a folder. Only the notebook creator can do this."""
     try:
+        await authorize_notebook_action(
+            session=session,
+            auth=auth,
+            notebook_id=str(notebook_id),
+            action=NotebookAction.SHARE_MANAGE,
+        )
         await FolderService.unshare_notebook_from_folder(
             folder_id=folder_id,
             notebook_id=notebook_id,
@@ -626,11 +647,17 @@ async def unshare_notebook_from_folder(
 async def update_snapshot(
     folder_id: UUID,
     notebook_id: UUID,
-    auth: AuthContext = Depends(require_scope(Scope.FOLDER_SHARE_NOTEBOOK)),
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_EXPORT)),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Refresh a snapshot share to the current notebook state. Only the owner who shared can do this."""
     try:
+        await authorize_notebook_action(
+            session=session,
+            auth=auth,
+            notebook_id=str(notebook_id),
+            action=NotebookAction.EXPORT,
+        )
         folder_notebook = await FolderService.update_snapshot(
             folder_id=folder_id,
             notebook_id=notebook_id,
@@ -799,11 +826,22 @@ async def list_folder_dashboards(
 async def share_dashboard_to_folder(
     folder_id: UUID,
     payload: FolderDashboardShare,
-    auth: AuthContext = Depends(require_scope(Scope.FOLDER_SHARE_NOTEBOOK)),  # Reuse notebook share scope
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_SHARE)),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Share a dashboard to a folder. User must own the notebook that contains the dashboard."""
     try:
+        dashboard_repo = DashboardRepository(session)
+        dashboard = await dashboard_repo.get(payload.dashboard_id)
+        if not dashboard:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard not found")
+        await authorize_notebook_action(
+            session=session,
+            auth=auth,
+            notebook_id=str(dashboard.notebook_id),
+            action=NotebookAction.SHARE_MANAGE,
+        )
+
         folder = await FolderService.get_folder(folder_id, session)
         if not folder:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
@@ -837,11 +875,21 @@ async def share_dashboard_to_folder(
 async def unshare_dashboard_from_folder(
     folder_id: UUID,
     dashboard_id: UUID,
-    auth: AuthContext = Depends(require_scope(Scope.FOLDER_SHARE_NOTEBOOK)),
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_SHARE)),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Remove a dashboard from a folder. Only the notebook creator can do this."""
     try:
+        dashboard_repo = DashboardRepository(session)
+        dashboard = await dashboard_repo.get(dashboard_id)
+        if not dashboard:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dashboard not found")
+        await authorize_notebook_action(
+            session=session,
+            auth=auth,
+            notebook_id=str(dashboard.notebook_id),
+            action=NotebookAction.SHARE_MANAGE,
+        )
         await FolderService.unshare_dashboard_from_folder(
             folder_id=folder_id,
             dashboard_id=dashboard_id,
@@ -864,11 +912,29 @@ async def update_folder_dashboard_version(
     folder_id: UUID,
     dashboard_id: UUID,
     payload: FolderDashboardUpdate,
-    auth: AuthContext = Depends(require_scope(Scope.FOLDER_SHARE_NOTEBOOK)),
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_SHARE)),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Update a shared dashboard to a different version. Only the notebook creator can do this."""
     try:
+        dashboard_repo = DashboardRepository(session)
+        old_dashboard = await dashboard_repo.get(dashboard_id)
+        if not old_dashboard:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original dashboard not found")
+        new_dashboard = await dashboard_repo.get(payload.new_dashboard_id)
+        if not new_dashboard:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="New dashboard not found")
+        await authorize_notebook_action(
+            session=session,
+            auth=auth,
+            notebook_id=str(old_dashboard.notebook_id),
+            action=NotebookAction.SHARE_MANAGE,
+        )
+        if new_dashboard.notebook_id != old_dashboard.notebook_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="New dashboard must be from the same notebook",
+            )
         folder_dashboard = await FolderService.update_folder_dashboard_version(
             folder_id=folder_id,
             old_dashboard_id=dashboard_id,
