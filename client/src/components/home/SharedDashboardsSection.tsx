@@ -948,6 +948,9 @@ export default function SharedDashboardsSection({ onLoadingChange, onError, deep
 
       <Dialog open={!!selectedDashboard} onOpenChange={(open) => !open && closeDashboard()}>
         <DialogContent className="max-w-[99vw] w-[99vw] h-[96vh] border-[#1f2430] p-0 bg-[#0f1217] overflow-hidden [&>button]:hidden">
+          <DialogTitle className="sr-only">
+            {clickedDashboardInfo?.notebook_name || 'Shared dashboard'}
+          </DialogTitle>
           <div className="relative w-full h-full flex flex-col">
             <div className="flex items-center justify-between px-4 py-2 bg-[#1a1a1a] border-b border-gray-800">
               <div className="flex items-center gap-3">

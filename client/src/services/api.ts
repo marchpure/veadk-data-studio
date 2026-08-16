@@ -1557,7 +1557,12 @@ async function handleTokenRefresh(): Promise<boolean> {
   return refreshPromise
 }
 
-const apiFetch = async (url: string, init?: RequestInit): Promise<Response> => {
+interface ApiFetchInit extends RequestInit {
+  skipTenantHeader?: boolean
+}
+
+const apiFetch = async (url: string, init?: ApiFetchInit): Promise<Response> => {
+  const { skipTenantHeader = false, ...fetchInit } = init ?? {}
   let finalUrl = url;
 
   if (isTauriApp() && finalUrl.startsWith('/')) {
@@ -1565,14 +1570,14 @@ const apiFetch = async (url: string, init?: RequestInit): Promise<Response> => {
     finalUrl = `${backendUrl}${finalUrl}`;
   }
 
-  const headers = new Headers(init?.headers);
+  const headers = new Headers(fetchInit.headers);
 
   const token = getAuthToken();
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const activeTenantId = getActiveTenantId();
+  const activeTenantId = skipTenantHeader ? null : getActiveTenantId();
   if (activeTenantId) {
     headers.set('X-Tenant-ID', activeTenantId);
   }
@@ -1581,7 +1586,7 @@ const apiFetch = async (url: string, init?: RequestInit): Promise<Response> => {
     headers.set('X-Analytics-Opt-Out', '1');
   }
 
-  let response = await fetch(finalUrl, { ...init, headers, credentials: 'include' });
+  let response = await fetch(finalUrl, { ...fetchInit, headers, credentials: 'include' });
 
   if (isHostedMode && response.status === 401 && !finalUrl.includes('/auth/refresh')) {
     const refreshed = await handleTokenRefresh()
@@ -1589,7 +1594,7 @@ const apiFetch = async (url: string, init?: RequestInit): Promise<Response> => {
       const newToken = getAuthToken()
       if (newToken) {
         headers.set('Authorization', `Bearer ${newToken}`)
-        response = await fetch(finalUrl, { ...init, headers, credentials: 'include' })
+        response = await fetch(finalUrl, { ...fetchInit, headers, credentials: 'include' })
       }
     }
   }
@@ -5620,6 +5625,7 @@ export class ApiService {
     try {
       const response = await apiFetch(`${API_BASE_URL}/scopes/all`, {
         method: 'GET',
+        skipTenantHeader: true,
         headers: {
           ...ApiService.getAuthHeaders(),
         },

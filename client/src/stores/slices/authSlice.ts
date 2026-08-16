@@ -106,6 +106,7 @@ export const createAuthSlice: StateCreator<
       const { access_token, refresh_token } = response
       setAccessToken(access_token)
       set({ token: access_token, isAuthenticated: true })
+      get().clearTenants()
       if (refresh_token) {
         setRefreshToken(refresh_token)
       }
@@ -140,6 +141,7 @@ export const createAuthSlice: StateCreator<
       const { access_token, refresh_token } = response
       setAccessToken(access_token)
       set({ token: access_token, isAuthenticated: true })
+      get().clearTenants()
       if (refresh_token) {
         setRefreshToken(refresh_token)
       }
