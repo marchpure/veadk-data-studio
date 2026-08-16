@@ -1,5 +1,25 @@
 # Evaluation + Sharing Governance P0 Progress
 
+CURRENT_PHASE: Phase 0 — Sharing 安全止血. Completed slices: integration worktree init, dashboard merge integration gates, focused migration/security gates. Next slice: failing regression tests and fix for share/manage responses that must not expose password, verifier, or raw token.
+
+## Phase 0 Slice Checklist
+
+- [ ] `GET /notebooks/{id}/share`, JSON share list, and manage endpoints never return `password`, `verifier`, or raw token.
+- [ ] `ShareModal.tsx` removes display/copy of saved passwords; password is input-only during create/rotate and is never read back.
+- [ ] share/create/delete/rotate/export use correct share/export action scope and unified object authorization for tenant, owner/grant, asset, version, and action.
+- [ ] viewer sessions bind and validate issuer, audience, user, tenant, grant, asset, version, token id, issued-at, not-before, expiry, and revocation/rotation identity.
+- [ ] structured dashboard query only accepts immutable manifest `data_view_id` plus validated filters; legacy path is tenant/dashboard-version/notebook bound.
+- [ ] errors, logs, and audit events never leak password, token, verifier, credentials, cross-tenant objects, or unauthorized SQL.
+
+## Environment Side-Effect Registration
+
+- `2026-08-16 13:11 CST`: this session previously created test data on the existing `127.0.0.1:8080` runtime while working on an unrelated dashboard validation task before goal correction.
+- Created folder: ID `b268fd5a-8bb4-4ee6-9447-03edc9c142f0`; name not confirmed from read-only evidence and must be verified during the Release Gate.
+- Shared dashboard: ID `9775fc11-8891-493d-8715-ee6dfbc31cbc`; selected dashboard notebook ID `1acfaeff-4dae-434f-aa0b-eba828c18669`.
+- Reason: temporary validation data for dashboard sharing behavior on the active 8080 instance.
+- Current state: data is still present in the 8080 runtime and has not been cleaned up.
+- Cleanup owner/timing: this governance integration session should verify and clean up the test folder during the final 8080 Release Gate, after Phase 0-5 implementation and local gates pass. Do not delete it earlier because 8080 is read-only for this goal until Release Gate.
+
 ## 2026-08-16 13:22 CST - Integration Worktree Initialized
 
 Branch: `integration/evaluation-sharing-governance-p0`
