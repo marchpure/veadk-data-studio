@@ -111,6 +111,22 @@ def _complete_snapshot(tenant_id: str) -> dict:
     }
 
 
+def _import_case_payload(case_key: str = "imported-case-one") -> dict:
+    return {
+        "case_key": case_key,
+        "title": "Imported case one",
+        "target_kinds": ["semantic_model"],
+        "operation": "answer_question",
+        "question": "What is governed revenue?",
+        "expected_contract": {
+            "answer": {"must_include_all": ["revenue"]},
+            "policy": {"security_hard_fail": True},
+        },
+        "provenance": {"source": "import", "principal": {"source": "rest-test"}},
+        "tags": ["imported", "release-gate"],
+    }
+
+
 async def _seed_completed_run(
     test_session: AsyncSession,
     *,
@@ -273,6 +289,124 @@ async def test_evaluation_rest_read_surfaces_describe_inventory_runs_failures_an
     comparison = compare_response.json()["data"]["comparison"]
     assert comparison["summary"]["regression_count"] == 1
     assert comparison["regressions"][0]["case_id"] == str(cases[0].id)
+
+
+async def test_evaluation_rest_create_import_publish_and_run_closed_loop(
+    test_client,
+    test_session: AsyncSession,
+) -> None:
+    tenant = (await test_session.execute(select(Tenant))).scalars().first()
+    assert tenant is not None
+
+    create_response = await test_client.post(
+        "/api/evaluation/suites",
+        json={
+            "slug": f"commercial-loop-{uuid4().hex[:8]}",
+            "name": "Commercial Evaluation Loop",
+            "description": "Explicit non-production acceptance fixture",
+            "target_kinds": ["semantic_model"],
+            "gate_policy": {"security_hard_fail": True, "min_overall_pass_rate": 1.0},
+        },
+    )
+    assert create_response.status_code == 201
+    suite = create_response.json()["data"]["suite"]
+    assert suite["lifecycle"] == "draft"
+    assert suite["versions"][0]["status"] == "draft"
+    draft_version_id = suite["versions"][0]["id"]
+
+    import_response = await test_client.post(
+        f"/api/evaluation/suite-versions/{draft_version_id}/cases/import",
+        json={"format": "json", "cases": [_import_case_payload("case-one"), _import_case_payload("case-two")]},
+    )
+    assert import_response.status_code == 201
+    import_payload = import_response.json()["data"]
+    assert import_payload["created_count"] == 2
+    assert import_payload["existing_count"] == 0
+
+    retry_import = await test_client.post(
+        f"/api/evaluation/suite-versions/{draft_version_id}/cases/import",
+        json={"format": "json", "cases": [_import_case_payload("case-one")]},
+    )
+    assert retry_import.status_code == 201
+    assert retry_import.json()["data"]["created_count"] == 0
+    assert retry_import.json()["data"]["existing_count"] == 1
+
+    cases_response = await test_client.get(f"/api/evaluation/suite-versions/{draft_version_id}/cases")
+    assert cases_response.status_code == 200
+    assert cases_response.json()["data"]["total"] == 2
+
+    publish_response = await test_client.post(f"/api/evaluation/suite-versions/{draft_version_id}/publish")
+    assert publish_response.status_code == 200
+    published = publish_response.json()["data"]["version"]
+    assert published["status"] == "published"
+    assert published["case_count"] == 2
+
+    suite_response = await test_client.get(f"/api/evaluation/suites/{suite['id']}?include_manifests=true")
+    assert suite_response.status_code == 200
+    described = suite_response.json()["data"]["suite"]
+    assert described["lifecycle"] == "published"
+    assert described["published_version_id"] == draft_version_id
+    assert described["current_draft_version_id"] is None
+
+    import_after_publish = await test_client.post(
+        f"/api/evaluation/suite-versions/{draft_version_id}/cases",
+        json=_import_case_payload("case-after-publish"),
+    )
+    assert import_after_publish.status_code == 409
+
+    preflight_response = await test_client.post(
+        "/api/evaluation/runs/preflight",
+        json={
+            "suite_version_id": draft_version_id,
+            "target_snapshot": _complete_snapshot(str(tenant.id)),
+            "idempotency_key": "commercial-loop",
+            "actor_type": "agent",
+            "actor_id": "agent-release-gate",
+        },
+    )
+    assert preflight_response.status_code == 202
+    run_id = preflight_response.json()["data"]["id"]
+
+    claim_response = await test_client.post(
+        "/api/evaluation/runs/claim",
+        json={"worker_id": "commercial-loop-worker", "lease_seconds": 60},
+    )
+    assert claim_response.status_code == 200
+    assert claim_response.json()["data"]["id"] == run_id
+
+    complete_response = await test_client.post(
+        f"/api/evaluation/runs/{run_id}/complete",
+        json={
+            "worker_id": "commercial-loop-worker",
+            "case_results": [
+                {
+                    "case_key": "case-one",
+                    "status": "passed",
+                    "assessments": [{"category": "answer", "status": "passed", "score": "1.0", "hard_fail": False}],
+                    "result": {"answer": "revenue is governed"},
+                },
+                {
+                    "case_key": "case-two",
+                    "status": "failed",
+                    "assessments": [{"category": "answer", "status": "failed", "score": "0", "hard_fail": True}],
+                    "result": {"answer": "incorrect"},
+                    "error": {"token": "super-secret-token", "sql": "select * from private_table"},
+                },
+            ],
+        },
+    )
+    assert complete_response.status_code == 200
+    completed = complete_response.json()["data"]
+    assert completed["status"] == "failed"
+    assert completed["summary"]["gate_decision"] == "failed"
+
+    failures_response = await test_client.get(f"/api/evaluation/runs/{run_id}/failures")
+    assert failures_response.status_code == 200
+    failures = failures_response.json()["data"]
+    assert failures["total"] == 1
+    assert failures["failures"][0]["status"] == "failed"
+    assert "super-secret-token" not in json.dumps(failures)
+    assert "private_table" not in json.dumps(failures)
 
 
 async def test_evaluation_run_rest_lifecycle_artifact_and_completion(

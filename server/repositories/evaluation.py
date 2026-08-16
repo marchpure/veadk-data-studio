@@ -54,6 +54,20 @@ class EvaluationRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_suite_by_slug(
+        self,
+        *,
+        tenant_id: str | UUID,
+        slug: str,
+    ) -> EvaluationSuite | None:
+        result = await self._session.execute(
+            select(EvaluationSuite).where(
+                EvaluationSuite.tenant_id == tenant_id,
+                EvaluationSuite.slug == slug,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def list_suites(
         self,
         *,
@@ -98,6 +112,60 @@ class EvaluationRepository:
             .order_by(EvaluationSuiteVersion.version_num.desc())
         )
         return list(result.scalars().all())
+
+    async def create_suite(
+        self,
+        *,
+        tenant_id: str | UUID,
+        slug: str,
+        name: str,
+        description: str,
+        owner_id: str | UUID | None,
+        target_kinds_json: list[str],
+        lifecycle: str,
+    ) -> EvaluationSuite:
+        suite = EvaluationSuite(
+            tenant_id=tenant_id,
+            slug=slug,
+            name=name,
+            description=description,
+            owner_id=owner_id,
+            target_kinds_json=target_kinds_json,
+            lifecycle=lifecycle,
+        )
+        self._session.add(suite)
+        await self._session.flush()
+        return suite
+
+    async def create_suite_version(
+        self,
+        *,
+        tenant_id: str | UUID,
+        suite_id: str | UUID,
+        version_num: int,
+        status: str,
+        contract_version: str,
+        manifest_json: dict,
+        gate_policy_json: dict,
+        case_count: int,
+        content_hash: str,
+        created_by: str | UUID | None,
+    ) -> EvaluationSuiteVersion:
+        version = EvaluationSuiteVersion(
+            tenant_id=tenant_id,
+            suite_id=suite_id,
+            version_num=version_num,
+            status=status,
+            contract_version=contract_version,
+            manifest_json=manifest_json,
+            gate_policy_json=gate_policy_json,
+            case_count=case_count,
+            content_hash=content_hash,
+            created_by=created_by,
+        )
+        self._session.add(version)
+        await self._session.flush()
+        return version
 
     async def get_run(
         self,

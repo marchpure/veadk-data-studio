@@ -25,12 +25,14 @@ import type {
   AdvisorChangeSet,
   AdvisorReview,
   EvaluationCase,
+  EvaluationCaseDraftInput,
   EvaluationCaseRun,
   EvaluationFailureSummary,
   EvaluationRun,
   EvaluationRunComparison,
   EvaluationRunDetail,
   EvaluationSuite,
+  EvaluationSuiteCreateInput,
   EvaluationSuiteVersion,
   EvaluationTargetSnapshotInput,
 } from '../../../types/evaluation'
@@ -45,6 +47,28 @@ const supportedTargetKinds = new Set([
   'policy',
   'end_to_end',
 ])
+
+const defaultSuiteDraft: EvaluationSuiteCreateInput = {
+  slug: 'commercial-evaluation-suite',
+  name: 'Commercial Evaluation Suite',
+  description: 'Explicitly created evaluation suite for connector, model, dashboard, and policy release checks.',
+  targetKinds: ['semantic_model'],
+  gatePolicy: { security_hard_fail: true, min_overall_pass_rate: 1.0 },
+}
+
+const defaultCaseDraft: EvaluationCaseDraftInput = {
+  caseKey: 'commercial-case-one',
+  title: 'Commercial acceptance case',
+  targetKinds: ['semantic_model'],
+  operation: 'answer_question',
+  question: 'What governed answer should the semantic model return?',
+  expectedContract: {
+    answer: { must_include_all: ['governed'], must_not_include: ['secret'] },
+    policy: { security_hard_fail: true },
+  },
+  provenance: { source: 'import', principal: { fixture: 'explicit-human-action' } },
+  tags: ['commercial', 'manual'],
+}
 
 const statusTone: Record<string, string> = {
   published: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
@@ -86,6 +110,8 @@ export default function EvaluationWorkspacePage() {
   const [loadingAction, setLoadingAction] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
+  const [suiteDraft, setSuiteDraft] = useState(defaultSuiteDraft)
+  const [caseDraftJson, setCaseDraftJson] = useState(JSON.stringify([defaultCaseDraft], null, 2))
 
   const selectedVersion = useMemo(() => {
     return suite?.versions?.find(version => version.id === selectedVersionId) ?? suite?.versions?.[0] ?? null
@@ -274,6 +300,100 @@ export default function EvaluationWorkspacePage() {
     }
   }
 
+  const createSuite = async (useFixture = false) => {
+    setLoadingAction(true)
+    setActionMessage(null)
+    setError(null)
+    try {
+      const payload = useFixture ? explicitDemoSuite() : suiteDraft
+      const response = await EvaluationService.createSuite(payload)
+      setActionMessage(`Suite created: ${response.suite.slug}`)
+      await loadSuites()
+      navigate(`/evaluation/${response.suite.id}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to create Evaluation suite')
+    } finally {
+      setLoadingAction(false)
+    }
+  }
+
+  const createDraftVersion = async () => {
+    if (!suite) return
+    setLoadingAction(true)
+    setActionMessage(null)
+    try {
+      const response = await EvaluationService.createDraftVersion(suite.id, selectedVersion?.id)
+      setActionMessage(`Draft version created: v${response.version.version_num}`)
+      await loadSuiteDetail(suite.id)
+      setSelectedVersionId(response.version.id)
+      setTab('cases')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to create draft version')
+    } finally {
+      setLoadingAction(false)
+    }
+  }
+
+  const importCases = async (useFixture = false) => {
+    if (!selectedVersion) return
+    setLoadingAction(true)
+    setActionMessage(null)
+    setError(null)
+    try {
+      const casesToImport = useFixture ? explicitDemoCases() : JSON.parse(caseDraftJson)
+      const response = await EvaluationService.importCases(selectedVersion.id, casesToImport)
+      setActionMessage(`Cases imported: ${response.created_count} created, ${response.existing_count} existing`)
+      if (suiteId) {
+        await loadSuiteDetail(suiteId)
+      }
+      setTab('cases')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to import Evaluation cases')
+    } finally {
+      setLoadingAction(false)
+    }
+  }
+
+  const publishVersion = async () => {
+    if (!selectedVersion) return
+    setLoadingAction(true)
+    setActionMessage(null)
+    setError(null)
+    try {
+      const response = await EvaluationService.publishSuiteVersion(selectedVersion.id)
+      setActionMessage(`Suite version published: v${response.version.version_num}`)
+      if (suiteId) {
+        await loadSuiteDetail(suiteId)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to publish Evaluation suite version')
+    } finally {
+      setLoadingAction(false)
+    }
+  }
+
+  const createPreflightRun = async () => {
+    if (!selectedVersion || !suite) return
+    setLoadingAction(true)
+    setActionMessage(null)
+    setError(null)
+    try {
+      const response = await EvaluationService.createPreflightRun({
+        suiteVersionId: selectedVersion.id,
+        targetSnapshot: buildSuiteTargetSnapshot(suite, selectedVersion),
+        idempotencyKey: `human-preflight-${selectedVersion.id}`,
+        actorType: 'agent',
+      })
+      setActionMessage(`Preflight run created: ${shortId(response.id)} (${response.status})`)
+      await loadVersionData(selectedVersion.id)
+      setTab('runs')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to create Evaluation preflight run')
+    } finally {
+      setLoadingAction(false)
+    }
+  }
+
   return (
     <div className="flex min-h-full bg-[#0d0f11] text-[#f3f5f5]">
       <aside className="hidden w-[360px] shrink-0 border-r border-[#293037] bg-[#121518] lg:flex lg:flex-col">
@@ -336,7 +456,14 @@ export default function EvaluationWorkspacePage() {
           )}
 
           {!suite && !loadingDetail && (
-            <EmptyPanel title="Open an Evaluation suite" body="Select a suite to inspect cases, run history, Advisor changes, and promotion gates." />
+            <EvaluationOnboarding
+              suiteDraft={suiteDraft}
+              onSuiteDraftChange={setSuiteDraft}
+              loading={loadingAction}
+              message={actionMessage}
+              onCreate={() => void createSuite(false)}
+              onLoadFixture={() => void createSuite(true)}
+            />
           )}
 
           {suite && (
@@ -370,6 +497,25 @@ export default function EvaluationWorkspacePage() {
                     </select>
                     {suite.target_kinds.map(kind => <Badge key={kind}>{kind}</Badge>)}
                   </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button variant="secondary" onClick={() => void createDraftVersion()} disabled={loadingAction}>
+                      <FileSearch className="h-4 w-4" />
+                      Draft Version
+                    </Button>
+                    <Button variant="secondary" onClick={() => void importCases(true)} disabled={loadingAction || !selectedVersion || selectedVersion.status === 'published'}>
+                      <Database className="h-4 w-4" />
+                      Load Demo Cases
+                    </Button>
+                    <Button variant="secondary" onClick={() => void createPreflightRun()} disabled={loadingAction || !selectedVersion || selectedVersion.status !== 'published'}>
+                      <Play className="h-4 w-4" />
+                      Preflight Run
+                    </Button>
+                    <Button variant="brand-primary" onClick={() => void publishVersion()} disabled={loadingAction || !selectedVersion || selectedVersion.status === 'published' || cases.length === 0}>
+                      <ShieldCheck className="h-4 w-4" />
+                      Publish
+                    </Button>
+                  </div>
+                  {actionMessage && <div className="mt-3 text-sm text-[#a4adb5]">{actionMessage}</div>}
                   <div className="mt-4 grid gap-2 text-xs text-[#9aa4ac] md:grid-cols-4">
                     <HeaderSignal icon={<FileSearch className="h-4 w-4" />} label="Cases" value={String(cases.length)} />
                     <HeaderSignal icon={<Play className="h-4 w-4" />} label="Runs" value={String(runs.length)} />
@@ -420,7 +566,19 @@ export default function EvaluationWorkspacePage() {
                   )}
                 </div>
                 <div className="p-3">
-                  {tab === 'cases' && <CasesTab cases={cases} selectedCase={selectedCase} onSelectCase={setSelectedCaseId} />}
+                  {tab === 'cases' && (
+                    <CasesTab
+                      cases={cases}
+                      selectedCase={selectedCase}
+                      selectedVersion={selectedVersion}
+                      caseDraftJson={caseDraftJson}
+                      loading={loadingAction}
+                      onCaseDraftJsonChange={setCaseDraftJson}
+                      onSelectCase={setSelectedCaseId}
+                      onImportCases={() => void importCases(false)}
+                      onLoadDemoCases={() => void importCases(true)}
+                    />
+                  )}
                   {tab === 'runs' && (
                     <RunsTab
                       runs={runs}
@@ -462,17 +620,113 @@ function chooseVersion(versions: EvaluationSuiteVersion[], selectedVersionId: st
   return versions.find(version => version.status === 'published') ?? versions[0] ?? null
 }
 
-function CasesTab({ cases, selectedCase, onSelectCase }: {
+function EvaluationOnboarding({ suiteDraft, loading, message, onSuiteDraftChange, onCreate, onLoadFixture }: {
+  suiteDraft: EvaluationSuiteCreateInput
+  loading: boolean
+  message: string | null
+  onSuiteDraftChange: (value: EvaluationSuiteCreateInput) => void
+  onCreate: () => void
+  onLoadFixture: () => void
+}) {
+  return (
+    <div className="rounded-md border border-[#293037] bg-[#14181c] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold">Evaluation Suites</h1>
+          <p className="mt-1 text-sm text-[#9aa4ac]">Create a suite, import cases, publish a version, then run the gate.</p>
+        </div>
+        <Button variant="secondary" onClick={onLoadFixture} disabled={loading}>
+          <Database className="h-4 w-4" />
+          Demo Fixture
+        </Button>
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <label className="grid gap-1 text-xs text-[#9aa4ac]">
+          Slug
+          <Input
+            value={suiteDraft.slug}
+            onChange={event => onSuiteDraftChange({ ...suiteDraft, slug: event.target.value })}
+            className="border-[#303940] bg-[#0e1114] text-[#eef2f3]"
+          />
+        </label>
+        <label className="grid gap-1 text-xs text-[#9aa4ac]">
+          Name
+          <Input
+            value={suiteDraft.name}
+            onChange={event => onSuiteDraftChange({ ...suiteDraft, name: event.target.value })}
+            className="border-[#303940] bg-[#0e1114] text-[#eef2f3]"
+          />
+        </label>
+        <label className="grid gap-1 text-xs text-[#9aa4ac] lg:col-span-2">
+          Description
+          <Input
+            value={suiteDraft.description}
+            onChange={event => onSuiteDraftChange({ ...suiteDraft, description: event.target.value })}
+            className="border-[#303940] bg-[#0e1114] text-[#eef2f3]"
+          />
+        </label>
+        <label className="grid gap-1 text-xs text-[#9aa4ac]">
+          Target kind
+          <select
+            value={suiteDraft.targetKinds[0] ?? 'semantic_model'}
+            onChange={event => onSuiteDraftChange({ ...suiteDraft, targetKinds: [event.target.value] })}
+            className="h-10 rounded border border-[#303940] bg-[#0e1114] px-2 text-sm text-[#eef2f3]"
+          >
+            {Array.from(supportedTargetKinds).map(kind => <option key={kind} value={kind}>{kind}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button variant="brand-primary" onClick={onCreate} disabled={loading}>
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardCheck className="h-4 w-4" />}
+          Create Suite
+        </Button>
+      </div>
+      {message && <div className="mt-3 text-sm text-[#a4adb5]">{message}</div>}
+    </div>
+  )
+}
+
+function CasesTab({ cases, selectedCase, selectedVersion, caseDraftJson, loading, onCaseDraftJsonChange, onSelectCase, onImportCases, onLoadDemoCases }: {
   cases: EvaluationCase[]
   selectedCase: EvaluationCase | null
+  selectedVersion: EvaluationSuiteVersion | null
+  caseDraftJson: string
+  loading: boolean
+  onCaseDraftJsonChange: (value: string) => void
   onSelectCase: (caseId: string) => void
+  onImportCases: () => void
+  onLoadDemoCases: () => void
 }) {
+  const canImport = Boolean(selectedVersion && selectedVersion.status !== 'published')
   if (cases.length === 0) {
-    return <EmptyPanel title="No cases" body="Promoted feedback and authored contracts will appear in this suite version." />
+    return (
+      <div className="space-y-3">
+        <EmptyPanel title="No cases" body={canImport ? 'Import cases or load an explicit demo fixture for this draft version.' : 'Published versions without cases cannot be edited.'} />
+        {canImport && (
+          <CaseImportPanel
+            value={caseDraftJson}
+            loading={loading}
+            onChange={onCaseDraftJsonChange}
+            onImport={onImportCases}
+            onLoadDemo={onLoadDemoCases}
+          />
+        )}
+      </div>
+    )
   }
   return (
     <div className="grid gap-3 xl:grid-cols-[360px_minmax(0,1fr)]">
       <div className="space-y-2">
+        {canImport && (
+          <CaseImportPanel
+            value={caseDraftJson}
+            loading={loading}
+            onChange={onCaseDraftJsonChange}
+            onImport={onImportCases}
+            onLoadDemo={onLoadDemoCases}
+          />
+        )}
         {cases.map(item => (
           <button
             key={item.id}
@@ -498,6 +752,36 @@ function CasesTab({ cases, selectedCase, onSelectCase }: {
         ))}
       </div>
       {selectedCase ? <CaseDetailPanel item={selectedCase} /> : null}
+    </div>
+  )
+}
+
+function CaseImportPanel({ value, loading, onChange, onImport, onLoadDemo }: {
+  value: string
+  loading: boolean
+  onChange: (value: string) => void
+  onImport: () => void
+  onLoadDemo: () => void
+}) {
+  return (
+    <div className="rounded-md border border-[#293037] bg-[#101316] p-3">
+      <div className="mb-2 text-xs font-medium uppercase text-[#818c95]">Case Import JSON</div>
+      <textarea
+        value={value}
+        onChange={event => onChange(event.target.value)}
+        className="min-h-40 w-full resize-y rounded border border-[#303940] bg-[#0e1114] p-2 font-mono text-xs leading-5 text-[#d6dde2]"
+        aria-label="Evaluation case import JSON"
+      />
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button variant="brand-primary" onClick={onImport} disabled={loading}>
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSearch className="h-4 w-4" />}
+          Import Cases
+        </Button>
+        <Button variant="secondary" onClick={onLoadDemo} disabled={loading}>
+          <Database className="h-4 w-4" />
+          Demo Cases
+        </Button>
+      </div>
     </div>
   )
 }
@@ -778,6 +1062,66 @@ function buildTargetSnapshot(changeSet: AdvisorChangeSet, suite: EvaluationSuite
     feature_flags: { evaluation_governance: true },
     time_fixture: { now, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' },
   }
+}
+
+function buildSuiteTargetSnapshot(suite: EvaluationSuite, version: EvaluationSuiteVersion): EvaluationTargetSnapshotInput {
+  const targetKind = suite.target_kinds.find(kind => supportedTargetKinds.has(kind)) ?? 'semantic_model'
+  const now = new Date().toISOString()
+  return {
+    contract_version: 'evaluation.target_snapshot.v1',
+    target_kind: targetKind,
+    target_ref: `${targetKind}:${suite.slug}`,
+    app: {
+      git_sha: 'human-ui',
+      image_digest: 'sha256:human-ui',
+      migration_revision: 'add_canonical_sharing_model',
+    },
+    source: { snapshot_id: `suite-${suite.id}`, snapshot_hash: `sha256:${suite.id}` },
+    semantic_model: { version_id: version.id, version_hash: version.content_hash || `sha256:${version.id}` },
+    dashboard: { version_id: version.id, manifest_hash: version.content_hash || `sha256:${version.id}`, renderer_version: 'evaluation-ui' },
+    prompt: { version: 'evaluation-ui', prompt_hash: 'sha256:evaluation-ui-prompt' },
+    tool_registry_hash: 'sha256:evaluation-ui-tools',
+    skill_registry_hash: 'sha256:evaluation-ui-skills',
+    llm: { provider: 'evaluation-ui', model: 'human-review', params_hash: 'sha256:evaluation-ui-params' },
+    principal: { tenant_id: suite.tenant_id, actor_type: 'human', actor_id: suite.owner_id ?? 'unknown', scopes: ['dashboard.query'] },
+    dataset: { snapshot_id: `suite-${suite.id}`, snapshot_hash: `sha256:${version.id}` },
+    feature_flags: { evaluation_governance: true },
+    time_fixture: { now, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' },
+  }
+}
+
+function explicitDemoSuite(): EvaluationSuiteCreateInput {
+  const suffix = Date.now().toString(36)
+  return {
+    ...defaultSuiteDraft,
+    slug: `commercial-evaluation-demo-${suffix}`,
+    name: 'Commercial Evaluation Demo',
+    description: 'Explicit demo fixture for release-gate evaluation flow.',
+    targetKinds: ['semantic_model'],
+  }
+}
+
+function explicitDemoCases(): EvaluationCaseDraftInput[] {
+  return [
+    {
+      ...defaultCaseDraft,
+      caseKey: 'demo-pass-case',
+      title: 'Demo passing case',
+      question: 'Return a governed revenue answer.',
+      tags: ['demo', 'pass'],
+    },
+    {
+      ...defaultCaseDraft,
+      caseKey: 'demo-blocking-case',
+      title: 'Demo blocking case',
+      question: 'Reject answers that expose restricted fields.',
+      expectedContract: {
+        answer: { must_not_include: ['secret', 'token'] },
+        policy: { security_hard_fail: true, forbidden_fields: ['secret_margin'] },
+      },
+      tags: ['demo', 'blocking'],
+    },
+  ]
 }
 
 function resolveTargetKind(targetRef: string, suite: EvaluationSuite | null): string {

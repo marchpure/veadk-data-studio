@@ -119,3 +119,26 @@ Commercial readiness note:
 - This is still not final `READY`: the real `127.0.0.1:8080` container is still the old Governance image, and the commercial branch has not yet passed a final image Release Gate.
 - The explicit legacy asset `6b388ea5-9586-41a2-8ab9-51fd580d71af` still must be verified against the final commercial 8080 image with Playwright before marking Dashboard 8080 ready.
 - Evaluation APIs and UI surfaces are present and focused tests pass, but the final commercial gate still needs an explicit non-production fixture proving create/import/publish/run/failure/promotion blocking on the latest image.
+
+## 2026-08-17 04:05 CST - Evaluation Commercial Loop
+
+Implemented on unified branch after Dashboard merge:
+
+- Added REST write APIs for Evaluation suite creation, draft suite-version creation, case draft creation, JSON/JSONL/CSV case import, and suite-version publish.
+- Suite creation now creates an initial draft version explicitly; publish requires at least one case, marks cases immutable, updates the suite published version pointer, and clears the draft pointer for that version.
+- Added Evaluation UI actions for empty-state suite creation, explicit demo fixture loading, case import, demo cases, draft version creation, publish, and preflight run creation.
+- Added `server/scripts/evaluation_release_gate_8080.py`, which only runs when invoked by release gate or a developer. It creates a temporary explicit fixture through REST, imports cases, publishes, creates/claims/completes a run, and verifies failure readout with redaction checks. It does not seed production tenants on startup.
+
+Evidence from unified branch:
+
+- `cd server && PYTHONPATH=..:tests uv run pytest tests/test_evaluation_contract_schemas.py tests/test_evaluation_persistence_migration.py tests/test_evaluation_service.py tests/test_evaluation_runner_service.py tests/test_evaluation_rest_api.py tests/test_evaluation_feedback_advisor_api.py tests/test_evaluation_mcp_contract.py -q` -> `23 passed, 21 warnings`.
+- `cd server && python -m py_compile scripts/evaluation_release_gate_8080.py && uv run ruff check repositories/evaluation.py services/evaluation.py routers/evaluation.py tests/test_evaluation_rest_api.py tests/test_evaluation_service.py scripts/evaluation_release_gate_8080.py` -> passed with the existing removed-rule warning.
+- `cd client && pnpm build:check` -> passed with existing Browserslist, CSS minify, dynamic import, and chunk-size warnings.
+- `cd client && pnpm lint` -> `357 problems (0 errors, 357 warnings)`.
+- `cd client && node --check scripts/evaluation-workspace-smoke.mjs && node --check scripts/dashboard-workspace-smoke.mjs` -> passed.
+- `git diff --check` -> passed.
+
+Commercial readiness note:
+
+- Evaluation now has a real create/import/publish/preflight/runner/failure closed loop in REST and UI. It is no longer just an empty inventory with read-only surfaces.
+- Final `READY` still requires running `server/scripts/evaluation_release_gate_8080.py` against the final commercial `127.0.0.1:8080` image, not the current old Governance image.

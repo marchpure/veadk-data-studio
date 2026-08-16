@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import csv
+import io
+import json
 from typing import Any, Literal
 from uuid import UUID
 
@@ -19,6 +22,7 @@ from server.serializers.evaluation import (
     evaluation_case_run_payload,
     evaluation_run_payload,
     evaluation_suite_payload,
+    evaluation_suite_version_payload,
     promotion_payload,
 )
 from server.services.evaluation import EvaluationService
@@ -36,6 +40,35 @@ class EvaluationPreflightRunRequest(EvaluationRouterModel):
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
     actor_type: Literal["human", "agent", "service"] = "agent"
     actor_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class EvaluationCreateSuiteRequest(EvaluationRouterModel):
+    slug: str = Field(min_length=1, max_length=160)
+    name: str = Field(min_length=1, max_length=255)
+    description: str = ""
+    target_kinds: list[str] = Field(min_length=1)
+    gate_policy: dict[str, Any] = Field(default_factory=dict)
+
+
+class EvaluationCreateDraftVersionRequest(EvaluationRouterModel):
+    copy_from_version_id: UUID | None = None
+
+
+class EvaluationCaseDraftRequest(EvaluationRouterModel):
+    case_key: str = Field(min_length=1, max_length=160)
+    title: str | None = Field(default=None, max_length=255)
+    target_kinds: list[str] = Field(min_length=1)
+    operation: str = Field(default="answer_question", min_length=1, max_length=80)
+    question: str = Field(min_length=1)
+    expected_contract: dict[str, Any] = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=lambda: {"source": "import"})
+    tags: list[str] = Field(default_factory=list)
+
+
+class EvaluationCaseImportRequest(EvaluationRouterModel):
+    format: Literal["json", "jsonl", "csv"] = "json"
+    cases: list[EvaluationCaseDraftRequest] | None = None
+    content: str | None = None
 
 
 class EvaluationRunLeaseRequest(EvaluationRouterModel):
@@ -96,6 +129,62 @@ def _advisor_review_payload(review: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _case_request_payload(payload: EvaluationCaseDraftRequest) -> dict[str, Any]:
+    return {
+        "case_key": payload.case_key,
+        "title": payload.title or payload.case_key,
+        "target_kinds": payload.target_kinds,
+        "operation": payload.operation,
+        "question": payload.question,
+        "expected_contract": payload.expected_contract,
+        "provenance": payload.provenance,
+        "tags": payload.tags,
+    }
+
+
+def _parse_import_cases(payload: EvaluationCaseImportRequest) -> list[dict[str, Any]]:
+    if payload.format == "json":
+        return [_case_request_payload(case) for case in payload.cases or []]
+    if not payload.content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Import content is required")
+    if payload.format == "jsonl":
+        cases = []
+        for line_number, line in enumerate(payload.content.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                cases.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid JSONL at line {line_number}: {exc.msg}",
+                ) from exc
+        return cases
+    reader = csv.DictReader(io.StringIO(payload.content))
+    cases = []
+    for row in reader:
+        expected_text = row.get("expected_contract_json") or row.get("expected_contract") or "{}"
+        provenance_text = row.get("provenance_json") or row.get("provenance") or '{"source":"import"}'
+        try:
+            expected_contract = json.loads(expected_text)
+            provenance = json.loads(provenance_text)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid CSV JSON field: {exc.msg}") from exc
+        cases.append(
+            {
+                "case_key": row.get("case_key") or "",
+                "title": row.get("title") or row.get("case_key") or "",
+                "target_kinds": [item.strip() for item in (row.get("target_kinds") or "").split(";") if item.strip()],
+                "operation": row.get("operation") or "answer_question",
+                "question": row.get("question") or "",
+                "expected_contract": expected_contract,
+                "provenance": provenance,
+                "tags": [item.strip() for item in (row.get("tags") or "").split(";") if item.strip()],
+            }
+        )
+    return cases
+
+
 @router.get("/evaluation/suites")
 async def list_evaluation_suites(
     query: str = "",
@@ -115,6 +204,37 @@ async def list_evaluation_suites(
     return success_response(
         data={"items": [evaluation_suite_payload(suite) for suite in suites], "total": len(suites)},
         message="Evaluation suites listed",
+    )
+
+
+@router.post("/evaluation/suites", status_code=status.HTTP_201_CREATED)
+async def create_evaluation_suite(
+    payload: EvaluationCreateSuiteRequest,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_CREATE)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        suite, version = await EvaluationService(session).create_suite_with_draft(
+            tenant_id=auth.tenant_id,
+            slug=payload.slug,
+            name=payload.name,
+            description=payload.description,
+            target_kinds=payload.target_kinds,
+            gate_policy=payload.gate_policy,
+            actor_id=auth.user_id,
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    return success_response(
+        data={
+            "suite": evaluation_suite_payload(
+                suite,
+                versions=[version],
+                include_versions=True,
+                include_manifests=True,
+            )
+        },
+        message="Evaluation suite draft created",
     )
 
 
@@ -145,6 +265,28 @@ async def describe_evaluation_suite(
     )
 
 
+@router.post("/evaluation/suites/{suite_id}/draft-version", status_code=status.HTTP_201_CREATED)
+async def create_evaluation_draft_suite_version(
+    suite_id: UUID,
+    payload: EvaluationCreateDraftVersionRequest,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_EDIT)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        version = await EvaluationService(session).create_draft_suite_version(
+            tenant_id=auth.tenant_id,
+            suite_id=suite_id,
+            actor_id=auth.user_id,
+            copy_from_version_id=payload.copy_from_version_id,
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    return success_response(
+        data={"version": evaluation_suite_version_payload(version, include_manifest=True)},
+        message="Evaluation draft version created",
+    )
+
+
 @router.get("/evaluation/suite-versions/{suite_version_id}/cases")
 async def list_evaluation_cases(
     suite_version_id: UUID,
@@ -171,6 +313,89 @@ async def list_evaluation_cases(
             "has_more": len(cases) > limit,
         },
         message="Evaluation cases listed",
+    )
+
+
+@router.post("/evaluation/suite-versions/{suite_version_id}/cases", status_code=status.HTTP_201_CREATED)
+async def create_evaluation_case_draft(
+    suite_version_id: UUID,
+    payload: EvaluationCaseDraftRequest,
+    response: Response,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_EDIT)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        case, created = await EvaluationService(session).create_case_draft(
+            tenant_id=auth.tenant_id,
+            suite_version_id=suite_version_id,
+            case_key=payload.case_key,
+            title=payload.title or payload.case_key,
+            target_kinds=payload.target_kinds,
+            operation=payload.operation,
+            question=payload.question,
+            expected_contract=payload.expected_contract,
+            provenance=payload.provenance,
+            tags=payload.tags,
+            actor_id=str(auth.user_id),
+            actor_type="human",
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return success_response(
+        data={"case": evaluation_case_payload(case), "created": created},
+        message="Evaluation case draft created",
+    )
+
+
+@router.post("/evaluation/suite-versions/{suite_version_id}/cases/import", status_code=status.HTTP_201_CREATED)
+async def import_evaluation_case_drafts(
+    suite_version_id: UUID,
+    payload: EvaluationCaseImportRequest,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_EDIT)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        imported = await EvaluationService(session).import_case_drafts(
+            tenant_id=auth.tenant_id,
+            suite_version_id=suite_version_id,
+            cases=_parse_import_cases(payload),
+            actor_id=str(auth.user_id),
+            actor_type="human",
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    created = [evaluation_case_payload(case) for case in imported["created"]]
+    existing = [evaluation_case_payload(case) for case in imported["existing"]]
+    return success_response(
+        data={
+            "created": created,
+            "existing": existing,
+            "created_count": len(created),
+            "existing_count": len(existing),
+            "total": imported["total"],
+        },
+        message="Evaluation cases imported",
+    )
+
+
+@router.post("/evaluation/suite-versions/{suite_version_id}/publish")
+async def publish_evaluation_suite_version(
+    suite_version_id: UUID,
+    auth: AuthContext = Depends(require_scope(Scope.DASHBOARD_PUBLISH)),
+    session: AsyncSession = Depends(get_async_session),
+):
+    try:
+        version = await EvaluationService(session).publish_suite_version(
+            tenant_id=auth.tenant_id,
+            suite_version_id=suite_version_id,
+            actor_id=str(auth.user_id),
+        )
+    except ValueError as exc:
+        raise _service_error(exc) from exc
+    return success_response(
+        data={"version": evaluation_suite_version_payload(version, include_manifest=True)},
+        message="Evaluation suite version published",
     )
 
 

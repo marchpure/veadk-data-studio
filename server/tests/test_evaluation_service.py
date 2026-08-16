@@ -102,6 +102,19 @@ async def test_evaluation_preflight_blocks_missing_required_target_pins(test_ses
 async def test_published_suite_version_is_immutable_through_service(test_session: AsyncSession) -> None:
     tenant_id, suite_version_id = await _seed_suite_version(test_session)
     service = EvaluationService(test_session)
+    await service.create_case_draft(
+        tenant_id=tenant_id,
+        suite_version_id=suite_version_id,
+        case_key="immutable-case",
+        title="Immutable case",
+        target_kinds=["semantic_model"],
+        operation="answer_question",
+        question="What is revenue?",
+        expected_contract={"answer": {"must_include_all": ["revenue"]}},
+        provenance={"source": "manual"},
+        tags=["immutable"],
+        actor_id="owner",
+    )
 
     await service.publish_suite_version(tenant_id=tenant_id, suite_version_id=suite_version_id, actor_id="owner")
 

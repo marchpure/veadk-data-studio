@@ -5,12 +5,15 @@ import type {
   AdvisorChangeSet,
   AdvisorReview,
   EvaluationCase,
+  EvaluationCaseDraftInput,
   EvaluationFailureSummary,
   EvaluationRun,
   EvaluationRunComparison,
   EvaluationRunDetail,
-  EvaluationSuite,
+  EvaluationSuiteCreateInput,
+  EvaluationSuiteVersion,
   EvaluationTargetSnapshotInput,
+  EvaluationSuite,
 } from '../types/evaluation'
 
 interface StandardResponse<T> {
@@ -99,16 +102,88 @@ export const EvaluationService = {
     )
   },
 
+  async createSuite(payload: EvaluationSuiteCreateInput): Promise<{ suite: EvaluationSuite }> {
+    return evaluationFetch<{ suite: EvaluationSuite }>('/suites', {
+      method: 'POST',
+      body: JSON.stringify({
+        slug: payload.slug,
+        name: payload.name,
+        description: payload.description,
+        target_kinds: payload.targetKinds,
+        gate_policy: payload.gatePolicy ?? {},
+      }),
+    })
+  },
+
+  async createDraftVersion(suiteId: string, copyFromVersionId?: string | null): Promise<{ version: EvaluationSuiteVersion }> {
+    return evaluationFetch<{ version: EvaluationSuiteVersion }>(`/suites/${suiteId}/draft-version`, {
+      method: 'POST',
+      body: JSON.stringify({ copy_from_version_id: copyFromVersionId ?? null }),
+    })
+  },
+
   async listCases(suiteVersionId: string): Promise<{ items: EvaluationCase[]; total: number; has_more: boolean }> {
     return evaluationFetch<{ items: EvaluationCase[]; total: number; has_more: boolean }>(
       `/suite-versions/${suiteVersionId}/cases`,
     )
   },
 
+  async createCase(suiteVersionId: string, payload: EvaluationCaseDraftInput): Promise<{ case: EvaluationCase; created: boolean }> {
+    return evaluationFetch<{ case: EvaluationCase; created: boolean }>(`/suite-versions/${suiteVersionId}/cases`, {
+      method: 'POST',
+      body: JSON.stringify(toCasePayload(payload)),
+    })
+  },
+
+  async importCases(suiteVersionId: string, cases: EvaluationCaseDraftInput[]): Promise<{
+    created: EvaluationCase[]
+    existing: EvaluationCase[]
+    created_count: number
+    existing_count: number
+    total: number
+  }> {
+    return evaluationFetch<{
+      created: EvaluationCase[]
+      existing: EvaluationCase[]
+      created_count: number
+      existing_count: number
+      total: number
+    }>(`/suite-versions/${suiteVersionId}/cases/import`, {
+      method: 'POST',
+      body: JSON.stringify({ format: 'json', cases: cases.map(toCasePayload) }),
+    })
+  },
+
+  async publishSuiteVersion(suiteVersionId: string): Promise<{ version: EvaluationSuiteVersion }> {
+    return evaluationFetch<{ version: EvaluationSuiteVersion }>(`/suite-versions/${suiteVersionId}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+  },
+
   async listRuns(suiteVersionId: string): Promise<{ items: EvaluationRun[]; total: number }> {
     return evaluationFetch<{ items: EvaluationRun[]; total: number }>(
       `/suite-versions/${suiteVersionId}/runs`,
     )
+  },
+
+  async createPreflightRun(payload: {
+    suiteVersionId: string
+    targetSnapshot: EvaluationTargetSnapshotInput
+    idempotencyKey?: string
+    actorType?: 'human' | 'agent' | 'service'
+    actorId?: string
+  }): Promise<EvaluationRun> {
+    return evaluationFetch<EvaluationRun>('/runs/preflight', {
+      method: 'POST',
+      body: JSON.stringify({
+        suite_version_id: payload.suiteVersionId,
+        target_snapshot: payload.targetSnapshot,
+        idempotency_key: payload.idempotencyKey,
+        actor_type: payload.actorType ?? 'agent',
+        actor_id: payload.actorId,
+      }),
+    })
   },
 
   async listAdvisorChangeSets(suiteVersionId: string): Promise<{ items: AdvisorChangeSet[]; total: number }> {
@@ -176,3 +251,16 @@ export const EvaluationService = {
 }
 
 export type EvaluationApiResponse<T> = StandardResponse<T>
+
+function toCasePayload(payload: EvaluationCaseDraftInput): Record<string, unknown> {
+  return {
+    case_key: payload.caseKey,
+    title: payload.title,
+    target_kinds: payload.targetKinds,
+    operation: payload.operation,
+    question: payload.question,
+    expected_contract: payload.expectedContract,
+    provenance: payload.provenance,
+    tags: payload.tags,
+  }
+}

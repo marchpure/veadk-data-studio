@@ -14,6 +14,25 @@ export interface EvaluationSuite {
   updated_at: string | null
 }
 
+export interface EvaluationSuiteCreateInput {
+  slug: string
+  name: string
+  description: string
+  targetKinds: string[]
+  gatePolicy?: Record<string, unknown>
+}
+
+export interface EvaluationCaseDraftInput {
+  caseKey: string
+  title: string
+  targetKinds: string[]
+  operation: string
+  question: string
+  expectedContract: Record<string, unknown>
+  provenance: Record<string, unknown>
+  tags: string[]
+}
+
 export interface EvaluationSuiteVersion {
   id: string
   tenant_id: string
