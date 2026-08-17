@@ -589,6 +589,7 @@ async function runViewScene(page, fixtures, viewport) {
   await page.goto(`${baseURL}/dashboard-assets/${fixtures.structuredAssetId}`, { waitUntil: 'networkidle' })
   await page.getByRole('heading', { name: /Browser Structured Revenue/i }).waitFor()
   await page.getByText('Filter Digest').waitFor()
+  await page.getByRole('heading', { name: 'Filter preflight' }).waitFor()
   await page.getByText(/as of|No rows returned|No run timestamp/i).first().waitFor()
   await capture(page, 'view', viewport)
 
@@ -743,8 +744,11 @@ async function runEditReviewScene(page, fixtures, viewport) {
   await page.getByText('Filter removed').waitFor()
   await page.getByLabel(`Region ${viewport}`).selectOption('EMEA')
   await page.waitForURL(/filter\.region=EMEA/)
+  await page.getByText('Filter preflight').waitFor()
+  await page.getByText('selected').first().waitFor()
   await page.reload({ waitUntil: 'networkidle' })
   await page.getByLabel(`Region ${viewport}`).waitFor()
+  await page.getByRole('heading', { name: 'Filter preflight' }).waitFor()
   const persistedFilter = await page.getByLabel(`Region ${viewport}`).inputValue()
   if (persistedFilter !== 'EMEA') {
     throw new Error(`Filter did not persist after reload for ${viewport}: ${persistedFilter}`)
@@ -753,6 +757,7 @@ async function runEditReviewScene(page, fixtures, viewport) {
   await page.goto(`${baseURL}/dashboard-assets`, { waitUntil: 'networkidle' })
   await page.goto(deepLink, { waitUntil: 'networkidle' })
   await page.getByLabel(`Region ${viewport}`).waitFor()
+  await page.getByRole('heading', { name: 'Filter preflight' }).waitFor()
   const deepLinkedFilter = await page.getByLabel(`Region ${viewport}`).inputValue()
   if (deepLinkedFilter !== 'EMEA') {
     throw new Error(`Filter did not persist through deep link for ${viewport}: ${deepLinkedFilter}`)

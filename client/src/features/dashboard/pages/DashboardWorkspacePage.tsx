@@ -680,6 +680,7 @@ export default function DashboardWorkspacePage() {
                       <TabButton active={tab === 'lineage'} onClick={() => setTab('lineage')} icon={<GitBranch className="h-4 w-4" />} label="Lineage" />
                     </div>
                   </div>
+                  <FilterPreflightPanel manifest={manifest} filters={filters} run={run} />
 
                   <div className="p-3">
                     {tab === 'dashboard' && <DashboardCanvas manifest={manifest} run={run} loadingRun={loadingRun} />}
@@ -1388,6 +1389,65 @@ function FilterBar({ filters, values, onChange }: { filters: DashboardFilter[]; 
           )}
         </label>
       ))}
+    </div>
+  )
+}
+
+function FilterPreflightPanel({
+  manifest,
+  filters,
+  run,
+}: {
+  manifest: DashboardManifest
+  filters: Record<string, unknown>
+  run: DashboardRun | null
+}) {
+  const selectedViewIds = new Set(manifest.data_views.map(view => view.id))
+  const activeFilters = manifest.filters.map(filter => {
+    const hasValue = filters[filter.field] !== undefined && filters[filter.field] !== null && String(filters[filter.field]) !== ''
+    return {
+      filter,
+      value: hasValue ? filters[filter.field] : filter.default_value,
+      source: hasValue ? 'selected' : filter.default_value !== undefined && filter.default_value !== null && String(filter.default_value) !== '' ? 'default' : 'empty',
+      affectedViews: filter.affected_data_view_ids?.filter(id => selectedViewIds.has(id)) ?? manifest.data_views.map(view => view.id),
+    }
+  })
+  const blockingFilters = activeFilters.filter(item => item.filter.required && (item.value === undefined || item.value === null || String(item.value) === ''))
+  return (
+    <div className="border-b border-[#293037] bg-[#101316] px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4 text-brand-orange" />
+          <h2 className="text-sm font-semibold text-[#f3f5f5]">Filter preflight</h2>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          <Badge tone={blockingFilters.length > 0 ? 'warning' : 'ready'}>{blockingFilters.length > 0 ? `${blockingFilters.length} missing` : 'ready'}</Badge>
+          <Badge>{run?.filter_digest ? shortHash(run.filter_digest) : 'not run'}</Badge>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {activeFilters.map(({ filter, value, source, affectedViews }) => (
+          <div key={filter.id} className="min-w-0 rounded border border-[#303940] bg-[#151a1f] p-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-[#f3f5f5]">{filter.label}</div>
+                <div className="mt-1 truncate text-xs text-[#818c95]">{filter.field} / {filter.operators.join(', ')}</div>
+              </div>
+              <Badge tone={source === 'empty' && filter.required ? 'warning' : source === 'selected' ? 'ready' : 'neutral'}>{source}</Badge>
+            </div>
+            <div className="mt-2 break-words text-sm text-[#d6dde2]">{value === undefined || value === null || String(value) === '' ? 'No value' : formatValue(value)}</div>
+            <div className="mt-2 flex flex-wrap gap-1">
+              <Badge>{filter.filter_type}</Badge>
+              {filter.required && <Badge tone="warning">required</Badge>}
+              {filter.domain?.length ? <Badge>{filter.domain.length} values</Badge> : null}
+              <Badge>{affectedViews.length} views</Badge>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#818c95]">
+        <span>Normalized filters: {formatValue(run?.normalized_filters ?? filters)}</span>
+      </div>
     </div>
   )
 }
