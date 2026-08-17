@@ -203,7 +203,12 @@ export default function DashboardWorkspacePage() {
   const blockers = selectedVersion?.validation_result.blockers ?? manifest?.migration.blockers ?? []
   const semanticWarnings = semanticDiff?.warnings ?? []
   const semanticBlockers = semanticDiff?.blockers ?? []
-  const allBlockers = [...blockers, ...semanticBlockers]
+  const pinnedSnapshotBlocked = Boolean(run?.mode === 'pinned_snapshot' && selectedVersion && !selectedVersion.is_published_immutable)
+  const allBlockers = [
+    ...blockers,
+    ...semanticBlockers,
+    ...(pinnedSnapshotBlocked ? ['Pinned snapshot run is blocked because this version has no immutable artifact.'] : []),
+  ]
   const warnings = [...(selectedVersion?.validation_result.warnings ?? []), ...semanticWarnings, ...(run?.warnings ?? [])]
   const canPublish = Boolean(selectedAsset && manifest && selectedVersion?.status === 'draft' && allBlockers.length === 0)
 
@@ -585,11 +590,32 @@ export default function DashboardWorkspacePage() {
                 />
               )}
 
+              {pinnedSnapshotBlocked && (
+                <section className="rounded-md border border-red-500/30 bg-red-500/10 p-4 text-red-100" role="alert">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <h2 className="text-sm font-semibold">Pinned snapshot blocked</h2>
+                      <p className="mt-1 text-sm leading-6 text-red-100/80">
+                        The current run requested pinned_snapshot mode, but this Dashboard version is not marked immutable. Publish an immutable version before sharing or replaying the pinned artifact.
+                      </p>
+                    </div>
+                  </div>
+                </section>
+              )}
+
               {isLegacyAsset && (
-                <LegacyFallbackPanel
+                <LegacyMigrationReviewPanel
                   asset={selectedAsset}
                   version={selectedVersion}
+                  manifest={manifest}
+                  run={run}
                   blockers={allBlockers}
+                  warnings={warnings}
+                  loading={loadingWorkflow}
+                  onGenerateDraft={() => void createReloadDraft()}
+                  onStartReview={() => void validateDraft()}
+                  onRefresh={() => void loadDetail(selectedAsset.id, versionNum)}
                 />
               )}
 
@@ -1556,67 +1582,168 @@ function AuditTrail({ events }: { events: DashboardAuditEvent[] }) {
   )
 }
 
-function LegacyFallbackPanel({
+function LegacyMigrationReviewPanel({
   asset,
   version,
+  manifest,
+  run,
   blockers,
+  warnings,
+  loading,
+  onGenerateDraft,
+  onStartReview,
+  onRefresh,
 }: {
   asset: DashboardAssetDetail
   version: DashboardVersion | null
+  manifest: DashboardManifest | null
+  run: DashboardRun | null
   blockers: string[]
+  warnings: string[]
+  loading: boolean
+  onGenerateDraft: () => void
+  onStartReview: () => void
+  onRefresh: () => void
 }) {
   const migrationSummary = isRecord(asset.health_summary.migration) ? asset.health_summary.migration : {}
-  const migrationState = version?.migration_state
+  const migrationState = manifest?.migration.state
+    ?? version?.migration_state
     ?? stringValue(migrationSummary.state)
     ?? asset.lifecycle
+  const sourceIds = uniqueStrings([
+    ...(version?.pinned_source_snapshots ?? []),
+    ...(manifest?.semantic_bindings.flatMap(binding => binding.source_snapshot_ids ?? []) ?? []),
+  ])
   const latestLegacyVersionId = stringValue(migrationSummary.latest_dashboard_version_id)
+  const legacySourceId = manifest?.migration.legacy_dashboard_id ?? asset.notebook_id ?? latestLegacyVersionId ?? version?.id ?? null
+  const permissionSummary = summarizeAccessPolicy(manifest?.access_policy ?? asset.access_policy)
+  const readOnlyRows = legacyPreviewRows(manifest, run, asset)
   const previewPath = asset.notebook_id ? `/notebook/${asset.notebook_id}/preview` : null
-
   return (
     <section className="rounded-md border border-amber-500/30 bg-amber-500/10 p-4">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-sm font-semibold text-amber-100">Legacy HTML fallback</h2>
+            <h2 className="text-sm font-semibold text-amber-100">Legacy migration review</h2>
             <StatusPill status={migrationState} />
+            {version && <Badge>v{version.version_num} {version.status}</Badge>}
           </div>
-          <p className="mt-1 max-w-4xl text-sm text-amber-100/80">
-            {asset.name} is preserved as legacy HTML and is not agent-ready until structured manifest review is complete.
+          <p className="mt-1 text-sm text-amber-100/80">
+            This legacy_unstructured asset stays read-only until a reviewer generates and validates a structured draft. It is not converted to a generic error state.
           </p>
-          <div className="mt-3 grid gap-2 text-xs text-amber-100/80 md:grid-cols-2 xl:grid-cols-4">
-            <LegacySignal label="Asset ID" value={asset.id} />
-            <LegacySignal label="Notebook ID" value={asset.notebook_id ?? 'none'} />
-            <LegacySignal label="Version" value={version ? `v${version.version_num} ${version.status}` : 'none'} />
-            <LegacySignal label="Legacy Version ID" value={latestLegacyVersionId ?? version?.id ?? 'none'} />
-          </div>
-          {blockers.length > 0 && (
-            <div className="mt-3 rounded border border-amber-500/30 bg-[#14100a] p-3">
-              <div className="text-xs font-medium uppercase text-amber-100/70">Migration blocker</div>
-              <div className="mt-1 text-sm text-amber-100">{blockers[0]}</div>
-            </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={onGenerateDraft} disabled={loading || !manifest || !asset.published_version_id}>
+            <GitBranch className="h-4 w-4" />
+            Generate structured draft
+          </Button>
+          <Button variant="secondary" onClick={onStartReview} disabled={loading || !manifest || !version}>
+            <ShieldCheck className="h-4 w-4" />
+            Start review
+          </Button>
+          <Button variant="secondary" onClick={onRefresh} disabled={loading}>
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
+          <Button asChild variant="secondary">
+            <Link to="/dashboard-assets">Back to list</Link>
+          </Button>
+          {asset.notebook_id && (
+            <Button asChild variant="secondary">
+              <Link to={`/notebook/${asset.notebook_id}`}>Open Notebook</Link>
+            </Button>
+          )}
+          {previewPath && (
+            <Button asChild variant="secondary">
+              <Link to={previewPath}>
+                <ExternalLink className="h-4 w-4" />
+                Open legacy preview
+              </Link>
+            </Button>
           )}
         </div>
-        {previewPath && (
-          <Link
-            to={previewPath}
-            className="inline-flex h-9 shrink-0 items-center gap-2 rounded border border-amber-500/30 px-3 text-sm text-amber-100 transition-colors hover:bg-amber-500/10"
-          >
-            <ExternalLink className="h-4 w-4" />
-            Open legacy preview
-          </Link>
-        )}
+      </div>
+
+      <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-3">
+          <div className="grid gap-2 md:grid-cols-3">
+            <LegacyKV label="Asset" value={`${asset.name} / ${asset.slug}`} />
+            <LegacyKV label="Version" value={version ? `v${version.version_num} ${version.status}` : 'No structured version'} />
+            <LegacyKV label="Freshness" value={run?.overall_freshness ?? formatInventoryFreshness(asset)} />
+            <LegacyKV label="Source" value={sourceIds.length ? sourceIds.join(', ') : legacySourceId ?? 'No source snapshot'} />
+            <LegacyKV label="Permission" value={permissionSummary} />
+            <LegacyKV label="Audit" value={manifest?.migration.reviewed_at ? `Reviewed ${formatDate(manifest.migration.reviewed_at)}` : 'Review not started'} />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <DiffList title="Blockers" items={blockers} tone="blocked" />
+            <DiffList title="Warnings" items={warnings} tone="warning" />
+          </div>
+        </div>
+
+        <div className="rounded-md border border-amber-500/25 bg-[#101316] p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-medium uppercase text-amber-100/70">Read-only preview</div>
+            <Badge tone="warning">locked</Badge>
+          </div>
+          <div className="mt-3 space-y-2">
+            {readOnlyRows.map(row => (
+              <div key={row.label} className="rounded border border-[#303940] bg-[#151a1f] p-2">
+                <div className="truncate text-xs text-[#818c95]">{row.label}</div>
+                <div className="mt-1 line-clamp-2 text-sm text-[#d6dde2]">{row.value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </section>
   )
 }
 
-function LegacySignal({ label, value }: { label: string; value: string }) {
+function LegacyKV({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded border border-amber-500/20 bg-[#14100a] p-2">
-      <div className="text-[11px] uppercase text-amber-100/60">{label}</div>
-      <div className="mt-1 truncate text-amber-100">{value}</div>
+    <div className="min-w-0 rounded border border-amber-500/20 bg-[#101316] p-3">
+      <div className="text-[11px] font-medium uppercase text-amber-100/60">{label}</div>
+      <div className="mt-1 break-words text-sm text-amber-50">{value}</div>
     </div>
   )
+}
+
+function summarizeAccessPolicy(policy: Record<string, unknown>): string {
+  const scopes = policy.required_scopes
+  const rows = policy.row_policy_refs
+  const columns = policy.column_policy_refs
+  const redactions = policy.redaction_policy_refs
+  const parts = [
+    Array.isArray(scopes) && scopes.length ? `${scopes.length} scopes` : null,
+    Array.isArray(rows) && rows.length ? `${rows.length} row policies` : null,
+    Array.isArray(columns) && columns.length ? `${columns.length} column policies` : null,
+    Array.isArray(redactions) && redactions.length ? `${redactions.length} redactions` : null,
+  ].filter(Boolean)
+  return parts.length ? parts.join(', ') : 'Workspace policy inherited'
+}
+
+function legacyPreviewRows(manifest: DashboardManifest | null, run: DashboardRun | null, asset: DashboardAssetDetail): Array<{ label: string; value: string }> {
+  const runRows = run?.views.flatMap(view => {
+    const rows = Array.isArray(view.result) ? view.result : view.result ? [view.result] : []
+    return rows.slice(0, 1).map(row => ({ label: view.data_view_id, value: formatValue(row) }))
+  }) ?? []
+  if (runRows.length > 0) return runRows.slice(0, 4)
+  const tileRows = manifest?.tiles.slice(0, 4).map(tile => ({
+    label: tile.title,
+    value: tile.accessible_fallback?.summary || tile.business_question || tile.tile_type,
+  })) ?? []
+  if (tileRows.length > 0) return tileRows
+  return [
+    { label: 'Name', value: asset.name },
+    { label: 'Description', value: asset.description || 'No description' },
+    { label: 'Notebook', value: asset.notebook_id ?? 'No notebook' },
+    { label: 'Lifecycle', value: asset.lifecycle },
+  ]
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)))
 }
 
 function TabButton({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {

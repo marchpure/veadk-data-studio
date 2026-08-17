@@ -91,10 +91,7 @@ export function MetricEditor({ metric }: { metric: Metric }) {
             </div>
           </div>
           <PreviewKV label="Why this calculation" value={metric.preview.explanation} />
-          <div>
-            <SectionTitle>Compiled SQL</SectionTitle>
-            <pre className="mt-2 max-h-44 overflow-auto rounded-md border border-[#343a40] bg-[#101214] p-3 text-xs text-[#cdd3d8] custom-scrollbar">{metric.preview.sql}</pre>
-          </div>
+          <PreviewKV label="Compiled query" value="Hidden in commercial UI. Review formula, validation, lineage, and governed query_metric output instead." />
           <PreviewKV label="Validation result" value={metric.preview.validation} />
           <div>
             <SectionTitle>Lineage</SectionTitle>

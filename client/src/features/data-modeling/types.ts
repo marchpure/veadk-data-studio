@@ -49,6 +49,7 @@ export interface DataModelingDatasource {
   sourceResourceId?: string | null
   contextIndexStatus?: string
   parseStatus?: string
+  lastSyncedAt?: string | null
 }
 
 export interface ModelConsumers {

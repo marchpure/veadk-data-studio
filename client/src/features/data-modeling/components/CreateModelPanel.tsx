@@ -273,6 +273,11 @@ function DatasourceStep({
                 {profiled && <StatusPill>{profiled.profileCoverage}% profile</StatusPill>}
               </div>
               {item.reason && <p className="mt-3 line-clamp-3 text-xs leading-5 text-[#9aa4ac]">{item.reason}</p>}
+              <div className="mt-3 grid gap-1 text-[11px] text-[#7f8a93]">
+                <span>Readiness gates: {readinessGateLabel(item)}</span>
+                <span>First blocker: {firstBlockerLabel(item)}</span>
+                <span>Last sync: {item.lastSyncedAt ?? 'No sync recorded'}</span>
+              </div>
               {item.nextActions.length > 0 && (
                 <div className="mt-3 text-[11px] font-medium text-[#cdd3d8]">
                   Next: {item.nextActions[0]}
@@ -382,7 +387,7 @@ function DatasourceStep({
 
 function modelingStatusLabel(status: DataModelingDatasource['modelingStatus']): string {
   if (status === 'supported') return 'Supported'
-  if (status === 'needs_projection') return 'Needs projection'
+  if (status === 'needs_projection') return 'Needs projection review'
   if (status === 'context_only') return 'Context only'
   if (status === 'permission_required') return 'Permission required'
   if (status === 'reauthorization_required') return 'Reauthorization required'
@@ -392,6 +397,22 @@ function modelingStatusLabel(status: DataModelingDatasource['modelingStatus']): 
   if (status === 'failed') return 'Failed'
   if (status === 'planned') return 'Planned'
   return 'Unsupported'
+}
+
+function readinessGateLabel(item: DataModelingDatasource): string {
+  if (item.modelingStatus === 'supported') return 'profile, projection, and permission ready'
+  if (item.modelingStatus === 'needs_projection') return 'projection review required before semantic draft'
+  if (item.modelingStatus === 'planned') return 'planned connector; setup disabled until adapter gates pass'
+  if (item.modelingStatus === 'reauthorization_required') return 'reauthorization required before profile load'
+  if (item.modelingStatus === 'permission_required') return 'permission restore required'
+  if (item.modelingStatus === 'processing') return 'sync/profile still processing'
+  if (item.modelingStatus === 'blocked') return 'policy or upstream blocker'
+  return item.modelingMode ? `${item.modelingMode.replace(/_/g, ' ')} gate not ready` : 'readiness gate not ready'
+}
+
+function firstBlockerLabel(item: DataModelingDatasource): string {
+  if (item.modelingStatus === 'supported') return 'None'
+  return item.reason || item.nextActions[0] || 'Open source detail'
 }
 
 function modelingStatusTone(status: DataModelingDatasource['modelingStatus']): 'ready' | 'warning' | 'blocked' | 'info' {

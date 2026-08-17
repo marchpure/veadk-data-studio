@@ -612,8 +612,9 @@ async function runPermissionScene(page, fixtures, viewport) {
 
 async function runLegacyScene(page, fixtures, viewport) {
   await page.goto(`${baseURL}/dashboard-assets/${fixtures.legacyAssetId}`, { waitUntil: 'networkidle' })
-  await page.getByText('Legacy HTML fallback').waitFor()
-  await page.getByText('not agent-ready').waitFor()
+  await page.getByText('Legacy migration review').waitFor()
+  await page.getByText('stays read-only').waitFor()
+  await page.getByRole('link', { name: /Open legacy preview/i }).waitFor()
   await capture(page, 'legacy', viewport)
 }
 
@@ -623,8 +624,8 @@ async function runExplicitLegacyAssetScene(page, assetId) {
   await page.getByRole('heading', { name: 'Black Friday Demographic Buying Pattern Analysis', exact: true }).waitFor()
   await page.getByText('legacy_unstructured').first().waitFor()
   await page.getByText('legacy HTML dashboard requires structured manifest review before agent-ready publish').first().waitFor()
-  await page.getByText('Legacy HTML fallback').waitFor()
-  await page.getByText('not agent-ready').first().waitFor()
+  await page.getByText('Legacy migration review').waitFor()
+  await page.getByText('stays read-only').first().waitFor()
   await page.getByRole('link', { name: /Open legacy preview/i }).waitFor()
   const bodyText = await page.locator('body').innerText()
   if (/Something went wrong/i.test(bodyText)) {

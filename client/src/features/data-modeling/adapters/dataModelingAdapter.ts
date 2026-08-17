@@ -249,6 +249,7 @@ export function sourceOverviewToModelingDatasource(item: SourceOverviewItem): Da
     sourceResourceId: reviewedProjectionTarget ? item.id : undefined,
     contextIndexStatus: item.context_index_status,
     parseStatus: item.parse_status,
+    lastSyncedAt: item.last_synced_at ?? item.updated_at ?? null,
   }
   if (item.modeling_status) {
     return {
@@ -291,7 +292,7 @@ export function sourceOverviewToModelingDatasource(item: SourceOverviewItem): Da
       ...base,
       modelingStatus: 'needs_projection',
       modelingMode: 'document_projection',
-      reason: 'Sampled document/key-value schema evidence is available; review a tabular projection before production semantic modeling.',
+      reason: `${nosqlProviderLabel(item)} needs projection review before production semantic modeling. Sampled document/key-value schema evidence is not enough for publish.`,
       evidenceSummary: localEvidenceSummary(item),
       canLoadProfile: true,
     }
@@ -359,6 +360,7 @@ function legacyDatasourceToModelingDatasource(item: Datasource): DataModelingDat
     provider: String(item.database_type ?? item.db_type ?? item.type ?? ''),
     canLoadProfile: true,
     projectedDatasetId: item.projected_dataset_id,
+    lastSyncedAt: item.updated_at ?? item.created_at ?? null,
   }
 }
 
@@ -479,6 +481,13 @@ function pendingSourceReason(item: SourceOverviewItem): string {
     return 'Database schema/profile is not ready yet. Refresh the profile before modeling.'
   }
   return 'Source processing is still running. Wait until processing finishes before modeling.'
+}
+
+function nosqlProviderLabel(item: SourceOverviewItem): string {
+  const provider = String(item.provider || item.resource_type || '').toLowerCase()
+  if (provider.includes('dynamo')) return 'DynamoDB'
+  if (provider.includes('mongo')) return 'MongoDB'
+  return 'NoSQL source'
 }
 
 function isProjectionSource(item: SourceOverviewItem): boolean {
