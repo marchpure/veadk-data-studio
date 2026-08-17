@@ -63,8 +63,9 @@ const statusTone: Record<string, string> = {
   running: 'border-sky-500/30 bg-sky-500/10 text-sky-200',
 }
 
-export default function DashboardWorkspacePage() {
-  const { assetId } = useParams<{ assetId?: string }>()
+export default function DashboardWorkspacePage({ embeddedAssetId, embedded = false }: { embeddedAssetId?: string; embedded?: boolean } = {}) {
+  const params = useParams<{ assetId?: string }>()
+  const assetId = embeddedAssetId ?? params.assetId
   const navigate = useNavigate()
   const location = useLocation()
   const [assets, setAssets] = useState<DashboardAsset[]>([])
@@ -101,7 +102,7 @@ export default function DashboardWorkspacePage() {
     try {
       const response = await DashboardService.listAssets()
       setAssets(response.items)
-      if (!assetId && response.items.length > 0) {
+      if (!embedded && !embeddedAssetId && !assetId && response.items.length > 0) {
         navigate(`/dashboard-assets/${response.items[0].id}`, { replace: true })
       }
     } catch (err) {
@@ -109,7 +110,7 @@ export default function DashboardWorkspacePage() {
     } finally {
       setLoadingAssets(false)
     }
-  }, [assetId, navigate])
+  }, [assetId, embedded, embeddedAssetId, navigate])
 
   const loadAudit = useCallback(async (id: string) => {
     try {
@@ -191,6 +192,12 @@ export default function DashboardWorkspacePage() {
       void loadDetail(assetId, null)
     }
   }, [assetId, loadDetail])
+
+  useEffect(() => {
+    if (embedded && !assetId && assets.length > 0 && !selectedAsset && !loadingDetail) {
+      void loadDetail(assets[0].id, null)
+    }
+  }, [assetId, assets, embedded, loadDetail, loadingDetail, selectedAsset])
 
   useEffect(() => {
     if (selectedAsset && selectedVersion && isStructuredDashboardManifest(selectedVersion.manifest) && filtersInitialized) {

@@ -1,6 +1,9 @@
 import { ApiService, type Datasource, type SourceOverviewItem, type SourceSkillCandidate, type SourceUnderstanding } from '../../../services/api'
 import type {
   AgentSuggestion,
+  ConsumptionEntry,
+  DataStudioAsset,
+  DataStudioAssetGate,
   DataModelingDatasource,
   DataModelingMode,
   DataModelingStatus,
@@ -36,6 +39,13 @@ const emptyExplore = {
   confirmedExamples: 0,
 }
 
+const defaultConsumptionEntries: ConsumptionEntry[] = [
+  { id: 'agent', label: 'Agent', before: 'Draft answers only', after: 'Waiting for publish' },
+  { id: 'dashboard', label: 'Dashboard', before: 'Preview binding', after: 'Waiting for publish' },
+  { id: 'mcp_api', label: 'MCP API', before: 'Draft not exposed', after: 'Waiting for publish' },
+  { id: 'share_link', label: 'Share link', before: 'Preview disabled', after: 'Waiting for publish' },
+]
+
 export interface DataModelingAdapter {
   listModels(): Promise<SemanticModel[]>
   getModel(modelId: string): Promise<SemanticModel>
@@ -55,27 +65,35 @@ export function normalizeModel(raw: any): SemanticModel {
   const dimensions = Array.isArray(raw?.dimensions) ? raw.dimensions : []
   const firstMetric = metrics[0]?.id ?? ''
   const firstDimension = dimensions[0]?.id ?? ''
-  return {
+  const status = raw?.status ?? 'Draft'
+  const publishedVersion = String(raw?.publishedVersion ?? 'v0')
+  const readiness = Number(raw?.readiness ?? 0)
+  const readinessLevel = raw?.readinessLevel ?? 'blocked'
+  const consumers = {
+    agents: Number(raw?.consumers?.agents ?? 0),
+    mcp: Number(raw?.consumers?.mcp ?? 0),
+    skills: Number(raw?.consumers?.skills ?? 0),
+    dashboards: Number(raw?.consumers?.dashboards ?? 0),
+    savedQueries: Number(raw?.consumers?.savedQueries ?? 0),
+  }
+  const readinessDetail = normalizeReadiness(raw?.readinessDetail)
+  const gate = normalizeGate(raw?.gate, readiness, readinessDetail.blockers)
+  const publishState = normalizePublishState(raw?.publishState ?? raw?.publish_state, status, gate.blockers.length)
+  const model: SemanticModel = {
     id: String(raw?.id ?? ''),
     name: String(raw?.name ?? 'Untitled Semantic Model'),
     domain: String(raw?.domain ?? 'Unassigned'),
     owner: String(raw?.owner ?? 'Data Team'),
     datasource: String(raw?.datasource ?? raw?.datasourceName ?? 'Unknown datasource'),
     datasourceId: String(raw?.datasourceId ?? ''),
-    status: raw?.status ?? 'Draft',
+    status,
     revision: Number(raw?.revision ?? 1),
     draftRevision: String(raw?.draftRevision ?? 'draft-1'),
-    publishedVersion: String(raw?.publishedVersion ?? 'v0'),
-    readiness: Number(raw?.readiness ?? 0),
-    readinessLevel: raw?.readinessLevel ?? 'blocked',
+    publishedVersion,
+    readiness,
+    readinessLevel,
     driftAlerts: Number(raw?.driftAlerts ?? 0),
-    consumers: {
-      agents: Number(raw?.consumers?.agents ?? 0),
-      mcp: Number(raw?.consumers?.mcp ?? 0),
-      skills: Number(raw?.consumers?.skills ?? 0),
-      dashboards: Number(raw?.consumers?.dashboards ?? 0),
-      savedQueries: Number(raw?.consumers?.savedQueries ?? 0),
-    },
+    consumers,
     updatedAt: String(raw?.updatedAt ?? ''),
     description: String(raw?.description ?? ''),
     entities: Array.isArray(raw?.entities) ? raw.entities : [],
@@ -107,7 +125,7 @@ export function normalizeModel(raw: any): SemanticModel {
     dimensions: dimensions.map(normalizeDimension),
     calculatedFields: Array.isArray(raw?.calculatedFields) ? raw.calculatedFields.map(normalizeCalculatedField) : [],
     suggestions: Array.isArray(raw?.suggestions) ? raw.suggestions.map(normalizeSuggestion) : [],
-    readinessDetail: normalizeReadiness(raw?.readinessDetail),
+    readinessDetail,
     explore: {
       ...emptyExplore,
       ...(raw?.explore ?? {}),
@@ -130,7 +148,24 @@ export function normalizeModel(raw: any): SemanticModel {
       lastResult: normalizeMcpResult(raw?.mcp?.lastResult),
     },
     validationLog: normalizeStringList(raw?.validationLog),
+    assetType: 'semantic_model',
+    publishState,
+    gate,
+    dataStudioAsset: normalizeDataStudioAsset(raw?.dataStudioAsset ?? raw?.data_studio_asset, {
+      id: String(raw?.id ?? ''),
+      name: String(raw?.name ?? 'Untitled Semantic Model'),
+      description: String(raw?.description ?? ''),
+      status,
+      publishState,
+      gate,
+      publishedVersion,
+      consumers,
+      datasource: String(raw?.datasource ?? raw?.datasourceName ?? 'Unknown datasource'),
+      validationLog: normalizeStringList(raw?.validationLog),
+    }),
+    consumptionEntries: normalizeConsumptionEntries(raw?.consumptionEntries ?? raw?.consumption_entries),
   }
+  return model
 }
 
 function modelPatch(model: SemanticModel, patch: Partial<SemanticModel>) {
@@ -766,6 +801,79 @@ function normalizeReadiness(readiness: any) {
     blockers: normalizeStringList(readiness.blockers),
     warnings: normalizeStringList(readiness.warnings),
   }
+}
+
+function normalizeGate(gate: any, readiness: number, blockers: string[]): DataStudioAssetGate {
+  const total = Number(gate?.total ?? 4)
+  const passed = Number(gate?.passed ?? Math.max(0, Math.min(total, Math.round((readiness / 100) * total))))
+  const normalizedBlockers = normalizeStringList(gate?.blockers).length ? normalizeStringList(gate.blockers) : blockers
+  return {
+    score: Number(gate?.score ?? readiness),
+    passed,
+    total,
+    blockers: normalizedBlockers,
+  }
+}
+
+function normalizePublishState(value: unknown, status: unknown, blockerCount: number) {
+  const publishState = String(value ?? '').toLowerCase()
+  if (['draft', 'validating', 'blocked', 'published', 'archived'].includes(publishState)) {
+    return publishState as SemanticModel['publishState']
+  }
+  const modelStatus = String(status ?? '').toLowerCase()
+  if (modelStatus === 'published') return 'published'
+  if (modelStatus === 'validating') return 'validating'
+  if (blockerCount > 0) return 'blocked'
+  return 'draft'
+}
+
+function normalizeDataStudioAsset(raw: any, fallback: {
+  id: string
+  name: string
+  description: string
+  status: SemanticModel['status']
+  publishState: SemanticModel['publishState']
+  gate: DataStudioAssetGate
+  publishedVersion: string
+  consumers: SemanticModel['consumers']
+  datasource: string
+  validationLog: string[]
+}): DataStudioAsset {
+  return {
+    asset_type: raw?.asset_type === 'dashboard' ? 'dashboard' : 'semantic_model',
+    asset_id: String(raw?.asset_id ?? fallback.id),
+    name: String(raw?.name ?? fallback.name),
+    description: String(raw?.description ?? fallback.description),
+    status: raw?.status ?? fallback.status,
+    publish_state: normalizePublishState(raw?.publish_state, fallback.status, fallback.gate.blockers.length),
+    gate: normalizeGate(raw?.gate, fallback.gate.score, fallback.gate.blockers),
+    version: String(raw?.version ?? fallback.publishedVersion),
+    consumers: {
+      agents: Number(raw?.consumers?.agents ?? fallback.consumers.agents),
+      mcp: Number(raw?.consumers?.mcp ?? fallback.consumers.mcp),
+      skills: Number(raw?.consumers?.skills ?? fallback.consumers.skills),
+      dashboards: Number(raw?.consumers?.dashboards ?? fallback.consumers.dashboards),
+      savedQueries: Number(raw?.consumers?.savedQueries ?? fallback.consumers.savedQueries),
+    },
+    capabilities: normalizeStringList(raw?.capabilities).length ? normalizeStringList(raw.capabilities) : ['semantic query', 'dashboard binding', 'policy evidence'],
+    freshness: String(raw?.freshness ?? 'Profile refreshed 2h ago'),
+    provenance: normalizeStringList(raw?.provenance).length ? normalizeStringList(raw.provenance) : [fallback.datasource, ...fallback.validationLog.slice(0, 2)],
+    usage_policy: normalizeStringList(raw?.usage_policy).length ? normalizeStringList(raw.usage_policy) : ['Certified metrics only', 'PII excluded from semantic consumers'],
+    sample_evidence: normalizeStringList(raw?.sample_evidence).length ? normalizeStringList(raw.sample_evidence) : fallback.validationLog.slice(0, 3),
+  }
+}
+
+function normalizeConsumptionEntries(value: unknown): ConsumptionEntry[] {
+  if (!Array.isArray(value)) return defaultConsumptionEntries
+  const entries = value
+    .map(item => ({
+      id: item?.id,
+      label: displayValue(item?.label),
+      before: displayValue(item?.before),
+      after: displayValue(item?.after),
+    }))
+    .filter(item => ['agent', 'dashboard', 'mcp_api', 'share_link'].includes(String(item.id)))
+  return entries.length ? entries as ConsumptionEntry[] : defaultConsumptionEntries
 }
 
 function normalizeMcpResult(result: any) {
