@@ -5,19 +5,20 @@ import hashlib
 import json
 import os
 from typing import Any
+from uuid import UUID
 
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.auth.tenant_context import get_tenant_id
+from server.auth.tenant_context import get_tenant_id, tenant_id_context
 from server.db.session import AsyncSessionFactory
 from server.services.settings import SettingsService
 
 _cached_encryption_keys: dict[str, bytes] = {}
 
 
-async def get_app_encryption_key(session: AsyncSession | None = None) -> bytes:
+async def get_app_encryption_key(session: AsyncSession | None = None, tenant_id: UUID | None = None) -> bytes:
     """
     Get the application encryption key, using cached value if available.
 
@@ -45,17 +46,18 @@ async def get_app_encryption_key(session: AsyncSession | None = None) -> bytes:
         _cached_encryption_keys[cache_key] = hashlib.sha256(app_secret.encode()).digest()
         return _cached_encryption_keys[cache_key]
 
-    tenant_id = get_tenant_id()
-    cache_key = f"tenant:{tenant_id}" if tenant_id else "tenant:unset"
+    effective_tenant_id = tenant_id or get_tenant_id()
+    cache_key = f"tenant:{effective_tenant_id}" if effective_tenant_id else "tenant:unset"
     if cache_key in _cached_encryption_keys:
         return _cached_encryption_keys[cache_key]
 
     # Local mode: use database setting scoped by the active tenant context.
-    if session:
-        key = await SettingsService.get_or_create_encryption_key(session)
-        _cached_encryption_keys[cache_key] = key
-        return key
-    else:
+    with tenant_id_context(effective_tenant_id):
+        if session:
+            key = await SettingsService.get_or_create_encryption_key(session)
+            _cached_encryption_keys[cache_key] = key
+            return key
+
         async with AsyncSessionFactory() as new_session:
             key = await SettingsService.get_or_create_encryption_key(new_session)
             _cached_encryption_keys[cache_key] = key
@@ -78,7 +80,9 @@ class CryptoService:
     """Unified encryption service for all configuration data across the application."""
 
     @staticmethod
-    async def encrypt_config(config_dict: dict[str, Any], session=None) -> str:
+    async def encrypt_config(
+        config_dict: dict[str, Any], session: AsyncSession | None = None, tenant_id: UUID | None = None
+    ) -> str:
         """
         Encrypt a configuration dictionary using AES-GCM.
 
@@ -89,7 +93,7 @@ class CryptoService:
         Returns:
             Base64-encoded encrypted data with embedded nonce
         """
-        key = await get_app_encryption_key(session)
+        key = await get_app_encryption_key(session, tenant_id)
         aesgcm = AESGCM(key)
         nonce = os.urandom(12)
         plaintext = json.dumps(config_dict).encode("utf-8")
@@ -97,7 +101,9 @@ class CryptoService:
         return base64.b64encode(nonce + ciphertext).decode("utf-8")
 
     @staticmethod
-    async def decrypt_config(b64_blob: str, session=None) -> dict[str, Any]:
+    async def decrypt_config(
+        b64_blob: str, session: AsyncSession | None = None, tenant_id: UUID | None = None
+    ) -> dict[str, Any]:
         """
         Decrypt a base64-encoded configuration blob using AES-GCM.
 
@@ -110,7 +116,7 @@ class CryptoService:
         """
         data = base64.b64decode(b64_blob)
         nonce, ciphertext = data[:12], data[12:]
-        key = await get_app_encryption_key(session)
+        key = await get_app_encryption_key(session, tenant_id)
         aesgcm = AESGCM(key)
         plaintext = aesgcm.decrypt(nonce, ciphertext, None)
         return json.loads(plaintext.decode("utf-8"))

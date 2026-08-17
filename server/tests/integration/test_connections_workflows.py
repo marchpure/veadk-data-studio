@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.connections import Connection
+from server.services.crypto_service import clear_encryption_key_cache
 
 
 @pytest.mark.workflow
@@ -231,6 +232,7 @@ class TestConnectionEncryptionWorkflow:
             is_base64 = False
         assert is_base64
 
+        clear_encryption_key_cache()
         decrypted = await db_connection.get_decrypted_connection_obj(test_session)
         assert decrypted["password"] == "SuperSecret123!@#"
         assert decrypted["username"] == "admin_user"
