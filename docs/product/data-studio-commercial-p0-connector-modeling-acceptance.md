@@ -9,7 +9,7 @@
 - ORIGINAL_BASE_SHA: `290679967d4e823077861fbd9875c860d698b4b9` (`2906799`)
 - PARALLEL_BASE_SHA: `13ed502b79d0e5f3b936af54316b2ab571e735a7` (`13ed502`)
 - FINAL_SYNC_STAGING_SHA: `13ed502b79d0e5f3b936af54316b2ab571e735a7`
-- D_HEAD: `pending-final-commit`
+- D_HEAD: `reported-after-final-push`
 - Current acceptance baseline: `PARALLEL_BASE_SHA`; `ORIGINAL_BASE_SHA` is retained as the historical source of the Session D worktree.
 - Scope owner: Connector and Modeling Commercial Acceptance
 - Scope limit: fixture, contract tests, E2E harness, source matrix evidence, and documentation only. This branch does not change production connector/modeling code.

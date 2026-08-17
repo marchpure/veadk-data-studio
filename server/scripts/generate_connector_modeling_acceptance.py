@@ -19,7 +19,7 @@ ORIGINAL_BASE_SHORT_SHA = "2906799"
 PARALLEL_BASE_SHA = "13ed502b79d0e5f3b936af54316b2ab571e735a7"
 PARALLEL_BASE_SHORT_SHA = "13ed502"
 FINAL_SYNC_STAGING_SHA = "13ed502b79d0e5f3b936af54316b2ab571e735a7"
-D_HEAD = "pending-final-commit"
+D_HEAD = "reported-after-final-push"
 WORKTREE = "/Users/bytedance/worktrees/byaan-connector-modeling-acceptance-p0"
 BRANCH = "acceptance/connector-modeling-commercial-p0"
 
