@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowDown,
@@ -66,6 +66,7 @@ const statusTone: Record<string, string> = {
 export default function DashboardWorkspacePage() {
   const { assetId } = useParams<{ assetId?: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const [assets, setAssets] = useState<DashboardAsset[]>([])
   const [selectedAsset, setSelectedAsset] = useState<DashboardAssetDetail | null>(null)
   const [selectedVersion, setSelectedVersion] = useState<DashboardVersion | null>(null)
@@ -87,6 +88,12 @@ export default function DashboardWorkspacePage() {
   const [semanticDiff, setSemanticDiff] = useState<DashboardSemanticDiff | null>(null)
   const [auditEvents, setAuditEvents] = useState<DashboardAuditEvent[]>([])
   const [shareFolderId, setShareFolderId] = useState('')
+  const [filtersInitialized, setFiltersInitialized] = useState(false)
+  const manifest = isStructuredDashboardManifest(selectedVersion?.manifest) ? selectedVersion.manifest : null
+  const filterKey = useMemo(() => {
+    if (!manifest) return ''
+    return manifest.filters.map(filter => `${filter.field}:${filter.filter_type}`).join('|')
+  }, [manifest])
 
   const loadAssets = useCallback(async () => {
     setLoadingAssets(true)
@@ -180,17 +187,62 @@ export default function DashboardWorkspacePage() {
       setVersionNum(null)
       setSemanticDiff(null)
       setAuditEvents([])
+      setFiltersInitialized(false)
       void loadDetail(assetId, null)
     }
   }, [assetId, loadDetail])
 
   useEffect(() => {
-    if (selectedAsset && selectedVersion && isStructuredDashboardManifest(selectedVersion.manifest)) {
+    if (selectedAsset && selectedVersion && isStructuredDashboardManifest(selectedVersion.manifest) && filtersInitialized) {
       void executeRun(selectedAsset, selectedVersion, filters)
     } else {
       setRun(null)
     }
-  }, [selectedAsset, selectedVersion, executeRun, filters])
+  }, [selectedAsset, selectedVersion, executeRun, filters, filtersInitialized])
+
+  useEffect(() => {
+    if (!manifest || !selectedVersion || selectedVersion.asset_id !== assetId) {
+      setFilters({})
+      setFiltersInitialized(false)
+      return
+    }
+    const params = new URLSearchParams(location.search)
+    const nextFilters: Record<string, unknown> = {}
+    for (const filter of manifest.filters) {
+      const value = params.get(`filter.${filter.field}`)
+      if (value !== null && value !== '') {
+        nextFilters[filter.field] = coerceFilterValue(filter, value)
+      }
+    }
+    setFilters(previous => shallowFiltersEqual(previous, nextFilters) ? previous : nextFilters)
+    setFiltersInitialized(true)
+  }, [assetId, filterKey, location.search, manifest, selectedVersion])
+
+  useEffect(() => {
+    if (!manifest || !filtersInitialized || !selectedVersion || selectedVersion.asset_id !== assetId) return
+    const params = new URLSearchParams(location.search)
+    let changed = false
+    for (const key of Array.from(params.keys())) {
+      if (key.startsWith('filter.')) {
+        params.delete(key)
+        changed = true
+      }
+    }
+    for (const filter of manifest.filters) {
+      const value = filters[filter.field]
+      if (value !== undefined && value !== null && String(value) !== '') {
+        params.set(`filter.${filter.field}`, String(value))
+        changed = true
+      }
+    }
+    if (!changed) return
+    const nextSearch = params.toString()
+    const nextLocation = `${location.pathname}${nextSearch ? `?${nextSearch}` : ''}${location.hash}`
+    const currentLocation = `${location.pathname}${location.search}${location.hash}`
+    if (nextLocation !== currentLocation) {
+      navigate(nextLocation, { replace: true })
+    }
+  }, [assetId, filters, filtersInitialized, location.hash, location.pathname, location.search, manifest, navigate, selectedVersion])
 
   const filteredAssets = useMemo(() => {
     const lower = query.trim().toLowerCase()
@@ -198,7 +250,6 @@ export default function DashboardWorkspacePage() {
     return assets.filter(asset => [asset.name, asset.slug, asset.description].some(value => value.toLowerCase().includes(lower)))
   }, [assets, query])
 
-  const manifest = isStructuredDashboardManifest(selectedVersion?.manifest) ? selectedVersion.manifest : null
   const isLegacyAsset = selectedAsset?.lifecycle === 'legacy_unstructured' || selectedVersion?.migration_state === 'legacy_unstructured'
   const blockers = selectedVersion?.validation_result.blockers ?? manifest?.migration.blockers ?? []
   const semanticWarnings = semanticDiff?.warnings ?? []
@@ -629,6 +680,7 @@ export default function DashboardWorkspacePage() {
                       <TabButton active={tab === 'lineage'} onClick={() => setTab('lineage')} icon={<GitBranch className="h-4 w-4" />} label="Lineage" />
                     </div>
                   </div>
+                  <FilterPreflightPanel manifest={manifest} filters={filters} run={run} />
 
                   <div className="p-3">
                     {tab === 'dashboard' && <DashboardCanvas manifest={manifest} run={run} loadingRun={loadingRun} />}
@@ -768,6 +820,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function shallowFiltersEqual(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  if (leftKeys.length !== rightKeys.length) return false
+  return leftKeys.every(key => left[key] === right[key])
+}
+
 function ConflictBanner({
   conflict,
   loading,
@@ -867,6 +926,40 @@ function ManifestEditor({
     onSelect({ kind: 'filter', id })
   }
 
+  const addTile = () => {
+    const dataView = manifest.data_views[0]
+    const section = manifest.layout.sections[0]
+    if (!dataView || !section) return
+    const outputFields = dataView.output_schema?.map(field => field.name) ?? []
+    const firstField = outputFields[0]
+    const secondField = outputFields[1]
+    const id = uniqueManifestId('tile', manifest.tiles.map(tile => tile.id))
+    const tile: DashboardTile = {
+      id,
+      title: 'New Tile',
+      tile_type: 'kpi',
+      business_question: 'What should this tile answer?',
+      data_view_id: dataView.id,
+      encoding: {
+        ...(firstField ? { value: firstField } : {}),
+        ...(secondField ? { label: secondField } : {}),
+      },
+      accessible_fallback: {
+        summary: 'New Dashboard tile',
+        table_fields: outputFields.slice(0, 4),
+      },
+    }
+    onPatch(
+      [
+        { op: 'add', path: '/tiles/-', value: tile },
+        { op: 'replace', path: '/layout/sections/0/tile_ids', value: [...section.tile_ids, id] },
+      ],
+      'Add Dashboard tile from workspace',
+      'Tile added',
+    )
+    onSelect({ kind: 'tile', id })
+  }
+
   return (
     <section className="rounded-md border border-[#293037] bg-[#14181c]" aria-label="Manifest editor">
       <div className="flex flex-col gap-3 border-b border-[#293037] p-3 md:flex-row md:items-center md:justify-between">
@@ -887,6 +980,7 @@ function ManifestEditor({
           disabled={disabled || loading}
           onSelect={onSelect}
           onMoveTile={moveTile}
+          onAddTile={addTile}
           onAddFilter={addFilter}
         />
         <div className="min-w-0 border-t border-[#293037] p-3 xl:border-l xl:border-t-0">
@@ -900,6 +994,7 @@ function ManifestEditor({
           loading={loading}
           disabled={disabled}
           onPatch={onPatch}
+          onSelect={onSelect}
         />
       </div>
     </section>
@@ -912,6 +1007,7 @@ function ManifestOutline({
   disabled,
   onSelect,
   onMoveTile,
+  onAddTile,
   onAddFilter,
 }: {
   manifest: DashboardManifest
@@ -919,6 +1015,7 @@ function ManifestOutline({
   disabled: boolean
   onSelect: (selection: EditorSelection) => void
   onMoveTile: (tileId: string, direction: -1 | 1) => void
+  onAddTile: () => void
   onAddFilter: () => void
 }) {
   const orderedTileIds = manifest.layout.sections.flatMap(section => section.tile_ids)
@@ -927,10 +1024,16 @@ function ManifestOutline({
     <aside className="min-w-0 p-3" aria-label="Manifest outline">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-xs font-medium uppercase text-[#818c95]">Outline</h3>
-        <Button variant="secondary" size="sm" onClick={onAddFilter} disabled={disabled}>
-          <Plus className="h-4 w-4" />
-          Filter
-        </Button>
+        <div className="flex gap-1">
+          <Button variant="secondary" size="sm" onClick={onAddTile} disabled={disabled || manifest.data_views.length === 0 || manifest.layout.sections.length === 0}>
+            <Plus className="h-4 w-4" />
+            Tile
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onAddFilter} disabled={disabled}>
+            <Plus className="h-4 w-4" />
+            Filter
+          </Button>
+        </div>
       </div>
       <div className="mt-3 space-y-4">
         <div>
@@ -1004,6 +1107,7 @@ function ManifestInspector({
   loading,
   disabled,
   onPatch,
+  onSelect,
 }: {
   manifest: DashboardManifest
   selection: EditorSelection | null
@@ -1012,6 +1116,7 @@ function ManifestInspector({
   loading: boolean
   disabled: boolean
   onPatch: (patch: JsonPatchOperation[], summary: string, message: string) => void
+  onSelect: (selection: EditorSelection) => void
 }) {
   return (
     <aside className="min-w-0 border-t border-[#293037] p-3 xl:border-l xl:border-t-0" aria-label="Manifest inspector">
@@ -1024,6 +1129,7 @@ function ManifestInspector({
           loading={loading}
           disabled={disabled}
           onPatch={onPatch}
+          onSelect={onSelect}
         />
       )}
       {filter && (
@@ -1045,12 +1151,14 @@ function TileInspector({
   loading,
   disabled,
   onPatch,
+  onSelect,
 }: {
   manifest: DashboardManifest
   tile: DashboardTile
   loading: boolean
   disabled: boolean
   onPatch: (patch: JsonPatchOperation[], summary: string, message: string) => void
+  onSelect: (selection: EditorSelection) => void
 }) {
   const [title, setTitle] = useState(tile.title)
   const [question, setQuestion] = useState(tile.business_question)
@@ -1084,6 +1192,23 @@ function TileInspector({
     ]
     onPatch(patch, `Edit Dashboard tile ${tile.id} from workspace`, 'Tile inspector saved')
   }
+  const remove = () => {
+    if (tileIndex < 0 || manifest.tiles.length <= 1) return
+    const nextSections = manifest.layout.sections.map(section => ({
+      ...section,
+      tile_ids: section.tile_ids.filter(tileId => tileId !== tile.id),
+    }))
+    const nextTile = manifest.tiles.find(item => item.id !== tile.id)
+    onPatch(
+      [
+        { op: 'replace', path: '/layout/sections', value: nextSections },
+        { op: 'remove', path: `/tiles/${tileIndex}` },
+      ],
+      `Remove Dashboard tile ${tile.id} from workspace`,
+      'Tile removed',
+    )
+    if (nextTile) onSelect({ kind: 'tile', id: nextTile.id })
+  }
 
   return (
     <div className="mt-3 space-y-3">
@@ -1109,10 +1234,16 @@ function TileInspector({
         />
         {encodingError && <div className="mt-1 text-xs text-red-100">{encodingError}</div>}
       </InspectorField>
-      <Button variant="secondary" onClick={save} disabled={disabled || loading || !title.trim() || !question.trim()}>
-        <Save className="h-4 w-4" />
-        Save Tile
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="secondary" onClick={save} disabled={disabled || loading || !title.trim() || !question.trim()}>
+          <Save className="h-4 w-4" />
+          Save Tile
+        </Button>
+        <Button variant="secondary" onClick={remove} disabled={disabled || loading || manifest.tiles.length <= 1}>
+          <Trash2 className="h-4 w-4" />
+          Remove Tile
+        </Button>
+      </div>
     </div>
   )
 }
@@ -1258,6 +1389,65 @@ function FilterBar({ filters, values, onChange }: { filters: DashboardFilter[]; 
           )}
         </label>
       ))}
+    </div>
+  )
+}
+
+function FilterPreflightPanel({
+  manifest,
+  filters,
+  run,
+}: {
+  manifest: DashboardManifest
+  filters: Record<string, unknown>
+  run: DashboardRun | null
+}) {
+  const selectedViewIds = new Set(manifest.data_views.map(view => view.id))
+  const activeFilters = manifest.filters.map(filter => {
+    const hasValue = filters[filter.field] !== undefined && filters[filter.field] !== null && String(filters[filter.field]) !== ''
+    return {
+      filter,
+      value: hasValue ? filters[filter.field] : filter.default_value,
+      source: hasValue ? 'selected' : filter.default_value !== undefined && filter.default_value !== null && String(filter.default_value) !== '' ? 'default' : 'empty',
+      affectedViews: filter.affected_data_view_ids?.filter(id => selectedViewIds.has(id)) ?? manifest.data_views.map(view => view.id),
+    }
+  })
+  const blockingFilters = activeFilters.filter(item => item.filter.required && (item.value === undefined || item.value === null || String(item.value) === ''))
+  return (
+    <div className="border-b border-[#293037] bg-[#101316] px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4 text-brand-orange" />
+          <h2 className="text-sm font-semibold text-[#f3f5f5]">Filter preflight</h2>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          <Badge tone={blockingFilters.length > 0 ? 'warning' : 'ready'}>{blockingFilters.length > 0 ? `${blockingFilters.length} missing` : 'ready'}</Badge>
+          <Badge>{run?.filter_digest ? shortHash(run.filter_digest) : 'not run'}</Badge>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {activeFilters.map(({ filter, value, source, affectedViews }) => (
+          <div key={filter.id} className="min-w-0 rounded border border-[#303940] bg-[#151a1f] p-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-[#f3f5f5]">{filter.label}</div>
+                <div className="mt-1 truncate text-xs text-[#818c95]">{filter.field} / {filter.operators.join(', ')}</div>
+              </div>
+              <Badge tone={source === 'empty' && filter.required ? 'warning' : source === 'selected' ? 'ready' : 'neutral'}>{source}</Badge>
+            </div>
+            <div className="mt-2 break-words text-sm text-[#d6dde2]">{value === undefined || value === null || String(value) === '' ? 'No value' : formatValue(value)}</div>
+            <div className="mt-2 flex flex-wrap gap-1">
+              <Badge>{filter.filter_type}</Badge>
+              {filter.required && <Badge tone="warning">required</Badge>}
+              {filter.domain?.length ? <Badge>{filter.domain.length} values</Badge> : null}
+              <Badge>{affectedViews.length} views</Badge>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#818c95]">
+        <span>Normalized filters: {formatValue(run?.normalized_filters ?? filters)}</span>
+      </div>
     </div>
   )
 }
@@ -1574,7 +1764,15 @@ function AuditTrail({ events }: { events: DashboardAuditEvent[] }) {
               <div className="truncate text-sm text-[#d6dde2]">{event.action}</div>
               <StatusPill status={event.outcome} />
             </div>
-            <div className="mt-1 truncate text-xs text-[#818c95]">{event.created_at ? formatDate(event.created_at) : 'No timestamp'}</div>
+            <div className="mt-2 flex flex-wrap gap-1">
+              <Badge>{event.actor_type || 'actor'}:{shortId(event.actor_id)}</Badge>
+              {event.correlation_id && <Badge>{shortId(event.correlation_id)}</Badge>}
+              {event.version_id && <Badge>v {shortId(event.version_id)}</Badge>}
+            </div>
+            <div className="mt-2 truncate text-xs text-[#818c95]">
+              {event.created_at ? formatDate(event.created_at) : 'No timestamp'}
+              {auditDetailSummary(event.details) ? ` · ${auditDetailSummary(event.details)}` : ''}
+            </div>
           </div>
         ))}
       </div>
@@ -1825,6 +2023,16 @@ function shortId(value?: string | null) {
 
 function shortHash(value: string) {
   return value.replace('sha256:', '').slice(0, 10)
+}
+
+function auditDetailSummary(details: Record<string, unknown>): string {
+  const changeSummary = stringValue(details.change_summary)
+  if (changeSummary) return changeSummary
+  const reason = stringValue(details.reason)
+  if (reason) return reason
+  const status = stringValue(details.status)
+  if (status) return status
+  return ''
 }
 
 function stringValue(value: unknown): string | null {
