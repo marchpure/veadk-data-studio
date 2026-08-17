@@ -40,6 +40,7 @@ class AssetDescriptor(BaseModel):
     version: str | None = None
     consumers: list[str] = Field(default_factory=list)
     capabilities: dict[str, Any]
+    query_url: str | None = None
     freshness: dict[str, Any]
     provenance: dict[str, Any]
     usage_policy: dict[str, Any] = Field(default_factory=dict)

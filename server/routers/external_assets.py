@@ -52,8 +52,11 @@ class ExternalAssetQueryRequest(BaseModel):
 async def list_external_assets(
     types: str = Query(default="dashboard,semantic_model"),
     query: str = "",
+    q: str | None = None,
     limit: int = Query(default=20, ge=1),
     cursor: str | None = None,
+    page: int | None = Query(default=None, ge=1),
+    page_size: int | None = Query(default=None, ge=1),
     principal: MCPKeyContext = Depends(require_mcp_key),
     session: AsyncSession = Depends(get_async_session),
 ):
@@ -64,13 +67,14 @@ async def list_external_assets(
         except ValueError:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid cursor")
     else:
-        start = 0
-    page_limit = min(limit, 100)
+        effective_page_size = page_size or limit
+        start = ((page - 1) * effective_page_size) if page else 0
+    page_limit = min(page_size or limit, 100)
     items = await asset_service.search_assets(
         session=session,
         tenant_id=principal.tenant_id,
         notebook_id=None,
-        query=query,
+        query=q if q is not None else query,
         asset_types=requested_types,
         publish_states=["published"],
         limit=10_000,

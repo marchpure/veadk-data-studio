@@ -81,6 +81,37 @@ async def test_external_assets_return_only_published_assets(test_client, test_se
     assert payload["publish_state"] == "published"
     assert payload["gate"]["blockers"] == []
     assert payload["version"] == "v1"
+    assert payload["query_url"] == f"/api/external/assets/dashboard/{published.id}/query"
+    assert "mcp_url" not in payload
+
+
+async def test_external_assets_support_q_and_page_aliases(test_client, test_session) -> None:
+    tenant = await current_tenant(test_session)
+    api_key = await _seed_mcp_key(test_session, tenant)
+    await seed_dashboard_asset(test_session, tenant, slug="alpha-revenue-dashboard", publish=True)
+    second = await seed_dashboard_asset(test_session, tenant, slug="beta-revenue-dashboard", publish=True)
+    await seed_dashboard_asset(test_session, tenant, slug="gamma-cost-dashboard", publish=True)
+
+    filtered = await test_client.get(
+        "/api/external/assets?types=dashboard&q=beta&page=1&page_size=1",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    first_page = await test_client.get(
+        "/api/external/assets?types=dashboard&page=1&page_size=1",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    second_page = await test_client.get(
+        f"/api/external/assets?types=dashboard&cursor={first_page.json()['data']['next_cursor']}&page_size=1",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+
+    assert filtered.status_code == 200
+    assert filtered.json()["data"]["total"] == 1
+    assert filtered.json()["data"]["items"][0]["asset_id"] == str(second.id)
+    assert first_page.status_code == 200
+    assert first_page.json()["data"]["next_cursor"] == "1"
+    assert second_page.status_code == 200
+    assert len(second_page.json()["data"]["items"]) == 1
 
 
 async def test_external_assets_cross_tenant_returns_404(test_client, test_session) -> None:

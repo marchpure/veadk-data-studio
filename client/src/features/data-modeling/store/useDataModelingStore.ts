@@ -18,6 +18,8 @@ import type {
   WorkspaceMode,
 } from '../types'
 
+const useMockKnowledgeCenter = import.meta.env?.VITE_KNOWLEDGE_CENTER_MOCK === 'true'
+
 interface DataModelingStore extends DataModelingWorkspaceData {
   homeMode: HomeViewMode
   homeLoading: boolean
@@ -755,38 +757,58 @@ export const useDataModelingStore = create<DataModelingStore>()(
         const model = currentModel(get())
         if (!model) return
         set({ publishState: 'validating', homeError: null })
-        const gate = await knowledgeCenterMockAdapter.evaluateGate(model)
-        set(state => {
-          const publishState = gate.blockers.length ? 'blocked' as const : 'draft' as const
-          return {
-            gate,
-            publishState,
-            ...updateModel(state, current => ({
-              ...current,
-              gate: {
-                score: gate.score,
-                passed: gate.passed,
-                total: gate.total,
-                blockers: gate.blockers,
-              },
+        if (useMockKnowledgeCenter) {
+          const gate = await knowledgeCenterMockAdapter.evaluateGate(model)
+          set(state => {
+            const publishState = gate.blockers.length ? 'blocked' as const : 'draft' as const
+            return {
+              gate,
               publishState,
-              dataStudioAsset: {
-                ...current.dataStudioAsset,
+              ...updateModel(state, current => ({
+                ...current,
                 gate: {
                   score: gate.score,
                   passed: gate.passed,
                   total: gate.total,
                   blockers: gate.blockers,
                 },
-                publish_state: publishState,
-              },
-              validationLog: [
-                `Knowledge gate evaluated: ${gate.passed}/${gate.total} checks passed.`,
-                ...current.validationLog,
-              ],
-            })),
-          }
-        })
+                publishState,
+                dataStudioAsset: {
+                  ...current.dataStudioAsset,
+                  gate: {
+                    score: gate.score,
+                    passed: gate.passed,
+                    total: gate.total,
+                    blockers: gate.blockers,
+                  },
+                  publish_state: publishState,
+                },
+                validationLog: [
+                  `Mock knowledge gate evaluated: ${gate.passed}/${gate.total} checks passed.`,
+                  ...current.validationLog,
+                ],
+              })),
+            }
+          })
+          return
+        }
+        try {
+          await flushModelPatches()
+          const validated = await dataModelingAdapter.validateModel(model)
+          const gate = gateStateFromModel(validated)
+          set(state => ({
+            gate: { ...gate, evaluated: true },
+            publishState: validated.publishState,
+            homeError: null,
+            models: mergeModels(state.models, [validated]),
+            visibleModels: mergeModels(state.visibleModels, [validated]),
+          }))
+        } catch (error) {
+          set({
+            publishState: model.publishState,
+            homeError: error instanceof Error ? error.message : 'Knowledge gate evaluation failed',
+          })
+        }
       },
 
       async publishKnowledgeAsset() {
@@ -801,32 +823,51 @@ export const useDataModelingStore = create<DataModelingStore>()(
           })
           return
         }
-        try {
-          const published = await knowledgeCenterMockAdapter.publishAsset(model)
-          set(current => ({
-            publishState: 'published',
-            homeError: null,
-            ...updateModel(current, item => ({
-              ...item,
-              status: 'Published',
+        if (useMockKnowledgeCenter) {
+          try {
+            const published = await knowledgeCenterMockAdapter.publishAsset(model)
+            set(current => ({
               publishState: 'published',
-              publishedVersion: published.publishedVersion,
-              consumers: published.consumers,
-              review: { ...item.review, publishedAt: published.publishedAt, reviewed: true, opened: true },
-              mcp: { ...item.mcp, exposedVersion: published.publishedVersion },
-              consumptionEntries: published.entries,
-              dataStudioAsset: {
-                ...item.dataStudioAsset,
+              homeError: null,
+              ...updateModel(current, item => ({
+                ...item,
                 status: 'Published',
-                publish_state: 'published',
-                version: published.publishedVersion,
+                publishState: 'published',
+                publishedVersion: published.publishedVersion,
                 consumers: published.consumers,
-              },
-              validationLog: [
-                `Published ${published.publishedVersion} to Agent, Dashboard, MCP API, and share link consumers.`,
-                ...item.validationLog,
-              ],
-            })),
+                review: { ...item.review, publishedAt: published.publishedAt, reviewed: true, opened: true },
+                mcp: { ...item.mcp, exposedVersion: published.publishedVersion },
+                consumptionEntries: published.entries,
+                dataStudioAsset: {
+                  ...item.dataStudioAsset,
+                  status: 'Published',
+                  publish_state: 'published',
+                  version: published.publishedVersion,
+                  consumers: published.consumers,
+                },
+                validationLog: [
+                  `Mock-published ${published.publishedVersion} to local Knowledge Center consumers.`,
+                  ...item.validationLog,
+                ],
+              })),
+            }))
+          } catch (error) {
+            set({ homeError: error instanceof Error ? error.message : 'Publish failed' })
+          }
+          return
+        }
+        try {
+          await flushModelPatches()
+          const latest = await dataModelingAdapter.getModel(model.id)
+          const reviewSaved = await dataModelingAdapter.patchModel(latest, { review: model.review })
+          const published = await dataModelingAdapter.publishModel(reviewSaved)
+          const gate = gateStateFromModel(published)
+          set(state => ({
+            gate: { ...gate, evaluated: true },
+            publishState: published.publishState,
+            homeError: null,
+            models: mergeModels(state.models, [published]),
+            visibleModels: mergeModels(state.visibleModels, [published]),
           }))
         } catch (error) {
           set({ homeError: error instanceof Error ? error.message : 'Publish failed' })
@@ -840,7 +881,10 @@ export const useDataModelingStore = create<DataModelingStore>()(
           const latest = await dataModelingAdapter.getModel(model.id)
           const reviewSaved = await dataModelingAdapter.patchModel(latest, { review: model.review })
           const published = await dataModelingAdapter.publishModel(reviewSaved)
+          const gate = gateStateFromModel(published)
           set(state => ({
+            gate: { ...gate, evaluated: true },
+            publishState: published.publishState,
             models: mergeModels(state.models, [published]),
             visibleModels: mergeModels(state.visibleModels, [published]),
           }))

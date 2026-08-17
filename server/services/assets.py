@@ -19,6 +19,8 @@ from server.models.source_snapshots import SourceSnapshot
 
 
 class AssetService:
+    EXTERNAL_QUERY_TYPES = {"dashboard", "semantic_model"}
+
     async def search_assets(
         self,
         *,
@@ -390,6 +392,7 @@ class AssetService:
             "version": model.published_version if model.published_version != "v0" else None,
             "consumers": self._semantic_model_consumers(model),
             "capabilities": capabilities,
+            "query_url": self._external_query_url("semantic_model", str(model.id)) if publish_state == "published" else None,
             "freshness": {
                 "status": "current" if model.drift_alerts == 0 else "drift_detected",
                 "drift_alerts": model.drift_alerts,
@@ -438,6 +441,7 @@ class AssetService:
             "version": f"v{version.version_num}" if version else None,
             "consumers": self._dashboard_consumers(asset),
             "capabilities": capabilities,
+            "query_url": self._external_query_url("dashboard", str(asset.id)) if can_consume else None,
             "freshness": self._dashboard_freshness(asset),
             "provenance": self._dashboard_provenance(asset, version, manifest),
             "usage_policy": usage_policy,
@@ -465,6 +469,7 @@ class AssetService:
                 "locator_types": self._locator_types(resource.resource_type),
                 "provider": knowledge.provider,
             },
+            "query_url": None,
             "freshness": {
                 "status": self._freshness_status(resource, snapshot),
                 "source_status": resource.status,
@@ -527,6 +532,11 @@ class AssetService:
             return items
         wanted = set(publish_states)
         return [item for item in items if item.get("publish_state", "draft") in wanted]
+
+    def _external_query_url(self, asset_type: str, asset_id: str) -> str | None:
+        if asset_type not in self.EXTERNAL_QUERY_TYPES:
+            return None
+        return f"/api/external/assets/{asset_type}/{asset_id}/query"
 
     def _dashboard_publish_state(
         self,
