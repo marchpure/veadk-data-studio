@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { dataModelingAdapter } from '../adapters/dataModelingAdapter'
+import { knowledgeCenterMockAdapter } from '../adapters/knowledgeCenterMockAdapter'
 import type {
   CertificationStatus,
   CreateModelDraft,
@@ -8,6 +9,8 @@ import type {
   DataModelingWorkspaceData,
   ExploreState,
   ExploreResult,
+  KnowledgeCenterGateState,
+  ModelingScopeItem,
   HomeViewMode,
   Metric,
   Relationship,
@@ -35,6 +38,9 @@ interface DataModelingStore extends DataModelingWorkspaceData {
   selectProfileField: (fieldName: string) => void
   updateCreateDraft: (patch: Partial<CreateModelDraft>) => void
   toggleCreateTable: (tableName: string) => void
+  selectScopeSource: (datasourceId: string) => void
+  addScopeTable: (tableName: string) => void
+  removeScopeItem: (scopeItemId: string) => void
   startSemanticGeneration: () => void
   advanceSemanticGeneration: () => void
   generateDraft: () => void
@@ -52,9 +58,72 @@ interface DataModelingStore extends DataModelingWorkspaceData {
   openReview: () => void
   updatePublishNotes: (notes: string) => void
   markReviewed: () => void
+  runKnowledgeGate: () => Promise<void>
+  publishKnowledgeAsset: () => Promise<void>
   publishModel: () => Promise<void>
   setRawSqlFallback: (enabled: boolean) => void
   runMcpQuery: () => Promise<void>
+}
+
+const initialGate: KnowledgeCenterGateState = {
+  score: 50,
+  passed: 2,
+  total: 4,
+  blockers: [
+    'Failed: Dashboard KPI still references gross_amount while the semantic model exposes paid_revenue after refunds.',
+    'Failed: Refunds can duplicate order lines unless refunds are pre-aggregated by order_id.',
+  ],
+  evaluated: false,
+  checks: [
+    {
+      id: 'metric-contract',
+      title: 'Paid Revenue contract matches dashboard KPI',
+      status: 'failed',
+      reason: 'Failed: Dashboard KPI still references gross_amount while the semantic model exposes paid_revenue after refunds.',
+      passedReason: 'Passed: Dashboard KPI and semantic model both resolve Paid Revenue from paid order lines net of refunds.',
+      evidence: {
+        sql: 'select sum(paid_amount - refunded_amount) as paid_revenue from marts.order_revenue_daily',
+        doc: 'Revenue Playbook / Section 2.1 Paid Revenue',
+        policy: 'Metric consumers may use certified revenue only after refund fanout is resolved.',
+      },
+    },
+    {
+      id: 'fanout',
+      title: 'Refund relationship fanout guard',
+      status: 'failed',
+      reason: 'Failed: Refunds can duplicate order lines unless refunds are pre-aggregated by order_id.',
+      passedReason: 'Passed: Refund evidence is aggregated by order_id before joining to order facts.',
+      evidence: {
+        sql: 'with refund_by_order as (select order_id, sum(amount) refund_amount from refunds group by 1)',
+        doc: 'Modeling Notes / Section 3.4 Refund Join Pattern',
+        policy: 'Fanout risk must be medium or lower for published revenue metrics.',
+      },
+    },
+    {
+      id: 'pii-policy',
+      title: 'PII is masked from semantic consumers',
+      status: 'passed',
+      reason: 'Passed: Customer email and phone fields are excluded from Agent, dashboard, and MCP exposure.',
+      passedReason: 'Passed: Customer email and phone fields are excluded from Agent, dashboard, and MCP exposure.',
+      evidence: {
+        sql: 'select customer_id, customer_segment from dim_customers',
+        doc: 'Privacy Rules / Section 5 Customer Contact Fields',
+        policy: 'MCP allowlist excludes customers.email and customers.phone.',
+      },
+    },
+    {
+      id: 'freshness',
+      title: 'Freshness is inside operational SLA',
+      status: 'passed',
+      reason: 'Passed: Source profile and dashboard snapshot were refreshed inside the 4 hour SLA.',
+      passedReason: 'Passed: Source profile and dashboard snapshot were refreshed inside the 4 hour SLA.',
+      evidence: {
+        sql: 'select max(updated_at) from marts.order_revenue_daily',
+        doc: 'Operations Runbook / Section 1.2 Data Freshness',
+        policy: 'Revenue assets require freshness under 4 hours for publish.',
+      },
+    },
+  ],
 }
 
 const emptyData: DataModelingWorkspaceData = {
@@ -69,7 +138,13 @@ const emptyData: DataModelingWorkspaceData = {
   },
   activeModelId: '',
   selectedObjectId: '',
-  workspaceMode: 'explore',
+  workspaceMode: 'connectors',
+  scope: {
+    selectedSourceId: '',
+    items: [],
+  },
+  gate: initialGate,
+  publishState: 'blocked',
   selectedProfileTable: '',
   selectedProfileField: '',
   generation: {
@@ -185,7 +260,16 @@ export const useDataModelingStore = create<DataModelingStore>()(
           const activeModelId = mergedModels.some(model => model.id === get().activeModelId)
             ? get().activeModelId
             : mergedModels[0]?.id || ''
-          set({ models: mergedModels, visibleModels, activeModelId, homeLoading: false, homeError: null })
+          const activeModel = mergedModels.find(model => model.id === activeModelId)
+          set({
+            models: mergedModels,
+            visibleModels,
+            activeModelId,
+            gate: activeModel ? gateStateFromModel(activeModel) : get().gate,
+            publishState: activeModel?.publishState ?? get().publishState,
+            homeLoading: false,
+            homeError: null,
+          })
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Unable to load Data Models'
           set({ visibleModels: [], homeLoading: false, homeError: message })
@@ -202,6 +286,8 @@ export const useDataModelingStore = create<DataModelingStore>()(
               models,
               visibleModels: mergeModels(state.visibleModels, [model]),
               activeModelId: model.id,
+              gate: gateStateFromModel(model),
+              publishState: model.publishState,
             }
           })
         } catch (error) {
@@ -248,7 +334,7 @@ export const useDataModelingStore = create<DataModelingStore>()(
       },
 
       setActiveModel(modelId) {
-        set({ activeModelId: modelId, selectedObjectId: '', workspaceMode: 'explore' })
+        set({ activeModelId: modelId, selectedObjectId: '', workspaceMode: 'connectors' })
       },
 
       selectObject(objectId) {
@@ -258,7 +344,7 @@ export const useDataModelingStore = create<DataModelingStore>()(
       setWorkspaceMode(mode) {
         set(state => ({
           workspaceMode: mode,
-          selectedObjectId: mode === 'explore' ? '' : state.selectedObjectId,
+          selectedObjectId: mode === 'dashboard' || mode === 'connectors' ? '' : state.selectedObjectId,
         }))
       },
 
@@ -282,22 +368,17 @@ export const useDataModelingStore = create<DataModelingStore>()(
         if (patch.datasourceId) {
           const selectedDatasource = get().datasourceOptions.find(item => item.id === patch.datasourceId)
           if (selectedDatasource && !selectedDatasource.canLoadProfile) {
-            set(state => ({
+            set({
               selectedProfileTable: '',
               selectedProfileField: '',
-              createDraft: { ...state.createDraft, selectedTables: [] },
-            }))
+            })
             return
           }
           void dataModelingAdapter.loadProfile(patch.datasourceId).then(profile => {
-            set(state => ({
-              profiles: mergeProfiles(state.profiles, [profile]),
+            set(current => ({
+              profiles: mergeProfiles(current.profiles, [profile]),
               selectedProfileTable: profile.tables[0]?.name ?? '',
               selectedProfileField: profile.tables[0]?.fields[0]?.name ?? '',
-              createDraft: {
-                ...state.createDraft,
-                selectedTables: profile.tables.slice(0, 5).map(table => table.name),
-              },
             }))
           }).catch(error => {
             set({ homeError: error instanceof Error ? error.message : 'Unable to load datasource profile' })
@@ -311,6 +392,57 @@ export const useDataModelingStore = create<DataModelingStore>()(
             ? state.createDraft.selectedTables.filter(name => name !== tableName)
             : [...state.createDraft.selectedTables, tableName]
           return { createDraft: { ...state.createDraft, selectedTables: selected } }
+        })
+      },
+
+      selectScopeSource(datasourceId) {
+        set(state => ({
+          scope: { ...state.scope, selectedSourceId: datasourceId },
+          createDraft: { ...state.createDraft, datasourceId },
+        }))
+        get().updateCreateDraft({ datasourceId })
+      },
+
+      addScopeTable(tableName) {
+        const state = get()
+        const sourceId = state.scope.selectedSourceId || state.createDraft.datasourceId
+        const profile = state.profiles.find(item => item.id === sourceId)
+        const table = profile?.tables.find(item => item.name === tableName)
+        if (!sourceId || !profile || !table) return
+        const item: ModelingScopeItem = {
+          id: `${sourceId}:${table.name}`,
+          sourceId,
+          tableName: table.name,
+          label: `${profile.name}.${table.name}`,
+          category: table.category,
+          rowCount: table.rowCount,
+        }
+        set(current => {
+          if (current.scope.items.some(scopeItem => scopeItem.id === item.id)) return {}
+          return {
+            scope: {
+              ...current.scope,
+              selectedSourceId: sourceId,
+              items: [...current.scope.items, item],
+            },
+            createDraft: {
+              ...current.createDraft,
+              selectedTables: Array.from(new Set([...current.createDraft.selectedTables, table.name])),
+            },
+          }
+        })
+      },
+
+      removeScopeItem(scopeItemId) {
+        set(state => {
+          const nextItems = state.scope.items.filter(item => item.id !== scopeItemId)
+          return {
+            scope: { ...state.scope, items: nextItems },
+            createDraft: {
+              ...state.createDraft,
+              selectedTables: nextItems.map(item => item.tableName),
+            },
+          }
         })
       },
 
@@ -349,7 +481,10 @@ export const useDataModelingStore = create<DataModelingStore>()(
         }
         void (async () => {
           try {
-            const understanding = await dataModelingAdapter.analyzeDatasource(draft.datasourceId, draft.selectedTables)
+            const scopedTables = get().scope.items.length
+              ? get().scope.items.map(item => item.tableName)
+              : draft.selectedTables
+            const understanding = await dataModelingAdapter.analyzeDatasource(draft.datasourceId, scopedTables)
             const candidates = understanding.candidates.filter(candidate => ['schema_map', 'relationship', 'data_truth'].includes(candidate.candidate_type))
             set(state => ({
               generation: {
@@ -399,6 +534,8 @@ export const useDataModelingStore = create<DataModelingStore>()(
               visibleModels: mergeModels(state.visibleModels, [model]),
               activeModelId: model.id,
               createDraft: { ...state.createDraft, generated: true },
+              gate: gateStateFromModel(model),
+              publishState: model.publishState,
               generation: {
                 ...state.generation,
                 phase: 'completed',
@@ -589,6 +726,7 @@ export const useDataModelingStore = create<DataModelingStore>()(
           set(state => ({
             models: mergeModels(state.models, [validated]),
             visibleModels: mergeModels(state.visibleModels, [validated]),
+            publishState: validated.publishState,
           }))
         } catch (error) {
           set({ homeError: error instanceof Error ? error.message : 'Validation failed' })
@@ -611,6 +749,88 @@ export const useDataModelingStore = create<DataModelingStore>()(
         set(state => updateModel(state, model => ({ ...model, review: { ...model.review, reviewed: true, opened: true } })))
         const after = currentModel(get())
         saveModelPatch(set, get, before, { review: after.review }, 'Unable to mark review complete')
+      },
+
+      async runKnowledgeGate() {
+        const model = currentModel(get())
+        if (!model) return
+        set({ publishState: 'validating', homeError: null })
+        const gate = await knowledgeCenterMockAdapter.evaluateGate(model)
+        set(state => {
+          const publishState = gate.blockers.length ? 'blocked' as const : 'draft' as const
+          return {
+            gate,
+            publishState,
+            ...updateModel(state, current => ({
+              ...current,
+              gate: {
+                score: gate.score,
+                passed: gate.passed,
+                total: gate.total,
+                blockers: gate.blockers,
+              },
+              publishState,
+              dataStudioAsset: {
+                ...current.dataStudioAsset,
+                gate: {
+                  score: gate.score,
+                  passed: gate.passed,
+                  total: gate.total,
+                  blockers: gate.blockers,
+                },
+                publish_state: publishState,
+              },
+              validationLog: [
+                `Knowledge gate evaluated: ${gate.passed}/${gate.total} checks passed.`,
+                ...current.validationLog,
+              ],
+            })),
+          }
+        })
+      },
+
+      async publishKnowledgeAsset() {
+        const state = get()
+        const model = currentModel(state)
+        if (!model) return
+        const blockers = state.gate.blockers.length ? state.gate.blockers : model.gate.blockers
+        if (blockers.length) {
+          set({
+            publishState: 'blocked',
+            homeError: 'Publish blocked by knowledge center gate.',
+          })
+          return
+        }
+        try {
+          const published = await knowledgeCenterMockAdapter.publishAsset(model)
+          set(current => ({
+            publishState: 'published',
+            homeError: null,
+            ...updateModel(current, item => ({
+              ...item,
+              status: 'Published',
+              publishState: 'published',
+              publishedVersion: published.publishedVersion,
+              consumers: published.consumers,
+              review: { ...item.review, publishedAt: published.publishedAt, reviewed: true, opened: true },
+              mcp: { ...item.mcp, exposedVersion: published.publishedVersion },
+              consumptionEntries: published.entries,
+              dataStudioAsset: {
+                ...item.dataStudioAsset,
+                status: 'Published',
+                publish_state: 'published',
+                version: published.publishedVersion,
+                consumers: published.consumers,
+              },
+              validationLog: [
+                `Published ${published.publishedVersion} to Agent, Dashboard, MCP API, and share link consumers.`,
+                ...item.validationLog,
+              ],
+            })),
+          }))
+        } catch (error) {
+          set({ homeError: error instanceof Error ? error.message : 'Publish failed' })
+        }
       },
 
       async publishModel() {
@@ -669,6 +889,9 @@ export const useDataModelingStore = create<DataModelingStore>()(
         activeModelId: state.activeModelId,
         selectedObjectId: state.selectedObjectId,
         workspaceMode: state.workspaceMode,
+        scope: state.scope,
+        gate: state.gate,
+        publishState: state.publishState,
         selectedProfileTable: state.selectedProfileTable,
         selectedProfileField: state.selectedProfileField,
         generation: resetRunningGeneration(state.generation),
@@ -703,6 +926,37 @@ function mergeProfiles(current: DataModelingWorkspaceData['profiles'], incoming:
     byId.set(profile.id, profile)
   }
   return Array.from(byId.values())
+}
+
+function gateStateFromModel(model: SemanticModel): KnowledgeCenterGateState {
+  const passed = model.gate.passed
+  const total = model.gate.total || Math.max(model.readinessDetail.components.length, 4)
+  const blockers = model.gate.blockers.length ? model.gate.blockers : model.readinessDetail.blockers
+  const matchedChecks = initialGate.checks.map(check => {
+    const blocker = blockers.find(item => item === check.reason || item === check.passedReason || item.includes(check.title))
+    return {
+      ...check,
+      status: blocker ? 'failed' as const : 'passed' as const,
+      reason: blocker ?? check.passedReason,
+    }
+  })
+  const unmatchedBlockers = blockers.filter(blocker => !matchedChecks.some(check => check.reason === blocker))
+  if (unmatchedBlockers.length) {
+    for (let index = 0; index < unmatchedBlockers.length; index += 1) {
+      const target = matchedChecks[matchedChecks.length - 1 - index]
+      if (!target) break
+      target.status = 'failed'
+      target.reason = unmatchedBlockers[index]
+    }
+  }
+  return {
+    score: model.gate.score,
+    passed,
+    total,
+    blockers,
+    evaluated: false,
+    checks: matchedChecks,
+  }
 }
 
 export function selectExploreResult(model: SemanticModel) {

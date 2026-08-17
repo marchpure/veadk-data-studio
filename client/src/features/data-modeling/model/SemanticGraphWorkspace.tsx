@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Code2, Menu, PanelLeftClose, PanelLeftOpen, Play, TableProperties, X } from 'lucide-react'
+import { Check, Code2, GitCompare, Menu, PanelLeftClose, PanelLeftOpen, Play, TableProperties, X } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../components/ui/dialog'
 import { ObjectTree } from './ObjectTree'
@@ -68,6 +68,7 @@ export function SemanticGraphWorkspace({ model }: { model: SemanticModel }) {
         </div>
 
         <div className="grid gap-4">
+          <ModelingEvidenceSummary model={model} />
           <RelationshipCanvas model={model} selectedObjectId={selectedObjectId} onSelect={selectAndInspect} />
 
           {selectedMetric && <MetricEditor metric={selectedMetric} />}
@@ -129,6 +130,140 @@ export function SemanticGraphWorkspace({ model }: { model: SemanticModel }) {
         </DialogContent>
       </Dialog>
     </main>
+  )
+}
+
+function ModelingEvidenceSummary({ model }: { model: SemanticModel }) {
+  const selectObject = useDataModelingStore(state => state.selectObject)
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <Panel>
+        <PanelHeader title="Structure Understanding" subtitle="Main tables, dimension tables, keys, cardinality, time fields, and fanout risk." />
+        <div className="grid gap-3 p-4 md:grid-cols-2">
+          {model.entities.map(entity => (
+            <Surface key={entity.id} className="p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-[#f3f5f5]">{entity.businessName}</div>
+                  <div className="mt-1 text-xs text-[#818c95]">{entity.table}</div>
+                </div>
+                <StatusPill>{entityKind(entity)}</StatusPill>
+              </div>
+              <div className="mt-3 grid gap-2 text-xs text-[#cdd3d8]">
+                <KV label="Primary key" value={entity.primaryKey} />
+                <KV label="Time fields" value={entity.fields.filter(field => field.role === 'time').map(field => field.name).join(', ') || 'None detected'} />
+              </div>
+            </Surface>
+          ))}
+        </div>
+        <div className="border-t border-[#30363a] p-4">
+          <SectionTitle>Relationship cardinality and fanout</SectionTitle>
+          <div className="mt-3 grid gap-2">
+            {model.relationships.map(relationship => (
+              <Surface key={relationship.id} className="p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-[#f3f5f5]">{relationship.fromEntity} to {relationship.toEntity}</span>
+                  <div className="flex flex-wrap gap-2">
+                    <StatusPill>{relationship.cardinality}</StatusPill>
+                    <StatusPill tone={relationship.fanoutRisk === 'high' ? 'blocked' : relationship.fanoutRisk === 'medium' ? 'warning' : 'ready'}>{relationship.fanoutRisk} fanout</StatusPill>
+                  </div>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-[#9aa4ac]">{relationship.validationMessage || relationship.fkEvidence}</p>
+              </Surface>
+            ))}
+          </div>
+        </div>
+      </Panel>
+
+      <div className="grid gap-4">
+        <Panel>
+          <PanelHeader title="Semantic Suggestions" subtitle="Confirm metrics, dimensions, and permission policy one suggestion at a time." />
+          <div className="grid gap-3 p-4">
+            {model.metrics.map(metric => (
+              <Surface key={metric.id} className="p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-[#f3f5f5]">{metric.businessName}</div>
+                    <p className="mt-1 text-sm leading-6 text-[#9aa4ac]">{metric.definition}</p>
+                  </div>
+                  <StatusPill tone={metric.certification === 'certified' ? 'ready' : 'warning'}>{metric.certification}</StatusPill>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => selectObject(metric.id)}>Open metric editor</Button>
+                  <StatusPill>metric</StatusPill>
+                </div>
+              </Surface>
+            ))}
+            {model.suggestions.slice(0, 5).map(suggestion => (
+              <Surface key={suggestion.id} className="p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-[#f3f5f5]">{suggestion.title}</div>
+                    <p className="mt-1 text-sm leading-6 text-[#9aa4ac]">{suggestion.recommendation}</p>
+                  </div>
+                  <StatusPill tone={suggestion.status === 'accepted' ? 'ready' : suggestion.status === 'rejected' ? 'blocked' : 'warning'}>{suggestion.status}</StatusPill>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => useDataModelingStore.getState().acceptSuggestion(suggestion.id)}><Check className="h-4 w-4" /> Confirm</Button>
+                  <StatusPill>{Math.round(suggestion.confidence * 100)}% confidence</StatusPill>
+                  <StatusPill>{suggestion.type}</StatusPill>
+                </div>
+              </Surface>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel>
+          <PanelHeader title="Conflicts" subtitle="Resolve conflicts by choosing one authority." action={<GitCompare className="h-4 w-4 text-brand-orange" />} />
+          <div className="grid gap-3 p-4">
+            <ConflictChoice
+              title="Document metric definition vs field reality"
+              left="Use doc wording: gross revenue includes pending orders."
+              right="Use field state: paid_revenue excludes pending and refunded order amounts."
+            />
+            <ConflictChoice
+              title="Two authority sources define region differently"
+              left="CRM region from customer owner hierarchy."
+              right="Store operations region from fulfillment location."
+            />
+          </div>
+        </Panel>
+      </div>
+    </div>
+  )
+}
+
+function ConflictChoice({ title, left, right }: { title: string; left: string; right: string }) {
+  const [choice, setChoice] = useState<'left' | 'right'>('right')
+  return (
+    <Surface className="p-3">
+      <div className="text-sm font-semibold text-[#f3f5f5]">{title}</div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => setChoice('left')}
+          className={`rounded border p-3 text-left text-sm leading-6 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${choice === 'left' ? 'border-brand-orange/60 bg-brand-orange/10 text-[#f3f5f5]' : 'border-[#2d3338] bg-[#101316] text-[#9aa4ac]'}`}
+        >
+          {left}
+        </button>
+        <button
+          type="button"
+          onClick={() => setChoice('right')}
+          className={`rounded border p-3 text-left text-sm leading-6 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${choice === 'right' ? 'border-brand-orange/60 bg-brand-orange/10 text-[#f3f5f5]' : 'border-[#2d3338] bg-[#101316] text-[#9aa4ac]'}`}
+        >
+          {right}
+        </button>
+      </div>
+    </Surface>
+  )
+}
+
+function KV({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded border border-[#2d3338] bg-[#0f1113] p-2">
+      <div className="text-[10px] font-semibold uppercase text-[#818c95]">{label}</div>
+      <div className="mt-1 break-words text-xs text-[#d6dde2]">{value}</div>
+    </div>
   )
 }
 

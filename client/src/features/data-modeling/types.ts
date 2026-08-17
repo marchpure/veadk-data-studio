@@ -11,7 +11,10 @@ export type RelationshipStatus = 'confirmed' | 'candidate' | 'rejected'
 export type Cardinality = 'many-to-one' | 'one-to-many' | 'one-to-one' | 'many-to-many'
 export type MetricKind = 'measure' | 'derived_metric'
 export type CertificationStatus = 'draft' | 'reviewed' | 'certified'
-export type WorkspaceMode = 'explore' | 'model' | 'publish'
+export type WorkspaceMode = 'connectors' | 'model' | 'dashboard' | 'publish'
+export type KnowledgeCenterStep = WorkspaceMode
+export type DataStudioAssetType = 'dashboard' | 'semantic_model'
+export type PublishState = 'draft' | 'validating' | 'blocked' | 'published' | 'archived'
 export type ExploreViewMode = 'trend' | 'table' | 'pivot'
 export type TimeGrain = 'day' | 'week' | 'month' | 'quarter'
 export type HomeViewMode = 'ready' | 'loading' | 'error' | 'empty' | 'permission'
@@ -58,6 +61,73 @@ export interface ModelConsumers {
   skills: number
   dashboards: number
   savedQueries: number
+}
+
+export interface DataStudioAssetGate {
+  score: number
+  passed: number
+  total: number
+  blockers: string[]
+}
+
+export interface DataStudioAsset {
+  asset_type: DataStudioAssetType
+  asset_id: string
+  name: string
+  description: string
+  status: ModelStatus
+  publish_state: PublishState
+  gate: DataStudioAssetGate
+  version: string
+  consumers: ModelConsumers
+  capabilities: string[]
+  freshness: string
+  provenance: string[]
+  usage_policy: string[]
+  sample_evidence: string[]
+}
+
+export interface ModelingScopeItem {
+  id: string
+  sourceId: string
+  tableName: string
+  label: string
+  category: TableCategory
+  rowCount: number
+}
+
+export interface ModelingScopeState {
+  selectedSourceId: string
+  items: ModelingScopeItem[]
+}
+
+export interface GateCheck {
+  id: string
+  title: string
+  status: 'failed' | 'passed'
+  reason: string
+  passedReason: string
+  evidence: {
+    sql: string
+    doc: string
+    policy: string
+  }
+}
+
+export interface KnowledgeCenterGateState {
+  score: number
+  passed: number
+  total: number
+  blockers: string[]
+  checks: GateCheck[]
+  evaluated: boolean
+}
+
+export interface ConsumptionEntry {
+  id: 'agent' | 'dashboard' | 'mcp_api' | 'share_link'
+  label: string
+  before: string
+  after: string
 }
 
 export interface SemanticModelSummary {
@@ -277,6 +347,11 @@ export interface SemanticModel extends SemanticModelSummary {
   review: ReviewState
   mcp: McpState
   validationLog: string[]
+  assetType: DataStudioAssetType
+  publishState: PublishState
+  gate: DataStudioAssetGate
+  dataStudioAsset: DataStudioAsset
+  consumptionEntries: ConsumptionEntry[]
 }
 
 export interface CreateModelDraft {
@@ -309,6 +384,9 @@ export interface DataModelingWorkspaceData {
   activeModelId: string
   selectedObjectId: string
   workspaceMode: WorkspaceMode
+  scope: ModelingScopeState
+  gate: KnowledgeCenterGateState
+  publishState: PublishState
   selectedProfileTable: string
   selectedProfileField: string
   generation: SemanticGenerationState

@@ -47,7 +47,7 @@ export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpen
   const startExploring = () => {
     if (!model?.id) return
     setActiveModel(model.id)
-    setWorkspaceMode('explore')
+    setWorkspaceMode('dashboard')
     onOpenChange(false)
     navigate(`/data-models/${model.id}`)
   }
