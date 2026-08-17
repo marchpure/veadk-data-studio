@@ -63,7 +63,7 @@ const defaultCaseDraft: EvaluationCaseDraftInput = {
   operation: 'answer_question',
   question: 'What governed answer should the semantic model return?',
   expectedContract: {
-    answer: { must_include_all: ['governed'], must_not_include: ['secret'] },
+    answer: { must_include_all: ['governed'], must_not_include: ['restricted_value'] },
     policy: { security_hard_fail: true },
   },
   provenance: { source: 'import', principal: { fixture: 'explicit-human-action' } },
@@ -110,6 +110,8 @@ export default function EvaluationWorkspacePage() {
   const [loadingAction, setLoadingAction] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
+  const [importMessage, setImportMessage] = useState<string | null>(null)
+  const [importFormat, setImportFormat] = useState<CaseImportFormat>('json')
   const [suiteDraft, setSuiteDraft] = useState(defaultSuiteDraft)
   const [caseDraftJson, setCaseDraftJson] = useState(JSON.stringify([defaultCaseDraft], null, 2))
 
@@ -338,17 +340,19 @@ export default function EvaluationWorkspacePage() {
     if (!selectedVersion) return
     setLoadingAction(true)
     setActionMessage(null)
+    setImportMessage(null)
     setError(null)
     try {
-      const casesToImport = useFixture ? explicitDemoCases() : JSON.parse(caseDraftJson)
+      const casesToImport = useFixture ? explicitDemoCases() : parseCaseImport(caseDraftJson, importFormat)
       const response = await EvaluationService.importCases(selectedVersion.id, casesToImport)
       setActionMessage(`Cases imported: ${response.created_count} created, ${response.existing_count} existing`)
+      setImportMessage(`Validated ${casesToImport.length} ${useFixture ? 'demo' : importFormat.toUpperCase()} case${casesToImport.length === 1 ? '' : 's'} before import.`)
       if (suiteId) {
         await loadSuiteDetail(suiteId)
       }
       setTab('cases')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to import Evaluation cases')
+      setImportMessage(err instanceof Error ? err.message : 'Unable to import Evaluation cases')
     } finally {
       setLoadingAction(false)
     }
@@ -572,8 +576,11 @@ export default function EvaluationWorkspacePage() {
                       selectedCase={selectedCase}
                       selectedVersion={selectedVersion}
                       caseDraftJson={caseDraftJson}
+                      importFormat={importFormat}
+                      importMessage={importMessage}
                       loading={loadingAction}
                       onCaseDraftJsonChange={setCaseDraftJson}
+                      onImportFormatChange={setImportFormat}
                       onSelectCase={setSelectedCaseId}
                       onImportCases={() => void importCases(false)}
                       onLoadDemoCases={() => void importCases(true)}
@@ -687,13 +694,18 @@ function EvaluationOnboarding({ suiteDraft, loading, message, onSuiteDraftChange
   )
 }
 
-function CasesTab({ cases, selectedCase, selectedVersion, caseDraftJson, loading, onCaseDraftJsonChange, onSelectCase, onImportCases, onLoadDemoCases }: {
+type CaseImportFormat = 'json' | 'jsonl' | 'csv'
+
+function CasesTab({ cases, selectedCase, selectedVersion, caseDraftJson, importFormat, importMessage, loading, onCaseDraftJsonChange, onImportFormatChange, onSelectCase, onImportCases, onLoadDemoCases }: {
   cases: EvaluationCase[]
   selectedCase: EvaluationCase | null
   selectedVersion: EvaluationSuiteVersion | null
   caseDraftJson: string
+  importFormat: CaseImportFormat
+  importMessage: string | null
   loading: boolean
   onCaseDraftJsonChange: (value: string) => void
+  onImportFormatChange: (value: CaseImportFormat) => void
   onSelectCase: (caseId: string) => void
   onImportCases: () => void
   onLoadDemoCases: () => void
@@ -706,8 +718,11 @@ function CasesTab({ cases, selectedCase, selectedVersion, caseDraftJson, loading
         {canImport && (
           <CaseImportPanel
             value={caseDraftJson}
+            format={importFormat}
+            message={importMessage}
             loading={loading}
             onChange={onCaseDraftJsonChange}
+            onFormatChange={onImportFormatChange}
             onImport={onImportCases}
             onLoadDemo={onLoadDemoCases}
           />
@@ -721,8 +736,11 @@ function CasesTab({ cases, selectedCase, selectedVersion, caseDraftJson, loading
         {canImport && (
           <CaseImportPanel
             value={caseDraftJson}
+            format={importFormat}
+            message={importMessage}
             loading={loading}
             onChange={onCaseDraftJsonChange}
+            onFormatChange={onImportFormatChange}
             onImport={onImportCases}
             onLoadDemo={onLoadDemoCases}
           />
@@ -756,24 +774,49 @@ function CasesTab({ cases, selectedCase, selectedVersion, caseDraftJson, loading
   )
 }
 
-function CaseImportPanel({ value, loading, onChange, onImport, onLoadDemo }: {
+function CaseImportPanel({ value, format, message, loading, onChange, onFormatChange, onImport, onLoadDemo }: {
   value: string
+  format: CaseImportFormat
+  message: string | null
   loading: boolean
   onChange: (value: string) => void
+  onFormatChange: (value: CaseImportFormat) => void
   onImport: () => void
   onLoadDemo: () => void
 }) {
+  const validation = useMemo(() => validateCaseImport(value, format), [value, format])
   return (
     <div className="rounded-md border border-[#293037] bg-[#101316] p-3">
-      <div className="mb-2 text-xs font-medium uppercase text-[#818c95]">Case Import JSON</div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-medium uppercase text-[#818c95]">Case Import</div>
+        <select
+          value={format}
+          onChange={event => onFormatChange(event.target.value as CaseImportFormat)}
+          className="h-8 rounded border border-[#303940] bg-[#0e1114] px-2 text-xs text-[#eef2f3]"
+          aria-label="Evaluation case import format"
+        >
+          <option value="json">JSON</option>
+          <option value="jsonl">JSONL</option>
+          <option value="csv">CSV</option>
+        </select>
+      </div>
       <textarea
         value={value}
         onChange={event => onChange(event.target.value)}
         className="min-h-40 w-full resize-y rounded border border-[#303940] bg-[#0e1114] p-2 font-mono text-xs leading-5 text-[#d6dde2]"
-        aria-label="Evaluation case import JSON"
+        aria-label="Evaluation case import content"
       />
+      <div className="mt-2 rounded border border-[#303940] bg-[#0e1114] p-2 text-xs">
+        {validation.valid ? (
+          <span className="text-emerald-200">Ready: {validation.count} valid row{validation.count === 1 ? '' : 's'}.</span>
+        ) : (
+          <span className="text-red-100">Blocked: {validation.errors[0]}</span>
+        )}
+        {validation.errors.length > 1 && <span className="ml-2 text-red-100/70">+{validation.errors.length - 1} more</span>}
+      </div>
+      {message && <div className="mt-2 text-xs text-[#a4adb5]">{message}</div>}
       <div className="mt-2 flex flex-wrap gap-2">
-        <Button variant="brand-primary" onClick={onImport} disabled={loading}>
+        <Button variant="brand-primary" onClick={onImport} disabled={loading || !validation.valid}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSearch className="h-4 w-4" />}
           Import Cases
         </Button>
@@ -784,6 +827,138 @@ function CaseImportPanel({ value, loading, onChange, onImport, onLoadDemo }: {
       </div>
     </div>
   )
+}
+
+function validateCaseImport(value: string, format: CaseImportFormat): { valid: boolean; count: number; errors: string[] } {
+  try {
+    const cases = parseCaseImport(value, format)
+    return { valid: cases.length > 0, count: cases.length, errors: cases.length > 0 ? [] : ['At least one case is required.'] }
+  } catch (error) {
+    return { valid: false, count: 0, errors: [error instanceof Error ? error.message : 'Import content is invalid.'] }
+  }
+}
+
+function parseCaseImport(value: string, format: CaseImportFormat): EvaluationCaseDraftInput[] {
+  const text = value.trim()
+  if (!text) throw new Error('Import content is empty.')
+  const rawRows = format === 'json'
+    ? parseJsonRows(text)
+    : format === 'jsonl'
+      ? text.split(/\r?\n/).filter(Boolean).map((line, index) => parseJsonLine(line, index))
+      : parseCsvRows(text)
+  return rawRows.map((row, index) => normalizeCaseImportRow(row, index))
+}
+
+function parseJsonRows(text: string): unknown[] {
+  const parsed = JSON.parse(text) as unknown
+  if (Array.isArray(parsed)) return parsed
+  if (isRecord(parsed)) return [parsed]
+  throw new Error('JSON import must be an object or an array of objects.')
+}
+
+function parseJsonLine(line: string, index: number): unknown {
+  try {
+    return JSON.parse(line) as unknown
+  } catch {
+    throw new Error(`JSONL row ${index + 1} is not valid JSON.`)
+  }
+}
+
+function parseCsvRows(text: string): Array<Record<string, string>> {
+  const rows = parseCsv(text)
+  if (rows.length < 2) throw new Error('CSV import requires a header and at least one data row.')
+  const headers = rows[0].map(header => header.trim())
+  return rows.slice(1).filter(row => row.some(cell => cell.trim())).map(row => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ''])))
+}
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cell = ''
+  let quoted = false
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    const next = text[index + 1]
+    if (char === '"' && quoted && next === '"') {
+      cell += '"'
+      index += 1
+    } else if (char === '"') {
+      quoted = !quoted
+    } else if (char === ',' && !quoted) {
+      row.push(cell)
+      cell = ''
+    } else if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && next === '\n') index += 1
+      row.push(cell)
+      rows.push(row)
+      row = []
+      cell = ''
+    } else {
+      cell += char
+    }
+  }
+  row.push(cell)
+  rows.push(row)
+  return rows
+}
+
+function normalizeCaseImportRow(row: unknown, index: number): EvaluationCaseDraftInput {
+  if (!isRecord(row)) throw new Error(`Row ${index + 1} must be an object.`)
+  const expectedContract = parseObjectCell(row.expectedContract ?? row.expected_contract, index, 'expectedContract')
+  const provenance = parseObjectCell(row.provenance, index, 'provenance')
+  const targetKinds = parseListCell(row.targetKinds ?? row.target_kinds)
+  const tags = parseListCell(row.tags)
+  const item: EvaluationCaseDraftInput = {
+    caseKey: stringCell(row.caseKey ?? row.case_key),
+    title: stringCell(row.title),
+    targetKinds,
+    operation: stringCell(row.operation),
+    question: stringCell(row.question),
+    expectedContract,
+    provenance,
+    tags,
+  }
+  const missing = [
+    !item.caseKey && 'caseKey',
+    !item.title && 'title',
+    item.targetKinds.length === 0 && 'targetKinds',
+    !item.operation && 'operation',
+    !item.question && 'question',
+  ].filter(Boolean)
+  if (missing.length > 0) throw new Error(`Row ${index + 1} is missing ${missing.join(', ')}.`)
+  return item
+}
+
+function stringCell(value: unknown): string {
+  return value === null || value === undefined ? '' : String(value).trim()
+}
+
+function parseListCell(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(stringCell).filter(Boolean)
+  const text = stringCell(value)
+  if (!text) return []
+  if (text.startsWith('[')) {
+    const parsed = JSON.parse(text) as unknown
+    if (Array.isArray(parsed)) return parsed.map(stringCell).filter(Boolean)
+  }
+  return text.split(/[|;]/).map(item => item.trim()).filter(Boolean)
+}
+
+function parseObjectCell(value: unknown, index: number, label: string): Record<string, unknown> {
+  if (isRecord(value)) return value
+  const text = stringCell(value)
+  if (!text) return {}
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (isRecord(parsed)) return parsed
+  } catch {
+    // handled below
+  }
+  throw new Error(`Row ${index + 1} ${label} must be a JSON object.`)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function CaseDetailPanel({ item }: { item: EvaluationCase }) {
@@ -1116,8 +1291,8 @@ function explicitDemoCases(): EvaluationCaseDraftInput[] {
       title: 'Demo blocking case',
       question: 'Reject answers that expose restricted fields.',
       expectedContract: {
-        answer: { must_not_include: ['secret', 'token'] },
-        policy: { security_hard_fail: true, forbidden_fields: ['secret_margin'] },
+        answer: { must_not_include: ['restricted_value', 'private_credential'] },
+        policy: { security_hard_fail: true, forbidden_fields: ['restricted_margin'] },
       },
       tags: ['demo', 'blocking'],
     },
