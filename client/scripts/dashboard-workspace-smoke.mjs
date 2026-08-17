@@ -4,6 +4,9 @@ import { mkdirSync } from 'node:fs'
 const baseURL = process.env.BASE_URL || 'http://127.0.0.1:5173'
 const apiURL = process.env.API_URL || 'http://127.0.0.1:8000'
 const screenDir = process.env.SCREEN_DIR || './tmp-dashboard-screens'
+const adminEmail = process.env.BYAAN_ADMIN_EMAIL || 'admin@example.com'
+const adminPassword = process.env.BYAAN_ADMIN_PASSWORD || 'password'
+const explicitLegacyAssetId = process.env.LEGACY_ASSET_ID || ''
 mkdirSync(screenDir, { recursive: true })
 
 const stats = {
@@ -30,6 +33,38 @@ async function api(path, options = {}) {
     throw new Error(`API ${path} failed ${response.status}: ${JSON.stringify(payload)}`)
   }
   return payload?.data ?? payload
+}
+
+async function loginForSelfHostedAuth() {
+  const response = await fetch(`${apiURL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ username: adminEmail, password: adminPassword }),
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(`Dashboard smoke login failed ${response.status}: ${JSON.stringify(payload)}`)
+  }
+  const token = payload?.data?.access_token
+  if (!token) {
+    throw new Error(`Dashboard smoke login did not return an access token: ${JSON.stringify(payload)}`)
+  }
+  const authHeaders = { Authorization: `Bearer ${token}` }
+  const scopes = await api('/api/scopes/all', { headers: authHeaders })
+  const tenantId = scopes.tenants?.[0]?.tenant_id
+  if (!tenantId) {
+    throw new Error(`Dashboard smoke login did not expose a tenant: ${JSON.stringify(scopes)}`)
+  }
+  return { tenantId, headers: { ...authHeaders, 'X-Tenant-ID': tenantId } }
+}
+
+async function resolveDashboardAuth() {
+  const config = await api('/api/app/config')
+  const bootstrap = config.local_bootstrap || config.community_bootstrap
+  if (bootstrap?.tenant_id) {
+    return { tenantId: bootstrap.tenant_id, headers: { 'X-Tenant-ID': bootstrap.tenant_id } }
+  }
+  return loginForSelfHostedAuth()
 }
 
 async function uploadCsvDataset(headers, notebookId) {
@@ -273,12 +308,7 @@ async function createDashboard(headers, notebookId, slugPrefix, manifestPayload,
 }
 
 async function seedDashboardFixtures() {
-  const config = await api('/api/app/config')
-  const bootstrap = config.local_bootstrap || config.community_bootstrap
-  if (!bootstrap?.tenant_id) {
-    throw new Error('Local bootstrap tenant was not available')
-  }
-  const headers = { 'X-Tenant-ID': bootstrap.tenant_id }
+  const { tenantId, headers } = await resolveDashboardAuth()
   const notebook = await api('/api/notebooks', {
     method: 'POST',
     headers,
@@ -388,7 +418,7 @@ async function seedDashboardFixtures() {
   const staleDetail = await api(`/api/dashboard-assets/${stalePartial.asset.id}`, { headers })
 
   return {
-    tenantId: bootstrap.tenant_id,
+    tenantId,
     notebookId: notebook.id,
     headers,
     structuredSlug: structured.asset.slug,
@@ -415,8 +445,31 @@ const browser = await chromium.launch({
   executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
 })
 
+async function issueBrowserRefreshToken() {
+  const response = await fetch(`${apiURL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ username: adminEmail, password: adminPassword }),
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(`Browser login failed ${response.status}: ${JSON.stringify(payload)}`)
+  }
+  const refreshToken = payload?.data?.refresh_token
+  if (!refreshToken) {
+    throw new Error(`Browser login did not return a refresh token: ${JSON.stringify(payload)}`)
+  }
+  return refreshToken
+}
+
 async function makePage(viewport, tenantId) {
-  const page = await browser.newPage({ viewport })
+  const refreshToken = await issueBrowserRefreshToken()
+  const context = await browser.newContext({ viewport, baseURL })
+  await context.addInitScript(({ id, token }) => {
+    window.localStorage.setItem('byaan_active_tenant', id)
+    window.sessionStorage.setItem('byaan_refresh_token', token)
+  }, { id: tenantId, token: refreshToken })
+  const page = await context.newPage()
   page.on('pageerror', error => {
     stats.pageerror += 1
     console.error('pageerror:', error.message)
@@ -439,9 +492,6 @@ async function makePage(viewport, tenantId) {
       console.error('http5xx:', response.status(), response.url())
     }
   })
-  await page.addInitScript(id => {
-    localStorage.setItem('byaan_active_tenant', id)
-  }, tenantId)
   return page
 }
 
@@ -567,6 +617,22 @@ async function runLegacyScene(page, fixtures, viewport) {
   await capture(page, 'legacy', viewport)
 }
 
+async function runExplicitLegacyAssetScene(page, assetId) {
+  if (!assetId) return
+  await page.goto(`${baseURL}/dashboard-assets/${assetId}`, { waitUntil: 'networkidle' })
+  await page.getByRole('heading', { name: 'Black Friday Demographic Buying Pattern Analysis', exact: true }).waitFor()
+  await page.getByText('legacy_unstructured').first().waitFor()
+  await page.getByText('legacy HTML dashboard requires structured manifest review before agent-ready publish').first().waitFor()
+  await page.getByText('Legacy HTML fallback').waitFor()
+  await page.getByText('not agent-ready').first().waitFor()
+  await page.getByRole('link', { name: /Open legacy preview/i }).waitFor()
+  const bodyText = await page.locator('body').innerText()
+  if (/Something went wrong/i.test(bodyText)) {
+    throw new Error(`Explicit legacy asset ${assetId} rendered the generic error boundary`)
+  }
+  await capture(page, 'legacy-explicit-asset', '1440')
+}
+
 async function runStalePartialScene(page, fixtures, viewport) {
   await page.goto(`${baseURL}/dashboard-assets/${fixtures.stalePartialAssetId}`, { waitUntil: 'networkidle' })
   await page.getByRole('heading', { name: /Browser Stale Partial/i }).waitFor()
@@ -663,8 +729,14 @@ async function runEditReviewScene(page, fixtures, viewport) {
   await page.getByText('Filter removed').waitFor()
   await page.getByRole('button', { name: 'Validate' }).click()
   await page.getByText(/1 blockers/i).waitFor()
+  const previewResponse = page.waitForResponse(response => (
+    response.request().method() === 'POST'
+    && response.url().includes(`/api/dashboard-assets/${fixtures.editAssetId}/preview`)
+    && response.status() === 200
+  ))
   await page.getByRole('button', { name: 'Preview' }).click()
-  await page.getByText('Preview executed against draft version').waitFor()
+  await previewResponse
+  await page.getByText('Preview run').waitFor()
   await page.getByText(/Review diff/i).waitFor()
   await capture(page, 'edit-review', viewport)
 }
@@ -683,6 +755,7 @@ async function runDashboardJourney(fixtures) {
   await runStalePartialScene(desktop, fixtures, '1440')
   await runPermissionScene(desktop, fixtures, '1440')
   await runLegacyScene(desktop, fixtures, '1440')
+  await runExplicitLegacyAssetScene(desktop, explicitLegacyAssetId)
   await desktop.close()
 
   const mobile = await makePage({ width: 390, height: 844 }, fixtures.tenantId)
