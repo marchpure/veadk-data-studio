@@ -467,7 +467,7 @@ Commit:
 
 ### Phase 6 Acceptance Slice: Browser Workspace Smoke
 
-Status: implemented, evidence captured, and pushed in `b5c679e`.
+Status: implemented and pushed in `b5c679e`. Generated browser evidence was removed from the release candidate and must be regenerated outside the repository by B2/E.
 
 Allowlist:
 
@@ -475,11 +475,6 @@ Allowlist:
 - `client/package.json`
 - `client/pnpm-lock.yaml`
 - `client/src/features/dashboard/pages/DashboardWorkspacePage.tsx`
-- `docs/product/dashboard-browser-smoke/dashboard-data-1440.png`
-- `docs/product/dashboard-browser-smoke/dashboard-lineage-1440.png`
-- `docs/product/dashboard-browser-smoke/dashboard-permission-denied-1440.png`
-- `docs/product/dashboard-browser-smoke/dashboard-legacy-1440.png`
-- `docs/product/dashboard-browser-smoke/dashboard-mobile-390.png`
 - `docs/product/human-agent-dashboard-p0-progress.md`
 
 Behavior:
@@ -493,9 +488,8 @@ Behavior:
 
 Evidence:
 
-- Screenshot directory: `docs/product/dashboard-browser-smoke/`
-- Initial captured files were `dashboard-data-1440.png`, `dashboard-lineage-1440.png`, `dashboard-permission-denied-1440.png`, `dashboard-legacy-1440.png`, and `dashboard-mobile-390.png`; the follow-up matrix below supersedes this limited list.
-- Initial `sips -g pixelWidth -g pixelHeight docs/product/dashboard-browser-smoke/*.png` confirmed desktop screenshots at `1440x900` and the mobile screenshot at `390x844`; the follow-up matrix below records per-scene viewport evidence.
+- The original branch run captured browser evidence, but generated screenshots are not release-candidate source files and are no longer tracked.
+- B2/E must regenerate screenshots under an external `EVIDENCE_DIR/dashboard-browser-smoke/` directory for the exact candidate SHA. Historical screenshots and results from another SHA are not release evidence.
 
 Commands and results:
 
@@ -504,7 +498,7 @@ Commands and results:
 - `cd server && DATABASE_URL=sqlite+aiosqlite:///$PWD/../.tmp/dashboard-browser-smoke/app.db uv run alembic current` -> `backfill_legacy_dashboard_assets (head)`.
 - Backend: `DATABASE_URL=sqlite+aiosqlite:///$PWD/.tmp/dashboard-browser-smoke/app.db APP_MODE=community CORS_ORIGINS=http://127.0.0.1:5179,http://localhost:5179 uv run uvicorn server.main:app --host 127.0.0.1 --port 8123`; `/health` -> healthy.
 - Frontend: `cd client && FRONTEND_PORT=5179 VITE_API_URL=http://127.0.0.1:8123 pnpm dev --host 127.0.0.1 --port 5179` -> Vite ready.
-- `cd client && BASE_URL=http://127.0.0.1:5179 API_URL=http://127.0.0.1:8123 SCREEN_DIR=../docs/product/dashboard-browser-smoke pnpm smoke:dashboard` -> passed with `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`.
+- Historical branch run: `cd client && BASE_URL=http://127.0.0.1:5179 API_URL=http://127.0.0.1:8123 SCREEN_DIR=$EVIDENCE_DIR/dashboard-browser-smoke pnpm smoke:dashboard` -> passed with `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`. B2/E must rerun this for the release candidate.
 - `cd client && node --check scripts/dashboard-workspace-smoke.mjs` -> passed.
 - `cd client && pnpm lint` -> passed with existing `355 warnings`, `0 errors`.
 - `cd client && pnpm build:check` -> passed with existing CSS/chunk warnings.
@@ -581,7 +575,7 @@ Commit:
 
 ## Acceptance Evidence
 
-Browser workspace evidence captured under `docs/product/dashboard-browser-smoke/` for structured data, lineage/evidence, permission-denied policy guard, legacy fallback, and mobile layout. Backend/MCP/security/migration evidence is recorded above, including post-handoff coverage that executes all P0 data-view kinds (`saved_query`, `semantic_metric`, and `context_search`) through governed service bindings, blocks deprecated legacy HTML tools from reading or mutating structured Dashboard versions, and marks those MCP tools as deprecated legacy-only. Real `8080` has not been verified in this isolated Dashboard worktree.
+Historical browser workspace results covered structured data, lineage/evidence, permission-denied policy guard, legacy fallback, and mobile layout. Their generated screenshots are not tracked in the release candidate; B2/E must regenerate exact-SHA evidence outside the repository. Backend/MCP/security/migration evidence is recorded above, including post-handoff coverage that executes all P0 data-view kinds (`saved_query`, `semantic_metric`, and `context_search`) through governed service bindings, blocks deprecated legacy HTML tools from reading or mutating structured Dashboard versions, and marks those MCP tools as deprecated legacy-only. Real `8080` has not been verified in this isolated Dashboard worktree.
 
 ## Final Integration Handoff
 
@@ -659,11 +653,6 @@ M	client/src/constants/scopes.ts
 A	client/src/features/dashboard/pages/DashboardWorkspacePage.tsx
 A	client/src/services/dashboard.ts
 A	client/src/types/dashboard.ts
-A	docs/product/dashboard-browser-smoke/dashboard-data-1440.png
-A	docs/product/dashboard-browser-smoke/dashboard-legacy-1440.png
-A	docs/product/dashboard-browser-smoke/dashboard-lineage-1440.png
-A	docs/product/dashboard-browser-smoke/dashboard-mobile-390.png
-A	docs/product/dashboard-browser-smoke/dashboard-permission-denied-1440.png
 A	docs/product/human-agent-dashboard-p0-progress.md
 A	docs/product/human-agent-dashboard-p0.md
 M	server/auth/scopes.py
@@ -755,7 +744,7 @@ Behavior added after the original handoff:
 Focused follow-up verification:
 
 - `cd client && node --check scripts/dashboard-workspace-smoke.mjs` -> passed.
-- `cd client && BASE_URL=http://127.0.0.1:5181 API_URL=http://127.0.0.1:8125 SCREEN_DIR=../docs/product/dashboard-browser-smoke pnpm smoke:dashboard` -> passed with `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`.
+- Historical branch run: `cd client && BASE_URL=http://127.0.0.1:5181 API_URL=http://127.0.0.1:8125 SCREEN_DIR=$EVIDENCE_DIR/dashboard-browser-smoke pnpm smoke:dashboard` -> passed with `pageerror=0`, `consoleError=0`, `requestfailed=0`, `http5xx=0`. B2/E must rerun this for the release candidate.
 - `cd server && uv run ruff check services/dashboard.py tests/test_dashboard_rest_api.py tests/test_dashboard_lifecycle_service.py` -> passed.
 - `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_lifecycle_service.py tests/test_dashboard_rest_api.py` -> `10 passed`, `41 warnings`.
 - `cd server && PYTHONPATH=..:tests uv run pytest tests/test_dashboard_*.py tests/test_migration_chain_hardening.py` -> `45 passed`, `84 warnings`.
@@ -766,22 +755,22 @@ Browser coverage matrix:
 
 | Scene | Viewport | Screenshot | Assertion highlights |
 | --- | --- | --- | --- |
-| Inventory | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-inventory-1440.png` | `/dashboard-assets` renders at least two real fixture assets; owner, published/draft version, model/version, freshness, readiness/warnings, and last update columns are visible; search filters to the secondary fixture and restores. |
-| Inventory | `390x844` | `docs/product/dashboard-browser-smoke/dashboard-inventory-390.png` | Mobile inventory strip and dense inventory evidence render without horizontal overflow; selected structured fixture opens from the mobile route. |
-| View | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-view-1440.png` | Published structured dashboard loads, executes canonical data views, shows filter digest and timestamp/no-run state. |
-| View | `390x844` | `docs/product/dashboard-browser-smoke/dashboard-view-390.png` | Same structured dashboard view is reachable and non-overlapping on mobile. |
-| Data | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-data-1440.png` | Data tab displays `dv-revenue` and table-equivalent results from the real saved-query fixture. |
+| Inventory | `1440x900` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-inventory-1440.png` | `/dashboard-assets` renders at least two real fixture assets; owner, published/draft version, model/version, freshness, readiness/warnings, and last update columns are visible; search filters to the secondary fixture and restores. |
+| Inventory | `390x844` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-inventory-390.png` | Mobile inventory strip and dense inventory evidence render without horizontal overflow; selected structured fixture opens from the mobile route. |
+| View | `1440x900` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-view-1440.png` | Published structured dashboard loads, executes canonical data views, shows filter digest and timestamp/no-run state. |
+| View | `390x844` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-view-390.png` | Same structured dashboard view is reachable and non-overlapping on mobile. |
+| Data | `1440x900` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-data-1440.png` | Data tab displays `dv-revenue` and table-equivalent results from the real saved-query fixture. |
 | Data | `390x844` | NOT COVERED | The required six-scene matrix did not require separate Data-tab mobile coverage; mobile View covers the published view route, and Data desktop covers the data-table tab. |
-| Lineage | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-lineage-1440.png` | Lineage tab displays reviewed source evidence and saved-query lineage locators. |
+| Lineage | `1440x900` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-lineage-1440.png` | Lineage tab displays reviewed source evidence and saved-query lineage locators. |
 | Lineage | `390x844` | NOT COVERED | The required six-scene matrix did not require separate Lineage-tab mobile coverage; mobile View covers the route, and Lineage desktop covers the lineage/evidence tab. |
-| Edit/review | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-edit-review-1440.png` | Publish disabled with one blocker; draft title patch succeeds; tile title/business question/encoding save via JSON Patch; tile order moves down/up; filter label/operator/default save; add/remove filter; visible 409 conflict banner and retry; validate and preview show review state. |
-| Edit/review | `390x844` | `docs/product/dashboard-browser-smoke/dashboard-edit-review-390.png` | Same tile/filter/layout editor path, validation, preview, blocker-gated publish, and editor layout run on mobile without overflow/overlap. |
-| Stale/partial | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-stale-partial-1440.png` | Stale saved-query view shows visible `Stale data` plus `as of`; partial failure view shows visible `Partial failure` and error/no-run timestamp text. |
-| Stale/partial | `390x844` | `docs/product/dashboard-browser-smoke/dashboard-stale-partial-390.png` | Same stale and partial failure states are visible on mobile without relying only on color. |
-| Permission denied | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-permission-denied-1440.png` | Unresolved row/column/redaction policy refs return visible blocked/permission-denied state without executing saved query. |
-| Permission denied | `390x844` | `docs/product/dashboard-browser-smoke/dashboard-permission-denied-390.png` | Same policy-denied state renders on mobile. |
-| Legacy | `1440x900` | `docs/product/dashboard-browser-smoke/dashboard-legacy-1440.png` | Legacy review asset displays `Legacy HTML fallback` and `not agent-ready`. |
-| Legacy | `390x844` | `docs/product/dashboard-browser-smoke/dashboard-legacy-390.png` | Same legacy fallback state renders on mobile. |
+| Edit/review | `1440x900` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-edit-review-1440.png` | Publish disabled with one blocker; draft title patch succeeds; tile title/business question/encoding save via JSON Patch; tile order moves down/up; filter label/operator/default save; add/remove filter; visible 409 conflict banner and retry; validate and preview show review state. |
+| Edit/review | `390x844` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-edit-review-390.png` | Same tile/filter/layout editor path, validation, preview, blocker-gated publish, and editor layout run on mobile without overflow/overlap. |
+| Stale/partial | `1440x900` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-stale-partial-1440.png` | Stale saved-query view shows visible `Stale data` plus `as of`; partial failure view shows visible `Partial failure` and error/no-run timestamp text. |
+| Stale/partial | `390x844` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-stale-partial-390.png` | Same stale and partial failure states are visible on mobile without relying only on color. |
+| Permission denied | `1440x900` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-permission-denied-1440.png` | Unresolved row/column/redaction policy refs return visible blocked/permission-denied state without executing saved query. |
+| Permission denied | `390x844` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-permission-denied-390.png` | Same policy-denied state renders on mobile. |
+| Legacy | `1440x900` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-legacy-1440.png` | Legacy review asset displays `Legacy HTML fallback` and `not agent-ready`. |
+| Legacy | `390x844` | `$EVIDENCE_DIR/dashboard-browser-smoke/dashboard-legacy-390.png` | Same legacy fallback state renders on mobile. |
 
 Every captured scene runs `assertNoHorizontalOverflow` and scoped `assertNoOverlaps` before screenshot capture. The smoke runner still exits non-zero on any `pageerror`, `consoleError`, `requestfailed`, or `http5xx`; no blanket ignore was added.
 

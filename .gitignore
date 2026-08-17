@@ -121,8 +121,12 @@ client/*.local
 
 # Local verification artifacts
 client/tmp-data-modeling-production-*/
+client/tmp-data-modeling-screens*/
 client/tmp-data-models-diagnostic.png
 client/tmp-login-diagnostic.png
+docs/product/dashboard-browser-smoke/
+**/test-results/
+**/playwright-report/
 
 # Tauri build artifacts
 client/src-tauri/target/
