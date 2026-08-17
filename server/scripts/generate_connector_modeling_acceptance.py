@@ -14,8 +14,12 @@ from server.scripts.generate_data_studio_p0_source_matrix import MatrixRow, buil
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_PATH = REPO_ROOT / "docs" / "product" / "data-studio-commercial-p0-connector-modeling-acceptance.md"
-BASE_SHA = "290679967d4e823077861fbd9875c860d698b4b9"
-BASE_SHORT_SHA = "2906799"
+ORIGINAL_BASE_SHA = "290679967d4e823077861fbd9875c860d698b4b9"
+ORIGINAL_BASE_SHORT_SHA = "2906799"
+PARALLEL_BASE_SHA = "13ed502b79d0e5f3b936af54316b2ab571e735a7"
+PARALLEL_BASE_SHORT_SHA = "13ed502"
+FINAL_SYNC_STAGING_SHA = "13ed502b79d0e5f3b936af54316b2ab571e735a7"
+D_HEAD = "pending-final-commit"
 WORKTREE = "/Users/bytedance/worktrees/byaan-connector-modeling-acceptance-p0"
 BRANCH = "acceptance/connector-modeling-commercial-p0"
 
@@ -215,7 +219,11 @@ def render_report() -> str:
         "",
         f"- Branch: `{BRANCH}`",
         f"- Worktree: `{WORKTREE}`",
-        f"- Base SHA: `{BASE_SHA}` (`{BASE_SHORT_SHA}`)",
+        f"- ORIGINAL_BASE_SHA: `{ORIGINAL_BASE_SHA}` (`{ORIGINAL_BASE_SHORT_SHA}`)",
+        f"- PARALLEL_BASE_SHA: `{PARALLEL_BASE_SHA}` (`{PARALLEL_BASE_SHORT_SHA}`)",
+        f"- FINAL_SYNC_STAGING_SHA: `{FINAL_SYNC_STAGING_SHA}`",
+        f"- D_HEAD: `{D_HEAD}`",
+        "- Current acceptance baseline: `PARALLEL_BASE_SHA`; `ORIGINAL_BASE_SHA` is retained as the historical source of the Session D worktree.",
         "- Scope owner: Connector and Modeling Commercial Acceptance",
         "- Scope limit: fixture, contract tests, E2E harness, source matrix evidence, and documentation only. This branch does not change production connector/modeling code.",
         "- Port rule: use isolated ports for local runs. Do not touch `8080`; final 8080 validation belongs to Coordinator after integration.",

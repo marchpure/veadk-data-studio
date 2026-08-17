@@ -7,10 +7,16 @@ cd "$ROOT"
 echo "[acceptance] worktree: $ROOT"
 echo "[acceptance] branch: $(git rev-parse --abbrev-ref HEAD)"
 echo "[acceptance] head: $(git rev-parse HEAD)"
-echo "[acceptance] merge-base with fixed baseline: $(git merge-base HEAD 290679967d4e823077861fbd9875c860d698b4b9)"
+echo "[acceptance] merge-base with original baseline: $(git merge-base HEAD 290679967d4e823077861fbd9875c860d698b4b9)"
+echo "[acceptance] merge-base with parallel baseline: $(git merge-base HEAD 13ed502b79d0e5f3b936af54316b2ab571e735a7)"
 
 if [[ "$(git merge-base HEAD 290679967d4e823077861fbd9875c860d698b4b9)" != "290679967d4e823077861fbd9875c860d698b4b9" ]]; then
-  echo "[acceptance] refusing branch that is not descended from fixed baseline 290679967d4e823077861fbd9875c860d698b4b9" >&2
+  echo "[acceptance] refusing branch that is not descended from original baseline 290679967d4e823077861fbd9875c860d698b4b9" >&2
+  exit 2
+fi
+
+if [[ "$(git merge-base HEAD 13ed502b79d0e5f3b936af54316b2ab571e735a7)" != "13ed502b79d0e5f3b936af54316b2ab571e735a7" ]]; then
+  echo "[acceptance] refusing branch that is not descended from parallel baseline 13ed502b79d0e5f3b936af54316b2ab571e735a7" >&2
   exit 2
 fi
 

@@ -4,7 +4,10 @@ from pathlib import Path
 
 from server.scripts.generate_connector_modeling_acceptance import (
     ACCEPTANCE_SOURCES,
+    FINAL_SYNC_STAGING_SHA,
+    ORIGINAL_BASE_SHA,
     OUTPUT_PATH,
+    PARALLEL_BASE_SHA,
     PROOF_COMMANDS,
     REAL_E2E_COMMANDS,
     acceptance_rows,
@@ -61,6 +64,9 @@ def test_connector_modeling_acceptance_report_keeps_guardrails_explicit() -> Non
     report = render_report()
 
     assert "Overall connector/modeling status: `PARTIAL`, not `READY`." in report
+    assert f"ORIGINAL_BASE_SHA: `{ORIGINAL_BASE_SHA}`" in report
+    assert f"PARALLEL_BASE_SHA: `{PARALLEL_BASE_SHA}`" in report
+    assert f"FINAL_SYNC_STAGING_SHA: `{FINAL_SYNC_STAGING_SHA}`" in report
     assert "Do not touch `8080`" in report
     assert "Catalog tiles: planned rows" in report
     assert "MongoDB and DynamoDB stay in `document_projection`" in report
