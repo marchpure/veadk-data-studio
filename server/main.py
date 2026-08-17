@@ -64,6 +64,7 @@ from server.routers import (
 )  # Unified datasources (connections + datasets)
 from server.routers import evaluation as evaluation_router
 from server.routers import exports as exports_router
+from server.routers import external_assets as external_assets_router
 from server.routers import (
     file_upload as file_upload_router,
 )  # File upload with DB storage
@@ -587,6 +588,7 @@ app.include_router(sharing_router.router, prefix="/api", tags=["sharing"])
 
 app.include_router(analysis_artifacts_router.router, prefix="/api", tags=["analysis-artifacts"])
 app.include_router(assets_router.router, prefix="/api", tags=["assets"])
+app.include_router(external_assets_router.router, prefix="/api", tags=["external-assets"])
 
 app.include_router(source_connections_router.router, prefix="/api", tags=["source-connections"])
 

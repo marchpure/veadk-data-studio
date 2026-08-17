@@ -1,4 +1,3 @@
-import hashlib
 import os
 import secrets
 import sys
@@ -8,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.auth.dependencies import AuthContext, require_scope
+from server.auth.mcp_keys import hash_mcp_api_key
 from server.auth.scopes import Scope
 from server.db.session import get_async_session
 from server.repositories.mcp_api_key import MCPAPIKeyRepository
@@ -24,7 +24,7 @@ mcp_router = APIRouter(prefix="/mcp", tags=["mcp"])
 def generate_api_key() -> tuple[str, str, str]:
     random_part = secrets.token_urlsafe(32)
     api_key = f"byaan_{random_part}"
-    key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    key_hash = hash_mcp_api_key(api_key)
     key_prefix = api_key[:13]
     return api_key, key_hash, key_prefix
 

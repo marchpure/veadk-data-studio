@@ -86,14 +86,11 @@ async def _load_dashboard_body(
 
 
 def _ensure_legacy_html_dashboard(dashboard: Any) -> None:
-    if (
-        dashboard.asset_id
-        and (
-            dashboard.manifest_json
-            or dashboard.manifest_schema_version
-            or dashboard.status != "legacy_unstructured"
-            or dashboard.migration_state != "legacy_unstructured"
-        )
+    if dashboard.asset_id and (
+        dashboard.manifest_json
+        or dashboard.manifest_schema_version
+        or dashboard.status != "legacy_unstructured"
+        or dashboard.migration_state != "legacy_unstructured"
     ):
         raise DashboardEditError(
             "Legacy HTML tools are deprecated for structured dashboards. "
@@ -1332,8 +1329,11 @@ async def search_assets(ctx: RunContextWrapper[Any], query: str = "", asset_type
     Search all analysis assets available to the current notebook.
 
     Unlike search_datasets(), this includes structured datasets, semantic models,
-    and knowledge resources. Use it when a task may need both calculable facts and
-    cited document evidence.
+    governed dashboards, and knowledge resources. Use a dashboard asset when the
+    user asks for a curated business view, dashboard KPI, governed slice, or
+    evidence-backed answer that should follow published dashboard filters and
+    access policy. Use a semantic_model asset when the user asks for an ad hoc
+    metric query over reusable metrics and dimensions.
     """
     tenant_id = ctx.context.get("tenant_id")
     notebook_id = ctx.context.get("notebook_id")
@@ -1375,7 +1375,9 @@ async def describe_asset(ctx: RunContextWrapper[Any], asset_type: str, asset_id:
     Describe one analysis asset before choosing an executor.
 
     Use this after search_assets() to inspect execution modes, freshness,
-    provenance, and evidence locator contract.
+    provenance, evidence locator contract, publish state, gate status, and
+    dashboard metric/dimension/query policy details. Dashboard capabilities are
+    empty unless the dashboard is published and passes its gate.
     """
     tenant_id = ctx.context.get("tenant_id")
 
