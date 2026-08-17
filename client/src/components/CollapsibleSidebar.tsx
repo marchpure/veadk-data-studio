@@ -19,6 +19,7 @@ export default function CollapsibleSidebar() {
   const { isViewer, canImportNotebook } = useScopes()
   const { openPalette } = useCommandPalette()
   const [importModalOpen, setImportModalOpen] = useState(false)
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches)
 
   const { isSelfHosted } = useAppConfig()
 
@@ -27,6 +28,9 @@ export default function CollapsibleSidebar() {
 
   // Only manage expand/collapse state on main pages
   const [isExpanded, setIsExpanded] = useState(() => {
+    if (window.matchMedia('(max-width: 767px)').matches) {
+      return false
+    }
     const stored = localStorage.getItem('sidebar-expanded')
     if (stored !== null) {
       hasUserToggled.current = true
@@ -42,11 +46,32 @@ export default function CollapsibleSidebar() {
     }
   }, [isViewer])
 
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 767px)')
+    const handleViewportChange = (event: MediaQueryListEvent) => {
+      setIsMobile(event.matches)
+      if (event.matches) {
+        setIsExpanded(false)
+        return
+      }
+      const stored = localStorage.getItem('sidebar-expanded')
+      setIsExpanded(stored === null ? !isViewer : stored === 'true')
+    }
+    media.addEventListener('change', handleViewportChange)
+    return () => media.removeEventListener('change', handleViewportChange)
+  }, [isViewer])
+
+  useEffect(() => {
+    if (isMobile) {
+      setIsExpanded(false)
+    }
+  }, [isMobile, location.pathname])
+
   // Save to localStorage only when user manually toggles
   const handleSetExpanded = (value: boolean) => {
     hasUserToggled.current = true
     setIsExpanded(value)
-    if (isMainPage) {
+    if (isMainPage && !isMobile) {
       localStorage.setItem('sidebar-expanded', String(value))
     }
   }
@@ -86,9 +111,20 @@ export default function CollapsibleSidebar() {
   }
 
   return (
-    <div
-      className={`h-full bg-[#1a1a1a] border-r border-[#2a2a2a] flex flex-col overflow-hidden transition-all duration-300 ${
-        isExpanded ? 'w-72' : 'w-12 cursor-pointer hover:bg-[#222222]'
+    <>
+      {isMobile && isExpanded && (
+        <button
+          type="button"
+          className="fixed inset-0 z-40 bg-black/60"
+          aria-label="Close navigation"
+          onClick={() => handleSetExpanded(false)}
+        />
+      )}
+      <div
+      className={`h-full shrink-0 bg-[#1a1a1a] border-r border-[#2a2a2a] flex flex-col overflow-hidden transition-all duration-300 ${
+        isExpanded
+          ? isMobile ? 'fixed inset-y-0 left-0 z-50 w-72 shadow-2xl' : 'w-72'
+          : 'w-12 cursor-pointer hover:bg-[#222222]'
       }`}
       onClick={!isExpanded ? handleToggleSidebar : undefined}
       title={!isExpanded ? "Click to expand sidebar" : undefined}
@@ -314,6 +350,7 @@ export default function CollapsibleSidebar() {
         />
       )}
 
-    </div>
+      </div>
+    </>
   )
 }
