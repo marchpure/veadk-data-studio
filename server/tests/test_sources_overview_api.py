@@ -845,7 +845,7 @@ async def test_sources_overview_uses_snapshot_projection_manifest_for_asset_coun
     assert item["raw_artifact_uri"] == "tos://sales-bucket/projections/targets.xlsx"
     assert item["parsed_asset_counts"]["tables"] == 2
     assert item["parsed_asset_counts"]["files"] == 1
-    assert item["next_actions"] == ["Review projection", "Generate semantic model"]
+    assert item["next_actions"] == ["Review projection"]
     assert item["projection_review"] is None
     assert item["modeling_status"] == "needs_projection"
     assert item["modeling_can_load_profile"] is False
@@ -864,7 +864,7 @@ async def test_sources_overview_marks_verified_projection_review_after_semantic_
     assert before.status_code == 200
     before_item = next(item for item in before.json()["data"]["items"] if item["id"] == resource["id"])
     assert before_item["projection_review"] is None
-    assert before_item["next_actions"] == ["Review projection", "Generate semantic model"]
+    assert before_item["next_actions"] == ["Review projection"]
     assert before_item["modeling_status"] == "needs_projection"
     assert before_item["modeling_mode"] == "projection"
     assert before_item["modeling_can_load_profile"] is False
@@ -882,7 +882,7 @@ async def test_sources_overview_marks_verified_projection_review_after_semantic_
     assert item["projection_review"]["status"] == "verified"
     assert item["projection_review"]["current"] is True
     assert item["projection_review"].get("semantic_handoff") is None
-    assert item["next_actions"] == ["Review semantic handoff", "Generate semantic model"]
+    assert item["next_actions"] == ["Review semantic handoff"]
     assert item["modeling_status"] == "needs_projection"
     assert item["modeling_mode"] == "projection"
     assert item["modeling_next_action"] == "Review semantic handoff"

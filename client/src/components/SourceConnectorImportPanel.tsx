@@ -634,17 +634,17 @@ export function SourceConnectorImportPanel({
             </div>
           ) : (
             <div className="space-y-4 rounded-lg border border-[#444444] bg-[#1a1a1a] p-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Connection name" value={tosForm.displayName} onChange={value => setTosForm(prev => ({ ...prev, displayName: value }))} disabled={disabled || createSourceConnection.isPending} />
               <Field label="Region" value={tosForm.region} onChange={value => setTosForm(prev => ({ ...prev, region: value }))} placeholder="cn-beijing" disabled={disabled || createSourceConnection.isPending} required />
             </div>
             <Field label="Endpoint" value={tosForm.endpoint} onChange={value => setTosForm(prev => ({ ...prev, endpoint: value }))} placeholder="https://tos-cn-beijing.volces.com" disabled={disabled || createSourceConnection.isPending} required />
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Access Key ID" value={tosForm.accessKeyId} onChange={value => setTosForm(prev => ({ ...prev, accessKeyId: value }))} disabled={disabled || createSourceConnection.isPending} required />
               <Field label="Secret Access Key" type="password" value={tosForm.secretAccessKey} onChange={value => setTosForm(prev => ({ ...prev, secretAccessKey: value }))} disabled={disabled || createSourceConnection.isPending} required />
             </div>
             <Field label="Session Token / STS" value={tosForm.sessionToken} onChange={value => setTosForm(prev => ({ ...prev, sessionToken: value }))} disabled={disabled || createSourceConnection.isPending} />
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Default bucket" value={tosForm.defaultBucket} onChange={value => setTosForm(prev => ({ ...prev, defaultBucket: value }))} disabled={disabled || createSourceConnection.isPending} />
               <Field label="Default prefix" value={tosForm.defaultPrefix} onChange={value => setTosForm(prev => ({ ...prev, defaultPrefix: value }))} disabled={disabled || createSourceConnection.isPending} />
             </div>
@@ -735,8 +735,8 @@ export function SourceConnectorImportPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        <div className="col-span-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(140px,1fr)]">
+        <div className="min-w-0">
           <Label className="text-white">Search / prefix filter</Label>
           <div className="relative mt-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
@@ -787,7 +787,7 @@ export function SourceConnectorImportPanel({
               variant="outline"
               onClick={handleQuickLocate}
               disabled={!quickLocateUrl.trim() || locateSourceResource.isPending || importSourceResources.isPending}
-              className="border-[#555555] text-white hover:bg-[#3a3a3a]"
+              className="shrink-0 border-[#555555] text-white hover:bg-[#3a3a3a]"
             >
               {locateSourceResource.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               Locate
@@ -921,11 +921,11 @@ export function SourceConnectorImportPanel({
         )}
       </div>
 
-      <div className="flex items-center justify-between rounded border border-[#444444] bg-[#1a1a1a] px-3 py-2 text-sm">
-        <span className="text-gray-300">
+      <div className="flex flex-col gap-3 rounded border border-[#444444] bg-[#1a1a1a] px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+        <span className="min-w-0 text-gray-300">
           {selectedList.length === 0 ? 'No resources selected' : `${selectedList.length} selected for immediate sync`}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           {resources.data?.next_page_token && (
             <Button
               type="button"

@@ -806,15 +806,7 @@ class SourceOverviewService:
             return ["Capture snapshot"]
         if family == "object_storage":
             if projected_dataset_id and semantic_count == 0:
-                if projection_review and projection_review.get("status") == "rejected":
-                    return ["Revise projection", "Review projection"]
-                if projection_review and projection_review.get("current") is False:
-                    return ["Review stale projection", "Generate semantic model"]
-                if self._projection_review_is_verified(projection_review):
-                    if self._projection_semantic_handoff_ready(projection_review):
-                        return ["Generate semantic model", "Review semantic handoff"]
-                    return ["Review semantic handoff", "Generate semantic model"]
-                return ["Review projection", "Generate semantic model"]
+                return self._projection_next_actions(projection_review)
             if knowledge_resource and knowledge_resource.index_status == "indexed":
                 return ["Search evidence", "Review projection"]
             if has_snapshot:
@@ -824,29 +816,24 @@ class SourceOverviewService:
             return ["Browse bucket or prefix"]
         if family == "databases":
             if projected_dataset_id and semantic_count == 0:
-                if projection_review and projection_review.get("status") == "rejected":
-                    return ["Revise projection", "Review projection"]
-                if projection_review and projection_review.get("current") is False:
-                    return ["Review stale projection", "Generate semantic model"]
-                if self._projection_review_is_verified(projection_review):
-                    if self._projection_semantic_handoff_ready(projection_review):
-                        return ["Generate semantic model", "Review semantic handoff"]
-                    return ["Review semantic handoff", "Generate semantic model"]
-                return ["Review projection", "Generate semantic model"]
+                return self._projection_next_actions(projection_review)
             return ["Review schema profile"]
         if projected_dataset_id and semantic_count == 0:
-            if projection_review and projection_review.get("status") == "rejected":
-                return ["Revise projection", "Review projection"]
-            if projection_review and projection_review.get("current") is False:
-                return ["Review stale projection", "Generate semantic model"]
-            if self._projection_review_is_verified(projection_review):
-                if self._projection_semantic_handoff_ready(projection_review):
-                    return ["Generate semantic model", "Review semantic handoff"]
-                return ["Review semantic handoff", "Generate semantic model"]
-            return ["Review projection", "Generate semantic model"]
+            return self._projection_next_actions(projection_review)
         if has_snapshot:
             return ["Open source detail"]
         return ["Capture snapshot"]
+
+    def _projection_next_actions(self, projection_review: dict[str, Any] | None) -> list[str]:
+        if projection_review and projection_review.get("status") == "rejected":
+            return ["Revise projection", "Review projection"]
+        if projection_review and projection_review.get("current") is False:
+            return ["Review stale projection", "Review projection"]
+        if self._projection_review_is_verified(projection_review):
+            if self._projection_semantic_handoff_ready(projection_review):
+                return ["Generate semantic model", "Review semantic handoff"]
+            return ["Review semantic handoff"]
+        return ["Review projection"]
 
     def _schema_table_count(self, schema_cache: str | None) -> int:
         if not schema_cache:

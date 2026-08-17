@@ -378,8 +378,22 @@ async function runMobile(browser) {
     screenshot: `${screenDir}/03-blocked-source-overview-390.png`,
   })
 
+  await page.getByRole('button', { name: 'Add source' }).click()
+  await page.getByRole('button', { name: /Business docs/i }).click()
+  await page.getByRole('button', { name: /Feishu \/ Lark/i }).click()
+  await assertVisible(page, 'Authorization required')
+  await assertVisible(page, 'Reauthorize Feishu')
+  await page.screenshot({ path: `${screenDir}/04-needs-authorization-picker-390.png`, fullPage: true })
+  record('needs_authorization_picker_390', {
+    screenshot: `${screenDir}/04-needs-authorization-picker-390.png`,
+  })
+
+  const overflowOk = await noHorizontalOverflow(page)
   await assertNoInfiniteLoading(page)
   await context.close()
+  if (!overflowOk) {
+    throw new Error('Mobile horizontal overflow detected')
+  }
 }
 
 async function main() {
