@@ -404,3 +404,8 @@ async def test_owner_can_folder_share_notebook_and_dashboard_after_dashboard_sha
     assert grant.channel == "folder"
     assert grant.audience == "folder_member"
     assert grant.status == "active"
+
+    delete_dashboard_response = await test_client.delete(f"/api/folders/{folder_id}/dashboards/{dashboard_id}")
+    assert delete_dashboard_response.status_code == 204
+    await test_session.refresh(grant)
+    assert grant.status == "revoked"

@@ -517,6 +517,13 @@ class FolderService:
 
         result = await folder_dashboard_repo.delete(folder_dashboard.id)
         if result:
+            await SharingService(session).revoke_legacy_grant(
+                tenant_id=dashboard.tenant_id,
+                legacy_surface="folder_dashboard",
+                legacy_id=str(folder_dashboard.id),
+                actor_id=str(user_id),
+                reason="folder dashboard unshared",
+            )
             logger.info(f"Dashboard {dashboard_id} unshared from folder {folder_id}")
         return result
 
