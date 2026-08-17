@@ -419,6 +419,7 @@ async function seedDashboardFixtures() {
 
   return {
     tenantId,
+    localBootstrap: !headers.Authorization,
     notebookId: notebook.id,
     headers,
     structuredSlug: structured.asset.slug,
@@ -462,12 +463,15 @@ async function issueBrowserRefreshToken() {
   return refreshToken
 }
 
-async function makePage(viewport, tenantId) {
-  const refreshToken = await issueBrowserRefreshToken()
+async function makePage(viewport, fixtures) {
+  const tenantId = fixtures.tenantId
+  const refreshToken = fixtures.localBootstrap ? null : await issueBrowserRefreshToken()
   const context = await browser.newContext({ viewport, baseURL })
   await context.addInitScript(({ id, token }) => {
     window.localStorage.setItem('byaan_active_tenant', id)
-    window.sessionStorage.setItem('byaan_refresh_token', token)
+    if (token) {
+      window.sessionStorage.setItem('byaan_refresh_token', token)
+    }
   }, { id: tenantId, token: refreshToken })
   const page = await context.newPage()
   page.on('pageerror', error => {
@@ -777,7 +781,7 @@ async function runEditReviewScene(page, fixtures, viewport) {
 }
 
 async function runDashboardJourney(fixtures) {
-  const desktop = await makePage({ width: 1440, height: 900 }, fixtures.tenantId)
+  const desktop = await makePage({ width: 1440, height: 900 }, fixtures)
   await desktop.goto(`${baseURL}/notebook/${fixtures.notebookId}/preview`, { waitUntil: 'networkidle' })
   await desktop.getByTitle('Close preview (Esc)').waitFor()
   await desktop.getByRole('button', { name: /Code/i }).click()
@@ -793,7 +797,7 @@ async function runDashboardJourney(fixtures) {
   await runExplicitLegacyAssetScene(desktop, explicitLegacyAssetId)
   await desktop.close()
 
-  const mobile = await makePage({ width: 390, height: 844 }, fixtures.tenantId)
+  const mobile = await makePage({ width: 390, height: 844 }, fixtures)
   await runInventoryScene(mobile, fixtures, '390')
   await runViewScene(mobile, fixtures, '390')
   await runEditReviewScene(mobile, fixtures, '390')
