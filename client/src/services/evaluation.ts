@@ -22,6 +22,29 @@ interface StandardResponse<T> {
   data: T
 }
 
+export interface EvaluationApiErrorData {
+  code?: string
+  errors?: Array<{
+    row?: number
+    index?: number
+    case_key?: string | null
+    error?: string
+  }>
+  [key: string]: unknown
+}
+
+export class EvaluationApiError extends Error {
+  status: number
+  data: EvaluationApiErrorData | null
+
+  constructor(message: string, status: number, data: EvaluationApiErrorData | null = null) {
+    super(message)
+    this.name = 'EvaluationApiError'
+    this.status = status
+    this.data = data
+  }
+}
+
 async function getEvaluationApiUrl(): Promise<string> {
   const runtimeBase = getApiBaseUrl()
   if (runtimeBase && runtimeBase !== '/api') {
@@ -60,10 +83,10 @@ async function evaluationFetch<T>(path: string, init?: RequestInit): Promise<T> 
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     const message = payload?.message || payload?.detail || response.statusText || 'Evaluation request failed'
-    throw new Error(message)
+    throw new EvaluationApiError(message, response.status, payload?.data ?? null)
   }
   if (payload?.success === false) {
-    throw new Error(payload.message || 'Evaluation request failed')
+    throw new EvaluationApiError(payload.message || 'Evaluation request failed', response.status, payload?.data ?? null)
   }
   return (payload?.data ?? payload) as T
 }

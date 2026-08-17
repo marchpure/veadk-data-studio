@@ -25,7 +25,7 @@ from server.serializers.evaluation import (
     evaluation_suite_version_payload,
     promotion_payload,
 )
-from server.services.evaluation import EvaluationService
+from server.services.evaluation import EvaluationCaseImportValidationError, EvaluationService
 
 router = APIRouter()
 
@@ -363,6 +363,15 @@ async def import_evaluation_case_drafts(
             actor_id=str(auth.user_id),
             actor_type="human",
         )
+    except EvaluationCaseImportValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "evaluation_case_import_validation_failed",
+                "message": "Evaluation case import validation failed",
+                "errors": exc.errors,
+            },
+        ) from exc
     except ValueError as exc:
         raise _service_error(exc) from exc
     created = [evaluation_case_payload(case) for case in imported["created"]]

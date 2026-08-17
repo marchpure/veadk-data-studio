@@ -409,6 +409,91 @@ async def test_evaluation_rest_create_import_publish_and_run_closed_loop(
     assert "private_table" not in json.dumps(failures)
 
 
+async def test_evaluation_import_returns_structured_row_validation_errors(
+    test_client,
+) -> None:
+    create_response = await test_client.post(
+        "/api/evaluation/suites",
+        json={
+            "slug": f"commercial-import-errors-{uuid4().hex[:8]}",
+            "name": "Commercial Import Error Suite",
+            "description": "Import diagnostics fixture",
+            "target_kinds": ["semantic_model"],
+            "gate_policy": {"security_hard_fail": True},
+        },
+    )
+    assert create_response.status_code == 201
+    draft_version_id = create_response.json()["data"]["suite"]["versions"][0]["id"]
+
+    import_response = await test_client.post(
+        f"/api/evaluation/suite-versions/{draft_version_id}/cases/import",
+        json={
+            "format": "json",
+            "cases": [
+                _import_case_payload("valid-case"),
+                {
+                    **_import_case_payload("bad-case"),
+                    "operation": "unsupported_operation",
+                },
+                {
+                    **_import_case_payload("unsupported-kind"),
+                    "target_kinds": ["unsupported"],
+                },
+            ],
+        },
+    )
+
+    assert import_response.status_code == 400
+    payload = import_response.json()
+    assert payload["success"] is False
+    assert payload["message"] == "Evaluation case import validation failed"
+    assert payload["data"]["code"] == "evaluation_case_import_validation_failed"
+    assert payload["data"]["errors"] == [
+        {
+            "row": 2,
+            "index": 1,
+            "case_key": "bad-case",
+            "error": "unsupported evaluation operation: unsupported_operation",
+        },
+        {
+            "row": 3,
+            "index": 2,
+            "case_key": "unsupported-kind",
+            "error": "unsupported evaluation target kinds: ['unsupported']",
+        },
+    ]
+
+
+async def test_evaluation_jsonl_import_reports_bad_line_number(
+    test_client,
+) -> None:
+    create_response = await test_client.post(
+        "/api/evaluation/suites",
+        json={
+            "slug": f"commercial-jsonl-errors-{uuid4().hex[:8]}",
+            "name": "Commercial JSONL Error Suite",
+            "description": "JSONL diagnostics fixture",
+            "target_kinds": ["semantic_model"],
+            "gate_policy": {"security_hard_fail": True},
+        },
+    )
+    assert create_response.status_code == 201
+    draft_version_id = create_response.json()["data"]["suite"]["versions"][0]["id"]
+
+    import_response = await test_client.post(
+        f"/api/evaluation/suite-versions/{draft_version_id}/cases/import",
+        json={
+            "format": "jsonl",
+            "content": json.dumps(_import_case_payload("valid-jsonl")) + "\n{not-json",
+        },
+    )
+
+    assert import_response.status_code == 400
+    payload = import_response.json()
+    assert payload["success"] is False
+    assert payload["message"].startswith("Invalid JSONL at line 2")
+
+
 async def test_evaluation_run_rest_lifecycle_artifact_and_completion(
     test_client,
     test_session: AsyncSession,

@@ -20,7 +20,7 @@ import {
 import { Button } from '../../../components/ui/button'
 import { Input } from '../../../components/ui/input'
 import { cn } from '../../../lib/utils'
-import { EvaluationService } from '../../../services/evaluation'
+import { EvaluationApiError, EvaluationService } from '../../../services/evaluation'
 import type {
   AdvisorChangeSet,
   AdvisorReview,
@@ -352,7 +352,7 @@ export default function EvaluationWorkspacePage() {
       }
       setTab('cases')
     } catch (err) {
-      setImportMessage(err instanceof Error ? err.message : 'Unable to import Evaluation cases')
+      setImportMessage(formatImportError(err))
     } finally {
       setLoadingAction(false)
     }
@@ -836,6 +836,20 @@ function validateCaseImport(value: string, format: CaseImportFormat): { valid: b
   } catch (error) {
     return { valid: false, count: 0, errors: [error instanceof Error ? error.message : 'Import content is invalid.'] }
   }
+}
+
+function formatImportError(error: unknown): string {
+  if (error instanceof EvaluationApiError && error.data?.code === 'evaluation_case_import_validation_failed') {
+    const rowErrors = error.data.errors ?? []
+    const summary = rowErrors.slice(0, 3).map(item => {
+      const row = typeof item.row === 'number' ? `row ${item.row}` : 'row'
+      const caseKey = item.case_key ? ` (${item.case_key})` : ''
+      return `${row}${caseKey}: ${item.error ?? 'invalid case'}`
+    })
+    const remainder = rowErrors.length > summary.length ? ` +${rowErrors.length - summary.length} more` : ''
+    return `${error.message}: ${summary.join('; ')}${remainder}`
+  }
+  return error instanceof Error ? error.message : 'Unable to import Evaluation cases'
 }
 
 function parseCaseImport(value: string, format: CaseImportFormat): EvaluationCaseDraftInput[] {

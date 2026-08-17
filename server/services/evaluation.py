@@ -33,6 +33,12 @@ SUPPORTED_TARGET_KINDS = {"connector", "semantic_model", "agent_answer", "dashbo
 SUPPORTED_OPERATIONS = {"answer_question", "execute_sql", "query_dashboard", "apply_policy", "end_to_end_task"}
 
 
+class EvaluationCaseImportValidationError(ValueError):
+    def __init__(self, errors: list[dict[str, Any]]):
+        super().__init__("evaluation case import validation failed")
+        self.errors = sanitize_error_payload(errors)
+
+
 class EvaluationService:
     def __init__(self, session: AsyncSession):
         self._session = session
@@ -782,9 +788,16 @@ class EvaluationService:
             try:
                 self._validate_case_import_payload(payload)
             except (KeyError, TypeError, ValueError) as exc:
-                errors.append({"index": index, "case_key": payload.get("case_key"), "error": str(exc)})
+                errors.append(
+                    {
+                        "row": index + 1,
+                        "index": index,
+                        "case_key": payload.get("case_key"),
+                        "error": str(exc),
+                    }
+                )
         if errors:
-            raise ValueError(f"evaluation case import validation failed: {errors}")
+            raise EvaluationCaseImportValidationError(errors)
         imported = []
         existing = []
         for payload in cases:
