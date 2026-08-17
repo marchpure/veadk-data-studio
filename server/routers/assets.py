@@ -26,6 +26,7 @@ async def search_assets(
         notebook_id=payload.notebook_id,
         query=payload.query,
         asset_types=list(payload.asset_types),
+        publish_states=list(payload.publish_states),
         limit=payload.limit,
     )
     return success_response(
