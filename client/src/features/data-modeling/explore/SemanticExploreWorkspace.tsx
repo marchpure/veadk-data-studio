@@ -118,7 +118,9 @@ export function SemanticExploreWorkspace({ model, onReviewModel }: { model: Sema
                           {(metric?.lineage ?? []).map((item, index) => <StatusPill key={`${item}-${index}`}>{item}</StatusPill>)}
                         </div>
                       </div>
-                      <pre className="max-h-48 overflow-auto rounded-md border border-[#343a40] bg-[#101214] p-3 text-xs text-[#cdd3d8] custom-scrollbar">{metric?.preview.sql}</pre>
+                      <div className="rounded-md border border-[#343a40] bg-[#101214] p-3 text-xs leading-5 text-[#cdd3d8]">
+                        Raw query text is hidden in the commercial workspace. Use lineage, metric formula, and validation status for review.
+                      </div>
                     </Surface>
                   )}
                 </div>

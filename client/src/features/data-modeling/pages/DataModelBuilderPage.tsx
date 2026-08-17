@@ -82,6 +82,14 @@ export default function DataModelBuilderPage() {
             </div>
           </div>
         </div>
+        <div className="grid gap-2 border-t border-[#30363a] px-4 py-3 md:grid-cols-6">
+          <ReadinessGate label="Source understanding" tone={model.suggestions.length ? 'ready' : 'warning'} value={model.suggestions.length ? `${model.suggestions.length} candidates` : 'needs evidence'} />
+          <ReadinessGate label="Profile" tone={model.entities.length ? 'ready' : 'blocked'} value={`${model.entities.length} entities`} />
+          <ReadinessGate label="Projection" tone={model.relationships.some(rel => rel.validationStatus === 'blocked') ? 'blocked' : 'ready'} value={model.datasource} />
+          <ReadinessGate label="Semantic draft" tone={model.status === 'Published' ? 'ready' : 'warning'} value={model.draftRevision} />
+          <ReadinessGate label="Lineage" tone={model.metrics.some(metric => metric.lineage.length > 0) ? 'ready' : 'warning'} value={`${model.metrics.length} metrics`} />
+          <ReadinessGate label="MCP" tone={model.publishedVersion !== 'v0' ? 'ready' : 'warning'} value={model.mcp.exposedVersion} />
+        </div>
         <div className="flex items-center gap-3 overflow-x-auto border-t border-[#30363a] px-4 py-2 custom-scrollbar">
           <div className={modelingStyles.segmented}>
             {modeLabels.map(mode => (
@@ -116,6 +124,20 @@ export default function DataModelBuilderPage() {
           {model.validationLog.length > 2 && <span className="text-[#818c95]">+{model.validationLog.length - 2} more</span>}
         </div>
       </footer>
+    </div>
+  )
+}
+
+function ReadinessGate({ label, value, tone }: { label: string; value: string; tone: 'ready' | 'warning' | 'blocked' }) {
+  const toneClass = tone === 'ready'
+    ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200'
+    : tone === 'blocked'
+      ? 'border-red-500/25 bg-red-500/10 text-red-200'
+      : 'border-amber-500/25 bg-amber-500/10 text-amber-100'
+  return (
+    <div className={`min-w-0 rounded-md border p-2 ${toneClass}`}>
+      <div className="truncate text-[11px] uppercase opacity-75">{label}</div>
+      <div className="mt-1 truncate text-xs font-medium">{value}</div>
     </div>
   )
 }

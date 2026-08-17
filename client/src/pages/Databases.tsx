@@ -195,6 +195,8 @@ const readinessGateSummary = (connector?: ConnectorDefinition): string | null =>
   if (!connector?.readiness_gates?.length) return null
   const passed = connector.readiness_gates.filter(gate => gate.status === 'passed').length
   const partial = connector.readiness_gates.filter(gate => gate.status === 'partial').length
+  const blocked = connector.readiness_gates.filter(gate => gate.status === 'blocked' || gate.status === 'failed').length
+  if (blocked > 0) return `${passed}/${connector.readiness_gates.length} passed · ${blocked} blocked`
   return partial > 0
     ? `${passed}/${connector.readiness_gates.length} passed · ${partial} partial`
     : `${passed}/${connector.readiness_gates.length} gates`
@@ -405,8 +407,8 @@ export default function DatabasesPage() {
         icon: Leaf,
         availability: 'beta',
         outputs: ['Dataset'],
-        description: 'Connect MongoDB for sampled document profile snapshots and projection review.',
-        limitations: ['Requires reviewed tabular projection before production semantic modeling; no automatic metric candidates are generated.'],
+        description: 'Connect MongoDB for sampled document profile snapshots. Semantic use is blocked until projection review is complete.',
+        limitations: ['Needs projection review before production semantic modeling; no automatic metric candidates are generated.'],
         modelingModes: ['Document projection'],
       },
       {
@@ -416,8 +418,8 @@ export default function DatabasesPage() {
         icon: Cloud,
         availability: 'beta',
         outputs: ['Dataset'],
-        description: 'Connect DynamoDB for key schema, sampled item profile snapshots and projection review.',
-        limitations: ['Requires reviewed tabular projection before production semantic modeling; no automatic metric candidates are generated.'],
+        description: 'Connect DynamoDB for key schema and sampled item profile snapshots. Semantic use is blocked until projection review is complete.',
+        limitations: ['Needs projection review before production semantic modeling; no automatic metric candidates are generated.'],
         modelingModes: ['Document projection'],
       },
     ]
@@ -631,6 +633,8 @@ export default function DatabasesPage() {
     const details = [
       source.modeling_mode?.replace(/_/g, ' '),
       source.modeling_can_load_profile ? 'profile ready' : null,
+      source.modeling_status === 'needs_projection' ? 'needs reviewed projection' : null,
+      source.last_synced_at ? `last sync ${formatTimeAgo(source.last_synced_at)}` : 'no sync recorded',
       source.consumer_counts.semantic_models > 0 ? `${source.consumer_counts.semantic_models} model${source.consumer_counts.semantic_models === 1 ? '' : 's'}` : null,
     ].filter(Boolean)
     return details.length > 0 ? details.join(' · ') : (source.modeling_next_action || primaryNextAction(source) || 'Open detail')
@@ -2088,6 +2092,11 @@ export default function DatabasesPage() {
                                   Readiness: {readinessGateSummary(option.connector)}
                                 </span>
                               )}
+                              {option.availability === 'planned' && (
+                                <span className="mt-1 block text-[11px] text-gray-500">
+                                  Setup disabled until adapter and contract gates pass
+                                </span>
+                              )}
                             </span>
                             <span className={`mt-0.5 text-[10px] uppercase ${
                               option.availability === 'available'
@@ -2551,7 +2560,10 @@ export default function DatabasesPage() {
 
 	                    {/* Database Connection Forms */}
                     {hasActiveSetupForm && selectedType === 'mongo' && (
-                      <div>
+                      <div className="space-y-3">
+                        <div className="rounded-md border border-amber-700/40 bg-amber-950/20 p-3 text-xs leading-5 text-amber-100/75">
+                          MongoDB is beta and needs projection review before production semantic modeling. Setup creates source evidence only; it does not open a fake semantic-ready path.
+                        </div>
                         <Label htmlFor="conn-string" className="text-white">
                           Connection String <span className="text-red-400">*</span>
                         </Label>
@@ -2585,6 +2597,9 @@ export default function DatabasesPage() {
 
                     {hasActiveSetupForm && selectedType === 'dynamodb' && (
                       <div className="space-y-4">
+                        <div className="rounded-md border border-amber-700/40 bg-amber-950/20 p-3 text-xs leading-5 text-amber-100/75">
+                          DynamoDB is beta and needs projection review before production semantic modeling. Setup creates sampled evidence only; publish gates remain blocked until review.
+                        </div>
                         <div>
                           <Label htmlFor="region" className="text-white">AWS Region <span className="text-red-400">*</span></Label>
                           <Input
@@ -2877,11 +2892,11 @@ export default function DatabasesPage() {
                                 </div>
                               </div>
                             </div>
-                            <p className="text-xs text-gray-400 -mt-2">Each pick becomes its own connection sharing this access token. Rotate later by editing each.</p>
+                            <p className="text-xs text-gray-400 -mt-2">Each pick becomes its own connection under the current Databricks authorization. Rotate credentials later by editing each connection.</p>
 
                             <div className="border border-[#444444] rounded-md divide-y divide-[#3a3a3a] max-h-[300px] overflow-y-auto custom-scrollbar">
                               {discoveredCatalogs.length === 0 && (
-                                <div className="p-6 text-sm text-gray-400 text-center">No catalogs visible to this token.</div>
+                                <div className="p-6 text-sm text-gray-400 text-center">No catalogs visible to this authorization.</div>
                               )}
                               {discoveredCatalogs
                                 .filter(c => !databricksCatalogFilter.trim() || c.name.toLowerCase().includes(databricksCatalogFilter.toLowerCase().trim()))
