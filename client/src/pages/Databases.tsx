@@ -195,8 +195,6 @@ const readinessGateSummary = (connector?: ConnectorDefinition): string | null =>
   if (!connector?.readiness_gates?.length) return null
   const passed = connector.readiness_gates.filter(gate => gate.status === 'passed').length
   const partial = connector.readiness_gates.filter(gate => gate.status === 'partial').length
-  const blocked = connector.readiness_gates.filter(gate => gate.status === 'blocked' || gate.status === 'failed').length
-  if (blocked > 0) return `${passed}/${connector.readiness_gates.length} passed · ${blocked} blocked`
   return partial > 0
     ? `${passed}/${connector.readiness_gates.length} passed · ${partial} partial`
     : `${passed}/${connector.readiness_gates.length} gates`
@@ -654,6 +652,7 @@ export default function DatabasesPage() {
       projected_dataset_id: source.projected_dataset_id,
       created_by: source.owner?.id,
       created_at: source.updated_at || source.created_at,
+      updated_at: source.updated_at,
       is_public: source.visibility === 'team' || source.visibility === 'public',
     }
   }

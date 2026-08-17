@@ -852,6 +852,7 @@ export interface Datasource {
   }>
   created_by?: string
   created_at: string
+  updated_at?: string | null
   is_public?: boolean
 }
 
