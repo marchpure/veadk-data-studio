@@ -148,12 +148,20 @@ async def _create_case_run(
 async def seed() -> dict[str, str]:
     slug = os.getenv("EVALUATION_SMOKE_SLUG") or f"evaluation-smoke-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
     async with AsyncSessionFactory() as session:
-        bootstrap = await get_local_bootstrap(session)
-        tenant_id = UUID(bootstrap["tenant_id"])
-        user_id = UUID(bootstrap["user_id"])
+        explicit_tenant_id = os.getenv("EVALUATION_SMOKE_TENANT_ID")
+        explicit_user_id = os.getenv("EVALUATION_SMOKE_USER_ID")
+        if explicit_tenant_id:
+            tenant_id = UUID(explicit_tenant_id)
+            user_id = UUID(explicit_user_id) if explicit_user_id else None
+        else:
+            bootstrap = await get_local_bootstrap(session)
+            tenant_id = UUID(bootstrap["tenant_id"])
+            user_id = UUID(bootstrap["user_id"])
         tenant = await session.get(Tenant, tenant_id)
-        owner = await session.get(User, user_id)
-        if tenant is None or owner is None:
+        if tenant is None:
+            raise RuntimeError("evaluation smoke tenant was not available")
+        owner = await session.get(User, user_id or tenant.owner_id)
+        if owner is None:
             raise RuntimeError("local bootstrap tenant/user was not available")
 
         suite = EvaluationSuite(

@@ -8,6 +8,7 @@ import {
   Braces,
   CheckCircle2,
   Database,
+  ExternalLink,
   Filter,
   GitBranch,
   LayoutDashboard,
@@ -131,7 +132,11 @@ export default function DashboardWorkspacePage() {
       const version = await DashboardService.getVersion(id, versionSummary.version_num)
       setSelectedVersion(version)
       setVersionNum(version.version_num)
-      setEditorSelection(previous => normalizeEditorSelection(version.manifest, previous))
+      setRun(null)
+      setEditorSelection(previous => {
+        if (!isStructuredDashboardManifest(version.manifest)) return null
+        return normalizeEditorSelection(version.manifest, previous)
+      })
       const diff = extractSemanticDiff(version)
       setSemanticDiff(diff ?? extractSemanticDiff(asset))
       void loadAudit(id)
@@ -143,6 +148,10 @@ export default function DashboardWorkspacePage() {
   }, [loadAudit])
 
   const executeRun = useCallback(async (asset: DashboardAssetDetail, version: DashboardVersion, nextFilters: Record<string, unknown>) => {
+    if (!isStructuredDashboardManifest(version.manifest)) {
+      setRun(null)
+      return
+    }
     setLoadingRun(true)
     try {
       const payload = {
@@ -176,8 +185,10 @@ export default function DashboardWorkspacePage() {
   }, [assetId, loadDetail])
 
   useEffect(() => {
-    if (selectedAsset && selectedVersion) {
+    if (selectedAsset && selectedVersion && isStructuredDashboardManifest(selectedVersion.manifest)) {
       void executeRun(selectedAsset, selectedVersion, filters)
+    } else {
+      setRun(null)
     }
   }, [selectedAsset, selectedVersion, executeRun, filters])
 
@@ -187,7 +198,8 @@ export default function DashboardWorkspacePage() {
     return assets.filter(asset => [asset.name, asset.slug, asset.description].some(value => value.toLowerCase().includes(lower)))
   }, [assets, query])
 
-  const manifest = selectedVersion?.manifest ?? null
+  const manifest = isStructuredDashboardManifest(selectedVersion?.manifest) ? selectedVersion.manifest : null
+  const isLegacyAsset = selectedAsset?.lifecycle === 'legacy_unstructured' || selectedVersion?.migration_state === 'legacy_unstructured'
   const blockers = selectedVersion?.validation_result.blockers ?? manifest?.migration.blockers ?? []
   const semanticWarnings = semanticDiff?.warnings ?? []
   const semanticBlockers = semanticDiff?.blockers ?? []
@@ -198,7 +210,7 @@ export default function DashboardWorkspacePage() {
     ...(pinnedSnapshotBlocked ? ['Pinned snapshot run is blocked because this version has no immutable artifact.'] : []),
   ]
   const warnings = [...(selectedVersion?.validation_result.warnings ?? []), ...semanticWarnings, ...(run?.warnings ?? [])]
-  const canPublish = Boolean(selectedAsset && selectedVersion?.status === 'draft' && allBlockers.length === 0)
+  const canPublish = Boolean(selectedAsset && manifest && selectedVersion?.status === 'draft' && allBlockers.length === 0)
 
   const handleFilterChange = (filter: DashboardFilter, value: string) => {
     setFilters(previous => {
@@ -274,7 +286,7 @@ export default function DashboardWorkspacePage() {
   }
 
   const patchTitle = async () => {
-    if (!editingTitle.trim()) return
+    if (!manifest || !editingTitle.trim()) return
     await applyDraftPatch(
       [{ op: 'replace', path: '/title', value: editingTitle.trim() }],
       'Update Dashboard title from workspace',
@@ -283,12 +295,12 @@ export default function DashboardWorkspacePage() {
   }
 
   const createReloadDraft = async () => {
-    if (!selectedAsset || !selectedVersion) return
+    if (!selectedAsset || !selectedVersion || !manifest) return
     setLoadingWorkflow(true)
     setValidationMessage(null)
     try {
       const nextModelVersions = Object.fromEntries(
-        selectedVersion.manifest.semantic_bindings.map(binding => [binding.id, binding.model_version]),
+        manifest.semantic_bindings.map(binding => [binding.id, binding.model_version]),
       )
       const response = await DashboardService.reload(selectedAsset.id, {
         base_etag: selectedAsset.etag,
@@ -333,7 +345,7 @@ export default function DashboardWorkspacePage() {
   }
 
   const executeSelectedVersion = async () => {
-    if (!selectedAsset || !selectedVersion) return
+    if (!selectedAsset || !selectedVersion || !manifest) return
     await executeRun(selectedAsset, selectedVersion, filters)
     if (selectedVersion.status !== 'published') {
       setValidationMessage('Preview executed against draft version')
@@ -341,7 +353,7 @@ export default function DashboardWorkspacePage() {
   }
 
   const exportHtml = async () => {
-    if (!selectedAsset || !selectedVersion) return
+    if (!selectedAsset || !selectedVersion || !manifest) return
     setLoadingWorkflow(true)
     setValidationMessage(null)
     try {
@@ -530,17 +542,17 @@ export default function DashboardWorkspacePage() {
                       <div className="text-xs font-medium uppercase text-[#818c95]">Review state</div>
                       <div className="mt-1 text-sm text-[#d6dde2]">{allBlockers.length} blockers, {warnings.length} warnings</div>
                     </div>
-                    <Button variant="secondary" onClick={() => void executeSelectedVersion()} disabled={loadingRun}>
+                    <Button variant="secondary" onClick={() => void executeSelectedVersion()} disabled={loadingRun || !manifest}>
                       {loadingRun ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                       {selectedVersion?.status === 'published' ? 'Run' : 'Preview'}
                     </Button>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button variant="secondary" onClick={() => void validateDraft()} disabled={loadingWorkflow}>Validate</Button>
-                    <Button variant="secondary" onClick={() => void patchTitle()} disabled={loadingWorkflow || !selectedVersion || selectedVersion.status === 'published'}>Patch Title</Button>
-                    <Button variant="secondary" onClick={() => void createReloadDraft()} disabled={loadingWorkflow || !selectedAsset.published_version_id}>Reload Draft</Button>
+                    <Button variant="secondary" onClick={() => void validateDraft()} disabled={loadingWorkflow || !manifest}>Validate</Button>
+                    <Button variant="secondary" onClick={() => void patchTitle()} disabled={loadingWorkflow || !manifest || !selectedVersion || selectedVersion.status === 'published'}>Patch Title</Button>
+                    <Button variant="secondary" onClick={() => void createReloadDraft()} disabled={loadingWorkflow || !manifest || !selectedAsset.published_version_id}>Reload Draft</Button>
                     <Button variant="secondary" onClick={() => void publishDraft()} disabled={loadingWorkflow || !canPublish}>Publish</Button>
-                    <Button variant="secondary" onClick={() => void exportHtml()} disabled={loadingWorkflow || selectedVersion?.status !== 'published'}>Export</Button>
+                    <Button variant="secondary" onClick={() => void exportHtml()} disabled={loadingWorkflow || !manifest || selectedVersion?.status !== 'published'}>Export</Button>
                   </div>
                   <div className="mt-3 flex gap-2">
                     <Input
@@ -550,7 +562,7 @@ export default function DashboardWorkspacePage() {
                       placeholder="Folder ID"
                       aria-label="Folder ID"
                     />
-                    <Button variant="secondary" onClick={() => void shareToFolder()} disabled={loadingWorkflow || selectedVersion?.status !== 'published' || !shareFolderId.trim()}>Share</Button>
+                    <Button variant="secondary" onClick={() => void shareToFolder()} disabled={loadingWorkflow || !manifest || selectedVersion?.status !== 'published' || !shareFolderId.trim()}>Share</Button>
                   </div>
                   <Input
                     value={editingTitle}
@@ -592,7 +604,7 @@ export default function DashboardWorkspacePage() {
                 </section>
               )}
 
-              {(selectedAsset.lifecycle === 'legacy_unstructured' || selectedVersion?.migration_state === 'legacy_unstructured') && manifest && (
+              {isLegacyAsset && (
                 <LegacyMigrationReviewPanel
                   asset={selectedAsset}
                   version={selectedVersion}
@@ -649,6 +661,22 @@ function extractSemanticDiff(source: DashboardVersion | DashboardAssetDetail | n
   }
   const diff = source.health_summary.semantic_diff
   return isRecord(diff) ? diff as DashboardSemanticDiff : null
+}
+
+function isStructuredDashboardManifest(value: unknown): value is DashboardManifest {
+  if (!isRecord(value)) return false
+  if (value.schema_version !== 'dashboard.manifest.v1') return false
+  return Array.isArray(value.semantic_bindings)
+    && Array.isArray(value.data_views)
+    && Array.isArray(value.filters)
+    && isRecord(value.layout)
+    && Array.isArray(value.layout.sections)
+    && Array.isArray(value.tiles)
+    && Array.isArray(value.actions)
+    && isRecord(value.freshness_policy)
+    && isRecord(value.access_policy)
+    && isRecord(value.provenance)
+    && isRecord(value.migration)
 }
 
 function normalizeEditorSelection(manifest: DashboardManifest, selection: EditorSelection | null): EditorSelection | null {
@@ -1568,7 +1596,7 @@ function LegacyMigrationReviewPanel({
 }: {
   asset: DashboardAssetDetail
   version: DashboardVersion | null
-  manifest: DashboardManifest
+  manifest: DashboardManifest | null
   run: DashboardRun | null
   blockers: string[]
   warnings: string[]
@@ -1577,19 +1605,27 @@ function LegacyMigrationReviewPanel({
   onStartReview: () => void
   onRefresh: () => void
 }) {
+  const migrationSummary = isRecord(asset.health_summary.migration) ? asset.health_summary.migration : {}
+  const migrationState = manifest?.migration.state
+    ?? version?.migration_state
+    ?? stringValue(migrationSummary.state)
+    ?? asset.lifecycle
   const sourceIds = uniqueStrings([
     ...(version?.pinned_source_snapshots ?? []),
-    ...manifest.semantic_bindings.flatMap(binding => binding.source_snapshot_ids ?? []),
+    ...(manifest?.semantic_bindings.flatMap(binding => binding.source_snapshot_ids ?? []) ?? []),
   ])
-  const permissionSummary = summarizeAccessPolicy(manifest.access_policy || asset.access_policy)
-  const readOnlyRows = legacyPreviewRows(manifest, run)
+  const latestLegacyVersionId = stringValue(migrationSummary.latest_dashboard_version_id)
+  const legacySourceId = manifest?.migration.legacy_dashboard_id ?? asset.notebook_id ?? latestLegacyVersionId ?? version?.id ?? null
+  const permissionSummary = summarizeAccessPolicy(manifest?.access_policy ?? asset.access_policy)
+  const readOnlyRows = legacyPreviewRows(manifest, run, asset)
+  const previewPath = asset.notebook_id ? `/notebook/${asset.notebook_id}/preview` : null
   return (
     <section className="rounded-md border border-amber-500/30 bg-amber-500/10 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-sm font-semibold text-amber-100">Legacy migration review</h2>
-            <StatusPill status={manifest.migration.state || asset.lifecycle} />
+            <StatusPill status={migrationState} />
             {version && <Badge>v{version.version_num} {version.status}</Badge>}
           </div>
           <p className="mt-1 text-sm text-amber-100/80">
@@ -1597,11 +1633,11 @@ function LegacyMigrationReviewPanel({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={onGenerateDraft} disabled={loading || !asset.published_version_id}>
+          <Button variant="secondary" onClick={onGenerateDraft} disabled={loading || !manifest || !asset.published_version_id}>
             <GitBranch className="h-4 w-4" />
             Generate structured draft
           </Button>
-          <Button variant="secondary" onClick={onStartReview} disabled={loading || !version}>
+          <Button variant="secondary" onClick={onStartReview} disabled={loading || !manifest || !version}>
             <ShieldCheck className="h-4 w-4" />
             Start review
           </Button>
@@ -1614,7 +1650,15 @@ function LegacyMigrationReviewPanel({
           </Button>
           {asset.notebook_id && (
             <Button asChild variant="secondary">
-              <Link to={`/notebooks/${asset.notebook_id}`}>Open Notebook</Link>
+              <Link to={`/notebook/${asset.notebook_id}`}>Open Notebook</Link>
+            </Button>
+          )}
+          {previewPath && (
+            <Button asChild variant="secondary">
+              <Link to={previewPath}>
+                <ExternalLink className="h-4 w-4" />
+                Open legacy preview
+              </Link>
             </Button>
           )}
         </div>
@@ -1626,9 +1670,9 @@ function LegacyMigrationReviewPanel({
             <LegacyKV label="Asset" value={`${asset.name} / ${asset.slug}`} />
             <LegacyKV label="Version" value={version ? `v${version.version_num} ${version.status}` : 'No structured version'} />
             <LegacyKV label="Freshness" value={run?.overall_freshness ?? formatInventoryFreshness(asset)} />
-            <LegacyKV label="Source" value={sourceIds.length ? sourceIds.join(', ') : manifest.migration.legacy_dashboard_id ?? asset.notebook_id ?? 'No source snapshot'} />
+            <LegacyKV label="Source" value={sourceIds.length ? sourceIds.join(', ') : legacySourceId ?? 'No source snapshot'} />
             <LegacyKV label="Permission" value={permissionSummary} />
-            <LegacyKV label="Audit" value={manifest.migration.reviewed_at ? `Reviewed ${formatDate(manifest.migration.reviewed_at)}` : 'Review not started'} />
+            <LegacyKV label="Audit" value={manifest?.migration.reviewed_at ? `Reviewed ${formatDate(manifest.migration.reviewed_at)}` : 'Review not started'} />
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
@@ -1679,16 +1723,23 @@ function summarizeAccessPolicy(policy: Record<string, unknown>): string {
   return parts.length ? parts.join(', ') : 'Workspace policy inherited'
 }
 
-function legacyPreviewRows(manifest: DashboardManifest, run: DashboardRun | null): Array<{ label: string; value: string }> {
+function legacyPreviewRows(manifest: DashboardManifest | null, run: DashboardRun | null, asset: DashboardAssetDetail): Array<{ label: string; value: string }> {
   const runRows = run?.views.flatMap(view => {
     const rows = Array.isArray(view.result) ? view.result : view.result ? [view.result] : []
     return rows.slice(0, 1).map(row => ({ label: view.data_view_id, value: formatValue(row) }))
   }) ?? []
   if (runRows.length > 0) return runRows.slice(0, 4)
-  return manifest.tiles.slice(0, 4).map(tile => ({
+  const tileRows = manifest?.tiles.slice(0, 4).map(tile => ({
     label: tile.title,
     value: tile.accessible_fallback?.summary || tile.business_question || tile.tile_type,
-  }))
+  })) ?? []
+  if (tileRows.length > 0) return tileRows
+  return [
+    { label: 'Name', value: asset.name },
+    { label: 'Description', value: asset.description || 'No description' },
+    { label: 'Notebook', value: asset.notebook_id ?? 'No notebook' },
+    { label: 'Lifecycle', value: asset.lifecycle },
+  ]
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -1774,6 +1825,10 @@ function shortId(value?: string | null) {
 
 function shortHash(value: string) {
   return value.replace('sha256:', '').slice(0, 10)
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null
 }
 
 function formatInventoryModel(asset: DashboardAsset): string {
