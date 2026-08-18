@@ -28,12 +28,12 @@ export default function EmbeddedLayout() {
     tabs[0]
 
   return (
-    <div className="flex h-screen min-w-0 flex-col overflow-hidden bg-white text-[#1c2024]" data-embedded-layout="knowledge-center">
-      <header className="shrink-0 border-b border-[#f0f0f3] bg-white">
-        <div className="flex min-h-[44px] min-w-0 items-center gap-3 px-3 sm:px-4">
+    <div className="flex h-screen min-w-0 flex-col overflow-hidden bg-[#f7f7f8] text-[#18181b]" data-embedded-layout="knowledge-center">
+      <header className="shrink-0 border-b border-[#e4e4e7] bg-[#f7f7f8]">
+        <div className="flex min-h-[46px] min-w-0 items-center gap-3 px-3 sm:px-4">
           <div className="hidden min-w-0 sm:block">
-            <div className="truncate text-[13px] font-medium text-[#1c2024]">Data Studio</div>
-            <div className="truncate text-[11px] text-[#60646c]">Knowledge Center</div>
+            <div className="truncate text-[13px] font-medium text-[#18181b]">Data Studio</div>
+            <div className="truncate text-[11px] text-[#71717a]">Knowledge Center</div>
           </div>
           <nav className="min-w-0 flex-1 overflow-x-auto custom-scrollbar" aria-label="Knowledge Center sections">
             <div className="flex w-max min-w-full items-center gap-0.5 py-1.5">
@@ -46,8 +46,8 @@ export default function EmbeddedLayout() {
                     className={({ isActive }) =>
                       `inline-flex h-8 shrink-0 items-center gap-2 rounded-md px-2.5 text-[13px] transition-colors ${
                         isActive || activeTab.to === tab.to
-                          ? 'bg-[#f4f4f5] text-[#1c2024]'
-                          : 'text-[#60646c] hover:bg-[#f7f7f8] hover:text-[#1c2024]'
+                          ? 'bg-white text-[#18181b] shadow-[0_1px_2px_rgba(24,24,27,0.06),inset_0_0_0_1px_rgba(24,24,27,0.06)]'
+                          : 'text-[#71717a] hover:bg-[#ededee] hover:text-[#18181b]'
                       }`
                     }
                   >
