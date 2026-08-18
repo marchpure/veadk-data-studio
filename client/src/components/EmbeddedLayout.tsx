@@ -23,15 +23,15 @@ export default function EmbeddedLayout() {
   const location = useLocation()
   const activeTab =
     tabs.find((tab) => location.pathname === tab.to || location.pathname.startsWith(`${tab.to}/`)) ??
-    tabs[1]
+    tabs[0]
 
   return (
-    <div className="flex h-screen min-w-0 flex-col overflow-hidden bg-[#1a1a1a] text-white" data-embedded-layout="knowledge-center">
-      <header className="shrink-0 border-b border-[#30363a] bg-[#141719]">
+    <div className="flex h-screen min-w-0 flex-col overflow-hidden bg-[#0f1115] text-white" data-embedded-layout="knowledge-center">
+      <header className="shrink-0 border-b border-[#29313a] bg-[#101418]">
         <div className="flex min-h-[52px] min-w-0 items-center gap-3 px-3 sm:px-4">
           <div className="hidden min-w-0 sm:block">
-            <div className="truncate text-sm font-semibold text-[#f3f5f5]">Knowledge Center</div>
-            <div className="truncate text-xs text-[#9aa4ac]">Byaan governed assets</div>
+            <div className="truncate text-sm font-semibold text-[#f3f5f5]">Data Studio</div>
+            <div className="truncate text-xs text-[#9aa4ac]">Governed analytics</div>
           </div>
           <nav className="min-w-0 flex-1 overflow-x-auto custom-scrollbar" aria-label="Knowledge Center sections">
             <div className="flex w-max min-w-full items-center gap-1 py-2">
@@ -45,7 +45,7 @@ export default function EmbeddedLayout() {
                       `inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-sm transition-colors ${
                         isActive || activeTab.to === tab.to
                           ? 'bg-brand-orange/15 text-brand-orange'
-                          : 'text-[#c7cfd6] hover:bg-[#22272b] hover:text-white'
+                          : 'text-[#c7cfd6] hover:bg-[#151a21] hover:text-white'
                       }`
                     }
                   >
@@ -60,7 +60,7 @@ export default function EmbeddedLayout() {
       </header>
       <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
         <Routes>
-          <Route index element={<Navigate to="data-models" replace />} />
+          <Route index element={<Navigate to="sources" replace />} />
           <Route path="sources" element={<EmbeddedPage><DatabasesPage /></EmbeddedPage>} />
           <Route path="sources/:sourceId" element={<EmbeddedPage><SourceDetailPage /></EmbeddedPage>} />
           <Route path="data-models" element={<EmbeddedPage><DataModelsHomePage /></EmbeddedPage>} />
@@ -71,7 +71,7 @@ export default function EmbeddedLayout() {
           <Route path="evaluation/:suiteId" element={<EmbeddedPage><EvaluationWorkspacePage /></EmbeddedPage>} />
           <Route path="folders" element={<EmbeddedPage><FoldersPage /></EmbeddedPage>} />
           <Route path="folders/:id" element={<EmbeddedPage><FolderDetailPage /></EmbeddedPage>} />
-          <Route path="*" element={<Navigate to="data-models" replace />} />
+          <Route path="*" element={<Navigate to="sources" replace />} />
         </Routes>
       </main>
     </div>

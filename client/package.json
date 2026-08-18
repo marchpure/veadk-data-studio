@@ -8,6 +8,7 @@
     "build": "vite build",
     "build:check": "tsc -b && vite build",
     "lint": "eslint .",
+    "test:embedded-theme": "node scripts/embedded-theme-regression.mjs",
     "smoke:dashboard": "node scripts/dashboard-workspace-smoke.mjs",
     "smoke:evaluation": "node scripts/evaluation-workspace-smoke.mjs",
     "preview": "vite preview",
