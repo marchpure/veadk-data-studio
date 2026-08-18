@@ -855,11 +855,11 @@ function normalizeDataStudioAsset(raw: any, fallback: {
       dashboards: Number(raw?.consumers?.dashboards ?? fallback.consumers.dashboards),
       savedQueries: Number(raw?.consumers?.savedQueries ?? fallback.consumers.savedQueries),
     },
-    capabilities: normalizeStringList(raw?.capabilities).length ? normalizeStringList(raw.capabilities) : ['semantic query', 'dashboard binding', 'policy evidence'],
-    freshness: String(raw?.freshness ?? 'Profile refreshed 2h ago'),
-    provenance: normalizeStringList(raw?.provenance).length ? normalizeStringList(raw.provenance) : [fallback.datasource, ...fallback.validationLog.slice(0, 2)],
-    usage_policy: normalizeStringList(raw?.usage_policy).length ? normalizeStringList(raw.usage_policy) : ['Certified metrics only', 'PII excluded from semantic consumers'],
-    sample_evidence: normalizeStringList(raw?.sample_evidence).length ? normalizeStringList(raw.sample_evidence) : fallback.validationLog.slice(0, 3),
+    capabilities: normalizeDisplayList(raw?.capabilities, ['semantic query', 'dashboard binding', 'policy evidence']),
+    freshness: displayFreshness(raw?.freshness ?? 'Profile refreshed 2h ago'),
+    provenance: normalizeDisplayList(raw?.provenance, [fallback.datasource, ...fallback.validationLog.slice(0, 2)]),
+    usage_policy: normalizeDisplayList(raw?.usage_policy, ['Certified metrics only', 'PII excluded from semantic consumers']),
+    sample_evidence: normalizeDisplayList(raw?.sample_evidence, fallback.validationLog.slice(0, 3)),
   }
 }
 
@@ -893,6 +893,47 @@ function normalizeStringList(value: unknown): string[] {
   return value.map(displayValue).filter(Boolean)
 }
 
+function normalizeDisplayList(value: unknown, fallback: string[]): string[] {
+  const items = toDisplayList(value)
+  return items.length ? items : fallback
+}
+
+function toDisplayList(value: unknown): string[] {
+  if (value === null || value === undefined) return []
+  if (Array.isArray(value)) return value.map(displayValue).filter(Boolean)
+  if (typeof value !== 'object') return [displayValue(value)].filter(Boolean)
+  const record = value as Record<string, unknown>
+  const entries: string[] = []
+  const executionModes = normalizeStringList(record.execution_modes)
+  entries.push(...executionModes.map(mode => mode.replace(/_/g, ' ')))
+  if (record.slug) entries.push(`slug: ${displayValue(record.slug)}`)
+  if (record.domain) entries.push(`domain: ${displayValue(record.domain)}`)
+  if (record.published_version) entries.push(`version: ${displayValue(record.published_version)}`)
+  if (Array.isArray(record.metrics)) entries.push(`${record.metrics.length} metrics`)
+  if (Array.isArray(record.dimensions)) entries.push(`${record.dimensions.length} dimensions`)
+  if (record.status) entries.push(`status: ${displayValue(record.status)}`)
+  if (record.external !== undefined) entries.push(`external: ${displayValue(record.external)}`)
+  if (record.rawSqlFallback !== undefined) entries.push(`raw SQL fallback: ${displayValue(record.rawSqlFallback)}`)
+  if (record.datasource_id) entries.push(`source: ${displayValue(record.datasource_id)}`)
+  if (record.datasource_kind) entries.push(`kind: ${displayValue(record.datasource_kind)}`)
+  if (Array.isArray(record.allowedMetrics)) entries.push(`${record.allowedMetrics.length} allowed metrics`)
+  if (Array.isArray(record.allowedDimensions)) entries.push(`${record.allowedDimensions.length} allowed dimensions`)
+  if (record.kind || record.title || record.definition || record.formula) entries.push(displayValue(record))
+  return entries.length ? entries : [displayValue(value)].filter(Boolean)
+}
+
+function displayFreshness(value: unknown): string {
+  if (!value || typeof value !== 'object') return displayValue(value || 'Profile refreshed 2h ago')
+  const record = value as Record<string, unknown>
+  const parts = [
+    displayValue(record.status),
+    record.drift_alerts !== undefined ? `${displayValue(record.drift_alerts)} drift alerts` : '',
+    record.updated_at ? `updated ${displayValue(record.updated_at)}` : '',
+    record.schema_updated_at ? `schema ${displayValue(record.schema_updated_at)}` : '',
+  ].filter(Boolean)
+  return parts.length ? parts.join(' · ') : displayValue(value)
+}
+
 function displayValue(value: unknown): string {
   if (value === null || value === undefined) return ''
   if (typeof value === 'string') return value
@@ -900,6 +941,7 @@ function displayValue(value: unknown): string {
   if (Array.isArray(value)) return value.map(displayValue).filter(Boolean).join(', ')
   if (typeof value === 'object') {
     const record = value as Record<string, any>
+    if (record.kind && record.title) return `${displayValue(record.kind)}: ${displayValue(record.title)}`
     if (record.status && record.reason) return `${displayValue(record.status)}: ${displayValue(record.reason)}`
     if (record.candidate_type && record.confidence !== undefined) {
       return `${displayValue(record.candidate_type)} evidence (${Math.round(Number(record.confidence) * 100)}% confidence)`

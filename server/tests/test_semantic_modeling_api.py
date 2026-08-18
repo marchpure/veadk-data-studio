@@ -187,12 +187,27 @@ async def test_data_models_validate_publish_and_query_metric_use_persisted_model
     validated = validate_response.json()["data"]
     assert validated["readiness"] >= 80
     assert validated["readinessDetail"]["blockers"] == []
+    assert validated["publishState"] == "draft"
+    assert validated["dataStudioAsset"]["asset_type"] == "semantic_model"
+    assert validated["dataStudioAsset"]["publish_state"] == "draft"
+    assert validated["dataStudioAsset"]["query_url"] is None
+    assert validated["dataStudioAsset"]["usage_policy"]["external"] is False
 
     publish_response = await test_client.post("/api/data-models/sales-semantic/publish")
     assert publish_response.status_code == 200
     published = publish_response.json()["data"]
     assert published["status"] == "Published"
     assert published["publishedVersion"] == "v1"
+    assert published["publishState"] == "published"
+    assert published["gate"]["blockers"] == []
+    assert published["dataStudioAsset"]["publish_state"] == "published"
+    assert published["dataStudioAsset"]["gate"]["score"] == 100
+    assert (
+        published["dataStudioAsset"]["query_url"]
+        == f"/api/external/assets/semantic_model/{published['dataStudioAsset']['asset_id']}/query"
+    )
+    assert published["dataStudioAsset"]["usage_policy"]["external"] is True
+    assert any(entry["id"] == "mcp_api" for entry in published["consumptionEntries"])
 
     async def fake_execute_raw_query(**kwargs):
         assert kwargs["db_type"] == "sqlite"

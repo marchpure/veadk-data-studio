@@ -13,6 +13,8 @@ let patchShouldFail = false
 let validateShouldFail = false
 let publishShouldFail = false
 let semanticQueryShouldFail = false
+let validateCalls = 0
+let publishCalls = 0
 
 globalThis.window = globalThis.window || { __RUNTIME_CONFIG__: {} }
 globalThis.document = globalThis.document || { cookie: '' }
@@ -66,6 +68,7 @@ globalThis.fetch = async (url, init = {}) => {
     return jsonResponse(serverModel)
   }
   if (path.endsWith(`/api/data-models/${modelId}/validate`) && method === 'POST') {
+    validateCalls += 1
     if (validateShouldFail) {
       return errorResponse(500, 'Validation failed at API')
     }
@@ -83,6 +86,7 @@ globalThis.fetch = async (url, init = {}) => {
     return jsonResponse(serverModel)
   }
   if (path.endsWith(`/api/data-models/${modelId}/publish`) && method === 'POST') {
+    publishCalls += 1
     if (publishShouldFail) {
       return errorResponse(409, 'Publish blocked by validation')
     }
@@ -265,8 +269,19 @@ store.updatePublishNotes('Reviewed in store smoke.')
 store.markReviewed()
 await flushAsync()
 const savedQueryChanged = selectActiveModel(useDataModelingStore.getState()).explore.savedQueryCount > 8
-await store.validateModel()
-await store.publishModel()
+const validateCallsBeforeGate = validateCalls
+await store.runKnowledgeGate()
+const gateStateAfterBackendRun = useDataModelingStore.getState()
+const knowledgeGateUsesBackend = validateCalls === validateCallsBeforeGate + 1
+  && gateStateAfterBackendRun.gate.evaluated === true
+  && gateStateAfterBackendRun.homeError === null
+  && !selectActiveModel(gateStateAfterBackendRun).validationLog.some(entry => entry.includes('Mock knowledge gate'))
+const publishCallsBeforeKnowledgeAsset = publishCalls
+await store.publishKnowledgeAsset()
+const publishStateAfterBackendRun = useDataModelingStore.getState()
+const knowledgePublishUsesBackend = publishCalls === publishCallsBeforeKnowledgeAsset + 1
+  && publishStateAfterBackendRun.publishState === 'published'
+  && !selectActiveModel(publishStateAfterBackendRun).validationLog.some(entry => entry.includes('Mock-published'))
 await store.runMcpQuery()
 semanticQueryShouldFail = true
 await store.runMcpQuery()
@@ -283,6 +298,8 @@ const assertions = [
   ['patch failure rolled back optimistic edit', patchFailureRolledBack],
   ['validate failure did not mark model ready', validateFailureDidNotSucceed],
   ['publish failure did not advance version', publishFailureDidNotSucceed],
+  ['knowledge gate used backend validate', knowledgeGateUsesBackend],
+  ['knowledge asset publish used backend publish', knowledgePublishUsesBackend],
   ['model published v3', model.status === 'Published' && model.publishedVersion === 'v3'],
   ['fanout blocker cleared', model.readinessDetail.blockers.length === 0],
   ['MCP result generated', Boolean(model.mcp.lastResult?.resolvedMetric)],

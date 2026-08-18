@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { dataModelingAdapter } from '../adapters/dataModelingAdapter'
-import { knowledgeCenterMockAdapter } from '../adapters/knowledgeCenterMockAdapter'
+import { loadMockKnowledgeCenterAdapter } from '../adapters/knowledgeCenterAdapter'
 import type {
   CertificationStatus,
   CreateModelDraft,
@@ -19,6 +19,12 @@ import type {
 } from '../types'
 
 const useMockKnowledgeCenter = import.meta.env?.VITE_KNOWLEDGE_CENTER_MOCK === 'true'
+let mockKnowledgeCenterAdapterTask: ReturnType<typeof loadMockKnowledgeCenterAdapter> | null = null
+
+function getMockKnowledgeCenterAdapter() {
+  mockKnowledgeCenterAdapterTask ??= loadMockKnowledgeCenterAdapter()
+  return mockKnowledgeCenterAdapterTask
+}
 
 interface DataModelingStore extends DataModelingWorkspaceData {
   homeMode: HomeViewMode
@@ -758,7 +764,8 @@ export const useDataModelingStore = create<DataModelingStore>()(
         if (!model) return
         set({ publishState: 'validating', homeError: null })
         if (useMockKnowledgeCenter) {
-          const gate = await knowledgeCenterMockAdapter.evaluateGate(model)
+          const mockKnowledgeCenterAdapter = await getMockKnowledgeCenterAdapter()
+          const gate = await mockKnowledgeCenterAdapter.evaluateGate(model)
           set(state => {
             const publishState = gate.blockers.length ? 'blocked' as const : 'draft' as const
             return {
@@ -825,7 +832,8 @@ export const useDataModelingStore = create<DataModelingStore>()(
         }
         if (useMockKnowledgeCenter) {
           try {
-            const published = await knowledgeCenterMockAdapter.publishAsset(model)
+            const mockKnowledgeCenterAdapter = await getMockKnowledgeCenterAdapter()
+            const published = await mockKnowledgeCenterAdapter.publishAsset(model)
             set(current => ({
               publishState: 'published',
               homeError: null,

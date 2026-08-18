@@ -128,6 +128,16 @@ class SemanticModelService:
         review = _json_load(model.review_json, {})
         mcp = _json_load(model.mcp_json, {})
         validation_log = _json_load(model.validation_log_json, [])
+        gate = SemanticModelService._asset_gate(model, validation_log=validation_log)
+        publish_state = SemanticModelService._publish_state(model, gate)
+        asset_payload = SemanticModelService._data_studio_asset_payload(
+            model=model,
+            publish_state=publish_state,
+            gate=gate,
+            consumers=consumers,
+            mcp=mcp,
+            validation_log=validation_log,
+        )
         entities = [
             {
                 "id": entity.slug,
@@ -241,7 +251,174 @@ class SemanticModelService:
             "review": review,
             "mcp": mcp,
             "validationLog": validation_log,
+            "assetType": "semantic_model",
+            "publishState": publish_state,
+            "publish_state": publish_state,
+            "gate": gate,
+            "dataStudioAsset": asset_payload,
+            "data_studio_asset": asset_payload,
+            "consumptionEntries": SemanticModelService._consumption_entries(
+                publish_state=publish_state,
+                published_version=model.published_version,
+            ),
         }
+
+    @staticmethod
+    def _publish_state(model: SemanticModel, gate: dict[str, Any]) -> str:
+        if model.published_version != "v0" and model.status == "Published":
+            return "published" if not gate["blockers"] else "blocked"
+        if model.status == "Validating":
+            return "validating"
+        if model.readiness_level == "blocked" or gate["blockers"]:
+            return "blocked"
+        return "draft"
+
+    @staticmethod
+    def _asset_gate(model: SemanticModel, *, validation_log: list[Any]) -> dict[str, Any]:
+        review = _json_load(model.review_json, {})
+        readiness_detail = _json_load(
+            review.get("readinessDetail"),
+            {
+                "score": model.readiness,
+                "blockers": [],
+            },
+        )
+        blockers = [str(item) for item in readiness_detail.get("blockers") or []]
+        if model.published_version == "v0" and model.readiness_level == "blocked" and not blockers:
+            blockers = [str(item) for item in validation_log[:5]]
+        total = max(1, len(model.metrics) + len(model.dimensions))
+        if model.published_version != "v0" and model.status == "Published":
+            blockers = []
+            passed = total
+            score = 100
+        else:
+            passed = 0 if blockers else max(0, min(total, round((int(model.readiness or 0) / 100) * total)))
+            score = max(0, min(99, int(readiness_detail.get("score") or model.readiness or 0)))
+        return {
+            "score": score,
+            "passed": passed,
+            "total": total,
+            "blockers": blockers,
+        }
+
+    @staticmethod
+    def _model_consumers(consumers: dict[str, Any]) -> dict[str, int]:
+        if isinstance(consumers.get("consumers"), list):
+            labels = {str(item) for item in consumers["consumers"]}
+            return {
+                "agents": int("agent" in labels),
+                "mcp": int("mcp" in labels),
+                "skills": int("skill" in labels),
+                "dashboards": int("dashboard" in labels),
+                "savedQueries": int("saved_query" in labels),
+            }
+        return {
+            "agents": int(consumers.get("agents", 0) or 0),
+            "mcp": int(consumers.get("mcp", 0) or 0),
+            "skills": int(consumers.get("skills", 0) or 0),
+            "dashboards": int(consumers.get("dashboards", 0) or 0),
+            "savedQueries": int(consumers.get("savedQueries", 0) or 0),
+        }
+
+    @staticmethod
+    def _data_studio_asset_payload(
+        *,
+        model: SemanticModel,
+        publish_state: str,
+        gate: dict[str, Any],
+        consumers: dict[str, Any],
+        mcp: dict[str, Any],
+        validation_log: list[Any],
+    ) -> dict[str, Any]:
+        can_consume = publish_state == "published" and not gate["blockers"]
+        return {
+            "asset_type": "semantic_model",
+            "asset_id": str(model.id),
+            "name": model.name,
+            "description": model.description,
+            "status": model.status,
+            "publish_state": publish_state,
+            "gate": gate,
+            "version": model.published_version if model.published_version != "v0" else None,
+            "consumers": SemanticModelService._model_consumers(consumers),
+            "capabilities": {
+                "execution_modes": ["run_semantic_query"] if can_consume else [],
+                "slug": model.slug,
+                "domain": model.domain,
+                "published_version": model.published_version,
+                "metrics": [metric.slug for metric in model.metrics],
+                "dimensions": [dimension.slug for dimension in model.dimensions],
+            },
+            "query_url": f"/api/external/assets/semantic_model/{model.id}/query" if can_consume else None,
+            "freshness": {
+                "status": "current" if model.drift_alerts == 0 else "drift_detected",
+                "drift_alerts": model.drift_alerts,
+                "updated_at": model.updated_at.isoformat() if model.updated_at else None,
+            },
+            "provenance": {
+                "semantic_model_id": str(model.id),
+                "datasource_id": model.datasource_id,
+                "datasource_kind": model.datasource_kind,
+                "draft_revision": model.draft_revision,
+                "published_version": model.published_version,
+            },
+            "usage_policy": {
+                "external": can_consume,
+                "allowedMetrics": mcp.get("allowedMetrics") or [metric.slug for metric in model.metrics],
+                "allowedDimensions": mcp.get("allowedDimensions") or [dimension.slug for dimension in model.dimensions],
+                "rawSqlFallback": bool(mcp.get("rawSqlFallback", False)),
+            },
+            "sample_evidence": SemanticModelService._asset_sample_evidence(model, validation_log=validation_log),
+        }
+
+    @staticmethod
+    def _asset_sample_evidence(model: SemanticModel, *, validation_log: list[Any]) -> list[dict[str, Any]]:
+        evidence: list[dict[str, Any]] = []
+        for metric in model.metrics:
+            evidence.append(
+                {
+                    "kind": "metric_definition",
+                    "title": metric.business_name or metric.name or metric.slug,
+                    "metric": metric.slug,
+                    "definition": metric.definition,
+                    "formula": metric.formula,
+                    "lineage": _json_load(metric.lineage_json, []),
+                }
+            )
+        for entry in validation_log[:3]:
+            evidence.append({"kind": "validation_log", "title": str(entry)})
+        return evidence[:8]
+
+    @staticmethod
+    def _consumption_entries(*, publish_state: str, published_version: str) -> list[dict[str, str]]:
+        version = published_version if published_version != "v0" else "draft"
+        published = publish_state == "published"
+        return [
+            {
+                "id": "agent",
+                "label": "Agent",
+                "before": "Waiting for gate pass",
+                "after": f"Serving {version} with governed metric answers" if published else "Waiting for publish",
+            },
+            {
+                "id": "dashboard",
+                "label": "Dashboard",
+                "before": "Bound to draft semantic version",
+                "after": f"Bound to {version} semantic contract" if published else "Waiting for publish",
+            },
+            {
+                "id": "mcp_api",
+                "label": "MCP API",
+                "before": "query_metric blocked for draft",
+                "after": f"query_metric exposes {version}" if published else "Waiting for publish",
+            },
+            {
+                "id": "share_link",
+                "label": "Share link",
+                "before": "Internal preview only",
+                "after": "Share link enabled with policy banner" if published else "Waiting for publish",
+            },
+        ]
 
     @staticmethod
     async def update_model(

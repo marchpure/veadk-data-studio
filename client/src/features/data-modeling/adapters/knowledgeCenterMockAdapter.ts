@@ -1,14 +1,5 @@
-import type { ConsumptionEntry, GateCheck, KnowledgeCenterGateState, SemanticModel } from '../types'
-
-export interface KnowledgeCenterAdapter {
-  evaluateGate(model: SemanticModel): Promise<KnowledgeCenterGateState>
-  publishAsset(model: SemanticModel): Promise<{
-    publishedVersion: string
-    publishedAt: string
-    consumers: SemanticModel['consumers']
-    entries: ConsumptionEntry[]
-  }>
-}
+import type { GateCheck, SemanticModel } from '../types'
+import type { KnowledgeCenterAdapter } from './knowledgeCenterAdapter'
 
 const gateChecks: GateCheck[] = [
   {
