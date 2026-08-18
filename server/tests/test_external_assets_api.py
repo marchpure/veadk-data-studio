@@ -4,8 +4,8 @@ import hashlib
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.mcp_api_key import MCPAPIKey
 from server.models.semantic_models import SemanticModel
