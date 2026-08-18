@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, type ReactNode } from 'react'
 
 export const EMBEDDED_KNOWLEDGE_CENTER_BASE = '/embedded/knowledge-center'
 
@@ -18,6 +18,30 @@ export function useEmbeddedMode() {
 
 export function isEmbeddedKnowledgeCenterPath(pathname: string) {
   return pathname === EMBEDDED_KNOWLEDGE_CENTER_BASE || pathname.startsWith(`${EMBEDDED_KNOWLEDGE_CENTER_BASE}/`)
+}
+
+type LocationLike = {
+  pathname: string
+  search?: string
+  state?: unknown
+}
+
+function getStateFromPathname(state: unknown) {
+  if (!state || typeof state !== 'object') return null
+  const from = (state as { from?: unknown }).from
+  if (!from || typeof from !== 'object') return null
+  const pathname = (from as { pathname?: unknown }).pathname
+  return typeof pathname === 'string' ? pathname : null
+}
+
+export function hasEmbeddedKnowledgeCenterQuery(search?: string) {
+  return new URLSearchParams(search ?? '').get('embedded') === 'veadk-studio'
+}
+
+export function isEmbeddedKnowledgeCenterLocation(location: LocationLike) {
+  return isEmbeddedKnowledgeCenterPath(location.pathname)
+    || isEmbeddedKnowledgeCenterPath(getStateFromPathname(location.state) ?? '')
+    || hasEmbeddedKnowledgeCenterQuery(location.search)
 }
 
 export function isKnowledgeCenterChildPath(pathname: string) {
@@ -49,5 +73,8 @@ export function isRunningInEmbeddedFrame() {
 
 export function useKnowledgeCenterPath() {
   const embedded = useEmbeddedMode()
-  return (path: string) => (embedded ? knowledgeCenterPath(path) : path)
+  return useCallback(
+    (path: string) => (embedded ? knowledgeCenterPath(path) : path),
+    [embedded],
+  )
 }

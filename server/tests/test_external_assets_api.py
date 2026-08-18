@@ -12,7 +12,12 @@ from server.models.semantic_models import SemanticModel
 from server.models.tenant import Tenant
 from server.models.user import User
 from server.services.dashboard import DashboardService
-from server.tests.asset_helpers import current_tenant, seed_dashboard_asset, seed_semantic_model
+from server.tests.asset_helpers import (
+    current_tenant,
+    seed_dashboard_asset,
+    seed_semantic_metric_dashboard_asset,
+    seed_semantic_model,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -83,8 +88,38 @@ async def test_external_assets_return_only_published_assets(test_client, test_se
     assert payload["publish_state"] == "published"
     assert payload["gate"]["blockers"] == []
     assert payload["version"] == "v1"
+    assert payload["capability_kind"] == "dashboard_skill"
+    assert payload["capability_package"]["package_type"] == "dashboard_skill"
+    assert payload["capability_package"]["runtime"]["query_url"] == f"/api/external/assets/dashboard/{published.id}/query"
+    assert payload["capability_package"]["dashboard"]["data_views"]
+    assert "connection_obj_encrypted" not in str(payload["capability_package"])
     assert payload["query_url"] == f"/api/external/assets/dashboard/{published.id}/query"
     assert "mcp_url" not in payload
+
+
+async def test_external_dashboard_asset_describes_semantic_metric_views(test_client, test_session) -> None:
+    tenant = await current_tenant(test_session)
+    api_key = await _seed_mcp_key(test_session, tenant)
+    dashboard = await seed_semantic_metric_dashboard_asset(
+        test_session,
+        tenant,
+        slug="external-oracle-semantic-dashboard",
+        publish=True,
+    )
+
+    response = await test_client.get(
+        f"/api/external/assets/dashboard/{dashboard.id}",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["publish_state"] == "published"
+    assert payload["query_url"] == f"/api/external/assets/dashboard/{dashboard.id}/query"
+    assert payload["capabilities"]["metrics"][0]["id"] == "ticket_count"
+    assert payload["provenance"]["lineage"]["data_views"][0]["lineage"][0]["ref"].startswith(
+        "oracle-local-extract-sanitized/"
+    )
 
 
 async def test_external_assets_support_q_and_page_aliases(test_client, test_session) -> None:
@@ -327,6 +362,16 @@ async def test_external_semantic_model_query_returns_completed_data_and_evidence
     assert described.status_code == 200
     asset_payload = described.json()["data"]
     assert asset_payload["publish_state"] == "published"
+    assert asset_payload["capability_kind"] == "semantic_skill"
+    package = asset_payload["capability_package"]
+    assert package["package_type"] == "semantic_skill"
+    assert package["runtime"]["query_url"] == f"/api/external/assets/semantic_model/{model.id}/query"
+    assert package["mdl"]["schema"] == "byaan.mdl.v1"
+    assert package["mdl"]["metrics"][0]["id"] == "revenue_revenue"
+    assert package["governance"]["raw_sql_fallback"] is False
+    assert package["governance"]["allowed_metrics"]
+    assert "connection_obj_encrypted" not in str(package)
+    assert "byaan_test_external_key" not in str(package)
     assert asset_payload["capabilities"]["metrics"]
     assert asset_payload["capabilities"]["dimensions"]
     assert asset_payload["sample_evidence"]

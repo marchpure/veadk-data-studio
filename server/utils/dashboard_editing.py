@@ -15,6 +15,10 @@ class DashboardPatchError(DashboardEditError):
     """Raised when a patch cannot be parsed or applied."""
 
 
+class DashboardValidationError(DashboardEditError):
+    """Raised when edited dashboard HTML violates a runtime invariant."""
+
+
 @dataclass
 class SearchReplaceBlock:
     search: str
@@ -35,6 +39,93 @@ SEARCH_REPLACE_PATTERN = re.compile(
 
 PATCH_BEGIN = "*** Begin Patch"
 PATCH_END = "*** End Patch"
+HOOK_PATTERN = re.compile(r"\b(?:React\.)?use(?:State|Effect|Memo|Callback|Ref|Reducer|Context|LayoutEffect)\s*\(")
+EARLY_RETURN_PATTERN = re.compile(r"\bif\s*\([^)]*\)\s*\{?\s*return\b", re.DOTALL)
+
+
+def _brace_depth_at_positions(source: str, positions: list[int]) -> dict[int, int]:
+    """Return brace depth at selected offsets, ignoring strings and comments."""
+    targets = set(positions)
+    depths: dict[int, int] = {}
+    depth = 0
+    quote: str | None = None
+    escaped = False
+    line_comment = False
+    block_comment = False
+    index = 0
+
+    while index < len(source):
+        if index in targets:
+            depths[index] = depth
+
+        char = source[index]
+        next_char = source[index + 1] if index + 1 < len(source) else ""
+        if line_comment:
+            if char == "\n":
+                line_comment = False
+        elif block_comment:
+            if char == "*" and next_char == "/":
+                block_comment = False
+                index += 1
+        elif quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char == "/" and next_char == "/":
+            line_comment = True
+            index += 1
+        elif char == "/" and next_char == "*":
+            block_comment = True
+            index += 1
+        elif char in {'"', "'", "`"}:
+            quote = char
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        index += 1
+
+    for position in targets:
+        depths.setdefault(position, depth)
+    return depths
+
+
+def validate_dashboard_html(content: str) -> None:
+    """Reject hook declarations after a component-level conditional return.
+
+    Dashboard HTML is generated incrementally. A common invalid edit inserts a
+    hook below the starter template's loading return, changing the number of
+    hooks between renders. This narrow guard catches that runtime failure before
+    the edited version is persisted while leaving hooks inside nested helper
+    components alone.
+    """
+    component_start = re.search(r"\bconst\s+Dashboard\s*=\s*\(\s*\)\s*=>\s*\{", content)
+    render_start = content.find("ReactDOM.render", component_start.end() if component_start else 0)
+    if component_start is None or render_start < 0:
+        return
+
+    component = content[component_start.end() : render_start]
+    returns = list(EARLY_RETURN_PATTERN.finditer(component))
+    hooks = list(HOOK_PATTERN.finditer(component))
+    positions = [match.start() for match in (*returns, *hooks)]
+    depths = _brace_depth_at_positions(component, positions)
+    top_level_returns = [match for match in returns if depths[match.start()] == 0]
+    if not top_level_returns:
+        return
+
+    first_return_offset = top_level_returns[0].start()
+    trailing_hook = next(
+        (match for match in hooks if match.start() > first_return_offset and depths[match.start()] == 0),
+        None,
+    )
+    if trailing_hook:
+        raise DashboardValidationError(
+            "Dashboard hooks must be declared before the first conditional return. "
+            "Move every useState/useEffect hook to the top of Dashboard and retry the edit."
+        )
 
 
 def parse_search_replace_blocks(diff_content: str) -> list[SearchReplaceBlock]:

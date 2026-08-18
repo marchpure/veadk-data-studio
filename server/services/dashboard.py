@@ -938,6 +938,7 @@ class DashboardService:
         policy_blockers: dict[str, list[str]],
     ) -> dict[str, Any]:
         policy_reason = "; ".join(f"{kind}={','.join(refs)}" for kind, refs in policy_blockers.items())
+        saved_query = data_view.get("saved_query") or {}
         return {
             "data_view_id": data_view["id"],
             "status": "permission_denied",
@@ -954,7 +955,7 @@ class DashboardService:
                 "policy_reason": policy_reason,
             },
             "evidence": data_view.get("evidence", []),
-            "lineage": data_view.get("lineage") or data_view.get("saved_query", {}).get("lineage", []),
+            "lineage": data_view.get("lineage") or saved_query.get("lineage", []),
         }
 
     async def _execute_data_view(

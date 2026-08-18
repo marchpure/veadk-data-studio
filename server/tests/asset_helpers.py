@@ -111,6 +111,66 @@ def dashboard_manifest(query_id: str | None = None, *, title: str = "Published S
     }
 
 
+def semantic_metric_dashboard_manifest(*, title: str = "Oracle Dashboard") -> dict:
+    return {
+        "schema_version": "dashboard.manifest.v1",
+        "dashboard_id": "oracle-dashboard",
+        "title": title,
+        "description": "Oracle semantic metric dashboard.",
+        "audience": ["finance"],
+        "semantic_bindings": [
+            {
+                "id": "oracle-model",
+                "model_slug": "oracle-sales",
+                "model_version": "v1",
+                "source_snapshot_ids": ["oracle-local-extract-sanitized/20260818-knowledge-center-4-arkclaw"],
+                "allowed_metrics": ["ticket_count"],
+                "allowed_dimensions": ["store"],
+            }
+        ],
+        "data_views": [
+            {
+                "id": "oracle-store-top-3",
+                "kind": "semantic_metric",
+                "question": "Oracle Store Top 3",
+                "output_schema": [
+                    {"name": "store", "data_type": "string"},
+                    {"name": "ticket_count", "data_type": "integer", "unit": "ticket"},
+                ],
+                "semantic_metric": {
+                    "semantic_binding_id": "oracle-model",
+                    "metric": "ticket_count",
+                    "dimensions": ["store"],
+                },
+                "lineage": [
+                    {
+                        "id": "oracle-snapshot",
+                        "kind": "source_snapshot",
+                        "name": "Oracle snapshot",
+                        "ref": "oracle-local-extract-sanitized/20260818-knowledge-center-4-arkclaw",
+                    }
+                ],
+            }
+        ],
+        "filters": [],
+        "layout": {"sections": [{"id": "main", "tile_ids": ["tile-top-3"]}]},
+        "tiles": [
+            {
+                "id": "tile-top-3",
+                "title": "Oracle Store Top 3",
+                "tile_type": "bar",
+                "business_question": "Which Oracle stores have the highest ticket count?",
+                "data_view_id": "oracle-store-top-3",
+            }
+        ],
+        "actions": [],
+        "freshness_policy": {"mode": "pinned_snapshot", "max_age_seconds": 0, "allow_stale": True},
+        "access_policy": {"required_scopes": ["dashboard:read", "dashboard:query"]},
+        "provenance": {"created_by_actor_type": "human", "created_by": "user-1", "source": "human"},
+        "migration": {"state": "new_structured", "blockers": []},
+    }
+
+
 async def current_tenant(session: AsyncSession) -> Tenant:
     tenant = (await session.execute(select(Tenant))).scalars().first()
     assert tenant is not None
@@ -153,6 +213,39 @@ async def seed_dashboard_asset(
             actor_id=tenant.owner_id,
             base_etag=asset.etag,
             change_summary="publish dashboard for tests",
+        )
+        await session.refresh(asset)
+    return asset
+
+
+async def seed_semantic_metric_dashboard_asset(
+    session: AsyncSession,
+    tenant: Tenant,
+    *,
+    slug: str,
+    publish: bool,
+    title: str = "Oracle Dashboard",
+) -> DashboardAsset:
+    notebook = await seed_notebook(session, tenant)
+    service = DashboardService()
+    asset = await service.create_asset_draft(
+        session=session,
+        tenant_id=tenant.id,
+        actor_id=tenant.owner_id,
+        notebook_id=notebook.id,
+        slug=slug,
+        manifest_payload=semantic_metric_dashboard_manifest(title=title),
+        description="Oracle semantic metric dashboard",
+        tags=["oracle"],
+    )
+    if publish:
+        await service.publish(
+            session=session,
+            tenant_id=tenant.id,
+            asset_id=asset.id,
+            actor_id=tenant.owner_id,
+            base_etag=asset.etag,
+            change_summary="publish semantic metric dashboard for tests",
         )
         await session.refresh(asset)
     return asset

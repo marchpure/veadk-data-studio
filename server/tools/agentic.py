@@ -6,9 +6,11 @@ from uuid import UUID
 
 from agents import function_tool
 from agents.run_context import RunContextWrapper
+from sqlalchemy import select
 
 from server.auth.tenant_context import set_tenant_id
 from server.db.session import get_async_session
+from server.models.notebook_assets import NotebookAsset
 from server.prompts.chart_styling import get_chart_instructions
 from server.prompts.defaults import DEFAULT_STYLE_GUIDELINES, DEFAULT_USER_INSTRUCTIONS
 from server.repositories.connections import ConnectionRepository
@@ -26,14 +28,17 @@ from server.services.posthog_service import PostHogService
 from server.services.query_service import QueryService
 from server.services.redaction_service import RedactionService
 from server.services.screenshot_service import ScreenshotService, ScreenshotServiceError
+from server.services.semantic_model_service import SemanticModelService
 from server.tools.plan_tools import check_plan_gate
 from server.utils.custom_logger import get_logger
 from server.utils.dashboard_editing import (
     DashboardEditError,
     DashboardPatchError,
     DashboardSearchReplaceError,
+    DashboardValidationError,
     apply_dashboard_patch,
     apply_search_replace,
+    validate_dashboard_html,
 )
 
 logger = get_logger(__name__)
@@ -169,6 +174,19 @@ async def dashboard_search_replace(ctx: RunContextWrapper[Any], diff_content: st
                     default=str,
                 )
 
+            try:
+                validate_dashboard_html(new_content)
+            except DashboardValidationError as validation_error:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": str(validation_error),
+                        "notebook_id": notebook_id,
+                    },
+                    indent=2,
+                    default=str,
+                )
+
             version_num = await _persist_dashboard_body(ctx, dashboard_repo, session, new_content, session_version)
             logger.info(
                 "Applied dashboard_search_replace for notebook %s version %s",
@@ -234,6 +252,19 @@ async def apply_html_patch(ctx: RunContextWrapper[Any], patch_text: str) -> str:
                     {
                         "success": False,
                         "error": str(p_err),
+                        "notebook_id": notebook_id,
+                    },
+                    indent=2,
+                    default=str,
+                )
+
+            try:
+                validate_dashboard_html(new_content)
+            except DashboardValidationError as validation_error:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": str(validation_error),
                         "notebook_id": notebook_id,
                     },
                     indent=2,
@@ -1404,6 +1435,112 @@ async def describe_asset(ctx: RunContextWrapper[Any], asset_type: str, asset_id:
     except Exception as e:
         logger.error(f"Error in describe_asset: {str(e)}", exc_info=True)
         return json.dumps({"success": False, "error": str(e)}, indent=2, default=str)
+
+
+async def _query_semantic_metric_impl(
+    ctx: RunContextWrapper[Any],
+    model_id: str,
+    metric: str,
+    dimension: str = "",
+    grain: str = "",
+    time_range: str = "",
+    limit: int = 100,
+) -> str:
+    """Query a metric through a published Semantic Model and return governed evidence.
+
+    Use this instead of raw SQL when the conversation is bound to a Semantic Model.
+    The backend enforces the published snapshot, exposed metric/dimension allowlists,
+    read-only SQL validation, tenant scope, and source redaction policy.
+    """
+    tenant_id = ctx.context.get("tenant_id")
+    user_id = ctx.context.get("user_id")
+    selected_model_id = str(ctx.context.get("semantic_model_id") or "").strip()
+
+    if not tenant_id:
+        return json.dumps({"success": False, "error": "Tenant context is required."})
+    if not selected_model_id:
+        return json.dumps({"success": False, "error": "This conversation is not bound to a Semantic Model."})
+    if selected_model_id and model_id != selected_model_id:
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"This conversation is bound to Semantic Model {selected_model_id}.",
+            },
+            ensure_ascii=False,
+        )
+
+    try:
+        set_tenant_id(UUID(str(tenant_id)))
+        async for session in get_async_session():
+            result = await SemanticModelService.run_query_metric(
+                session=session,
+                tenant_id=UUID(str(tenant_id)),
+                slug=model_id,
+                request={
+                    "metric": metric,
+                    "dimension": dimension or None,
+                    "grain": grain or None,
+                    "time_range": time_range or None,
+                    "limit": max(1, min(int(limit), 5000)),
+                },
+                user_id=UUID(str(user_id)) if user_id else None,
+            )
+            if result is None:
+                return json.dumps({"success": False, "error": "Semantic Model not found."})
+            notebook_id = ctx.context.get("notebook_id")
+            if notebook_id:
+                binding = await session.scalar(
+                    select(NotebookAsset).where(
+                        NotebookAsset.tenant_id == UUID(str(tenant_id)),
+                        NotebookAsset.notebook_id == notebook_id,
+                        NotebookAsset.asset_type == "semantic_model",
+                        NotebookAsset.asset_id == selected_model_id,
+                    )
+                )
+                if binding:
+                    policy = dict(binding.usage_policy_json or {})
+                    policy["latest_query"] = {
+                        "metric": metric,
+                        "dimension": dimension or None,
+                        "grain": grain or None,
+                        "time_range": time_range or None,
+                        "status": result.get("status"),
+                        "resolvedMetric": result.get("resolvedMetric"),
+                        "metricDefinition": result.get("metricDefinition"),
+                        "modelVersion": result.get("modelVersion"),
+                        "freshness": result.get("freshness"),
+                        "policyDecision": result.get("policyDecision"),
+                        "sql": result.get("sql"),
+                        "lineage": result.get("lineage") or [],
+                        "evidence": result.get("evidence") or [],
+                        "snapshot": result.get("snapshot") or {},
+                        "dataThrough": result.get("dataThrough"),
+                        "snapshotId": result.get("snapshotId"),
+                        "snapshotHash": result.get("snapshotHash"),
+                        "returnedCount": result.get("returnedCount"),
+                    }
+                    binding.usage_policy_json = policy
+                    await session.commit()
+            return json.dumps({"success": True, **result}, ensure_ascii=False, default=str)
+    except (RuntimeError, PermissionError, ValueError) as error:
+        return json.dumps({"success": False, "error": str(error)}, ensure_ascii=False)
+    except Exception as error:
+        logger.error("Semantic metric query failed: %s", error, exc_info=True)
+        return json.dumps({"success": False, "error": "Semantic metric query failed."}, ensure_ascii=False)
+
+
+@function_tool
+async def query_semantic_metric(
+    ctx: RunContextWrapper[Any],
+    model_id: str,
+    metric: str,
+    dimension: str = "",
+    grain: str = "",
+    time_range: str = "",
+    limit: int = 100,
+) -> str:
+    """Query a metric through a published Semantic Model and return governed evidence."""
+    return await _query_semantic_metric_impl(ctx, model_id, metric, dimension, grain, time_range, limit)
 
 
 def _filter_redacted_from_schema(

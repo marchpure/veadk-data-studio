@@ -28,6 +28,7 @@ export interface AgentRequest {
   db_type?: string
   current_version?: number
   datasource_ids?: string[]
+  semantic_model_id?: string
   create_notebook?: boolean
   is_preview?: boolean
   plan_mode?: boolean
@@ -69,6 +70,21 @@ export interface DatasourceSelectedEvent {
   datasource_id: string
   datasource_name: string
   datasource_type: string
+}
+
+export interface SemanticQueryResultEvent {
+  type: 'semantic_query_result'
+  model_id: string
+  result: SemanticMetricQueryResponse & {
+    success?: boolean
+    metricDefinition?: string
+    metric?: Record<string, any>
+    evidence?: Array<Record<string, any>>
+    snapshot?: Record<string, any>
+    dataThrough?: string
+    snapshotId?: string
+    snapshotHash?: string
+  }
 }
 
 export interface PlanCreatedEvent {
@@ -1403,8 +1419,62 @@ export interface SourceToSemanticModelResponse {
   lineage: Record<string, any>
 }
 
+export interface SemanticModelMetricSummary {
+  id: string
+  name: string
+  businessName: string
+  definition: string
+  dimensions: string[]
+  unit: string
+  lineage?: any[]
+}
+
+export interface SemanticModelDimensionSummary {
+  id: string
+  name: string
+  description: string
+}
+
+export interface SemanticModelSummary {
+  id: string
+  name: string
+  domain: string
+  owner: string
+  datasource: string
+  status: string
+  publishedVersion: string
+  readiness: number
+  readinessLevel: string
+  updatedAt: string
+  description: string
+  metrics: SemanticModelMetricSummary[]
+  dimensions: SemanticModelDimensionSummary[]
+  mcp?: {
+    exposedVersion?: string
+    rawSqlFallback?: boolean
+    allowedMetrics?: string[]
+    allowedDimensions?: string[]
+    lastResult?: Record<string, any>
+  }
+}
+
 export interface SemanticModelListResponse {
-  items: any[]
+  items: SemanticModelSummary[]
+  total: number
+}
+
+export interface NotebookAssetRead {
+  id: string
+  notebook_id: string
+  asset_type: 'dataset' | 'semantic_model' | 'knowledge_resource'
+  asset_id: string
+  added_by?: string | null
+  usage_policy_json: Record<string, any>
+  added_at: string
+}
+
+export interface NotebookAssetListResponse {
+  items: NotebookAssetRead[]
   total: number
 }
 
@@ -1424,7 +1494,7 @@ export interface SemanticMetricQueryResponse {
   result: any
   error?: string
   freshness: string
-  lineage: string[]
+  lineage: Array<string | Record<string, any>>
   policyDecision: string
   sql?: string
   warnings?: string[] | string
@@ -1558,6 +1628,8 @@ async function handleTokenRefresh(): Promise<boolean> {
   return refreshPromise
 }
 
+const TENANT_HEADER = 'X-Tenant-ID'
+
 const apiFetch = async (url: string, init?: RequestInit): Promise<Response> => {
   let finalUrl = url;
 
@@ -1574,8 +1646,11 @@ const apiFetch = async (url: string, init?: RequestInit): Promise<Response> => {
   }
 
   const activeTenantId = getActiveTenantId();
-  if (activeTenantId) {
-    headers.set('X-Tenant-ID', activeTenantId);
+  if (activeTenantId && !headers.has(TENANT_HEADER)) {
+    headers.set(TENANT_HEADER, activeTenantId);
+  }
+  if (headers.get(TENANT_HEADER) === '') {
+    headers.delete(TENANT_HEADER);
   }
 
   if (isAnalyticsOptedOut()) {
@@ -1826,6 +1901,21 @@ export class ApiService {
       }
     } catch (error) {
       console.error('Error deleting notebook:', error)
+      throw error
+    }
+  }
+
+  static async getNotebookAssets(notebookId: string): Promise<NotebookAssetListResponse> {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/notebooks/${notebookId}/assets`)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(extractErrorMessage(errorData) || `HTTP error! status: ${response.status}`)
+      }
+      const responseData = await response.json()
+      return extractData<NotebookAssetListResponse>(responseData)
+    } catch (error) {
+      console.error('Error fetching notebook assets:', error)
       throw error
     }
   }
@@ -3874,6 +3964,7 @@ export class ApiService {
       onHtmlEditComplete?: (event: HtmlEditCompleteEvent) => void
       onHtmlContextEvent?: (event: HtmlContextRefreshEvent) => void
       onDatasourceSelected?: (event: DatasourceSelectedEvent) => void
+      onSemanticQueryResult?: (event: SemanticQueryResultEvent) => void
       onQuerySaved?: () => void
       onInstructionUpdated?: () => void
       onLearningUpdated?: () => void
@@ -3897,6 +3988,7 @@ export class ApiService {
       onHtmlEditComplete,
       onHtmlContextEvent,
       onDatasourceSelected,
+      onSemanticQueryResult,
       onQuerySaved,
       onInstructionUpdated,
       onLearningUpdated,
@@ -3973,6 +4065,8 @@ export class ApiService {
                 onHtmlContextEvent(event as HtmlContextRefreshEvent)
               } else if (event.type === 'datasource_selected' && onDatasourceSelected) {
                 onDatasourceSelected(event as DatasourceSelectedEvent)
+              } else if (event.type === 'semantic_query_result' && onSemanticQueryResult) {
+                onSemanticQueryResult(event as SemanticQueryResultEvent)
               } else if (event.type === 'query_saved' && onQuerySaved) {
                 onQuerySaved()
               } else if (event.type === 'memory_updated' && onInstructionUpdated) {
@@ -5368,6 +5462,7 @@ export class ApiService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
+          [TENANT_HEADER]: '',
         },
         body: formData.toString(),
       })
@@ -5623,6 +5718,7 @@ export class ApiService {
         method: 'GET',
         headers: {
           ...ApiService.getAuthHeaders(),
+          [TENANT_HEADER]: '',
         },
       })
 

@@ -4,6 +4,7 @@ import { useStore } from '../../stores/useStore'
 import { ApiService } from '../../services/api'
 import GoogleSignInButton from '../../components/GoogleSignInButton'
 import { useAppConfig } from '../../hooks/useAppConfig'
+import { isEmbeddedKnowledgeCenterLocation } from '../../contexts/EmbeddedModeContext'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -28,10 +29,18 @@ export default function Login() {
   const [isProcessingInvitation, setIsProcessingInvitation] = useState(false)
 
   // Get the redirect path from location state, default to home
-  const from = location.state?.from?.pathname || '/'
+  const fromLocation = location.state?.from
+  const from = fromLocation?.pathname
+    ? `${fromLocation.pathname}${fromLocation.search ?? ''}${fromLocation.hash ?? ''}`
+    : '/'
 
   // Combined loading state for UI
   const isSubmitting = isLoading || isProcessingInvitation
+  const embeddedAuth = isEmbeddedKnowledgeCenterLocation(location)
+  const showInvitationOnly = (registrationDisabled || features.invitation_only)
+    && !fromInvitationRegistration
+    && !isFromInvitation
+    && !noAccess
 
   const handleGoogleSuccess = async (credential: string) => {
     setAuthError(null)
@@ -173,6 +182,149 @@ export default function Login() {
     } catch {
       setIsProcessingInvitation(false)
     }
+  }
+
+  if (embeddedAuth) {
+    return (
+      <div data-embedded-auth="knowledge-center" className="flex min-h-screen w-full items-center justify-center bg-[#0f172a] px-4 py-6 text-[#e5e7eb]">
+        <div className="w-full max-w-[380px] rounded-md border border-[rgba(148,163,184,0.22)] bg-[#111827] p-5 shadow-2xl shadow-black/30">
+          <div className="mb-5">
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-orange">Data Studio</div>
+            <h1 className="mt-2 text-xl font-semibold text-[#e5e7eb]">
+              {noAccess ? 'No Workspace Access' : 'Sign in to Data Studio'}
+            </h1>
+            <p className="mt-1 text-sm text-[#94a3b8]">Knowledge Center requires a Data Studio session.</p>
+          </div>
+
+          {noAccess && (
+            <div className="mb-4 rounded-md border border-[rgba(248,113,113,0.35)] bg-[#172033] p-3">
+              <div className="flex items-start gap-3">
+                <svg className="mt-0.5 h-4 w-4 shrink-0 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-[#e5e7eb]">No Workspace Access</p>
+                  <p className="mt-1 text-sm text-[#94a3b8]">Please contact your administrator for an invitation.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showInvitationOnly && (
+            <div className="mb-4 rounded-md border border-[rgba(148,163,184,0.22)] bg-[#172033] p-3">
+              <div className="flex items-start gap-3">
+                <svg className="mt-0.5 h-4 w-4 shrink-0 text-brand-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-[#e5e7eb]">Invitation Only</p>
+                  <p className="mt-1 text-sm text-[#94a3b8]">Contact your administrator if you need access.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {authError && (
+            <div className="mb-4 rounded-md border border-[rgba(248,113,113,0.35)] bg-[rgba(127,29,29,0.32)] p-3">
+              <p className="text-sm text-red-200">{authError}</p>
+            </div>
+          )}
+
+          {features.local_auth_enabled && (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-[#e5e7eb]">
+                  Email
+                </label>
+                <div className="flex items-center gap-3 rounded-md border border-[rgba(148,163,184,0.22)] bg-[#0f172a] px-3 py-2.5 transition-all focus-within:border-brand-orange/70 focus-within:ring-2 focus-within:ring-brand-orange/15">
+                  <svg
+                    className="h-4 w-4 shrink-0 text-[#94a3b8]"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <rect x="2" y="4" width="20" height="16" rx="2" />
+                    <path d="M22 6L12 13L2 6" />
+                  </svg>
+                  <input
+                    id="email"
+                    type="email"
+                    placeholder="yours@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    disabled={isSubmitting || (isFromInvitation && !!invitationEmail) || (fromInvitationRegistration && !!invitationEmail)}
+                    className="min-w-0 flex-1 border-none bg-transparent text-[15px] text-[#e5e7eb] outline-none placeholder:text-[#64748b] disabled:opacity-60"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-[#e5e7eb]">
+                  Password
+                </label>
+                <div className="flex items-center gap-3 rounded-md border border-[rgba(148,163,184,0.22)] bg-[#0f172a] px-3 py-2.5 transition-all focus-within:border-brand-orange/70 focus-within:ring-2 focus-within:ring-brand-orange/15">
+                  <svg
+                    className="h-4 w-4 shrink-0 text-[#94a3b8]"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0110 0v4" />
+                  </svg>
+                  <input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Enter your password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    disabled={isSubmitting}
+                    className="min-w-0 flex-1 border-none bg-transparent text-[15px] text-[#e5e7eb] outline-none placeholder:text-[#64748b]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="text-[#94a3b8] transition-colors hover:text-[#e5e7eb]"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? (
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                      </svg>
+                    ) : (
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="flex w-full items-center justify-center gap-2 rounded-md border-none bg-brand-orange px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-brand-orange-hover disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSubmitting ? (
+                  <>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"></div>
+                    {isProcessingInvitation ? 'Accepting invitation...' : 'Signing in...'}
+                  </>
+                ) : (
+                  'Sign in'
+                )}
+              </button>
+            </form>
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (

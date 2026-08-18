@@ -365,6 +365,7 @@ async def stream_claude_with_mcp_tools(
         pending_query_saved_events: dict[str, str] = {}
         pending_memory_updated_events: set[str] = set()
         pending_screenshot_events: dict[str, str] = {}
+        pending_semantic_query_events: dict[str, str] = {}
 
         async for message in client.receive_messages():
             message_count += 1
@@ -518,12 +519,16 @@ async def stream_claude_with_mcp_tools(
                             if display_name == "generate_dashboard_screenshot":
                                 pending_screenshot_events[tool_id] = json.dumps(tool_input) if tool_input else "{}"
 
+                            if display_name == "query_semantic_metric":
+                                pending_semantic_query_events[tool_id] = str(tool_input.get("model_id") or "")
+
                             skill_description_override = None
                             if display_name in [
                                 "execute_mongo_query",
                                 "execute_sql_query",
                                 "execute_duckdb_query",
                                 "save_query",
+                                "query_semantic_metric",
                             ]:
                                 args_json = json.dumps(tool_input) if tool_input else "{}"
                             elif display_name == "get_skill_definition" and tool_input:
@@ -683,6 +688,25 @@ async def stream_claude_with_mcp_tools(
                                 except Exception as e:
                                     logger.warning(f"[CLAUDE MCP] Failed to emit dashboard_screenshot event: {e}")
 
+                            if tool_id in pending_semantic_query_events:
+                                semantic_model_id = pending_semantic_query_events.pop(tool_id)
+                                try:
+                                    if isinstance(content, str):
+                                        result_data = json.loads(content)
+                                    elif isinstance(content, list) and content:
+                                        text_content = getattr(content[0], "text", None)
+                                        result_data = json.loads(text_content) if text_content else {}
+                                    else:
+                                        result_data = {}
+                                    if isinstance(result_data, dict):
+                                        yield {
+                                            "type": "semantic_query_result",
+                                            "model_id": semantic_model_id,
+                                            "result": result_data,
+                                        }
+                                except (json.JSONDecodeError, TypeError) as error:
+                                    logger.warning(f"[CLAUDE MCP] Could not emit semantic query evidence: {error}")
+
                             if tool_id in pending_plan_tool_ids:
                                 pending_plan_tool_ids.discard(tool_id)
                             else:
@@ -758,6 +782,20 @@ async def stream_claude_with_mcp_tools(
                                 pending_memory_updated_events.discard(tool_use_id)
                                 logger.info("[CLAUDE MCP] Memory updated (UserMessage), emitting memory_updated event")
                                 yield {"type": "memory_updated"}
+
+                            if tool_use_id in pending_semantic_query_events:
+                                semantic_model_id = pending_semantic_query_events.pop(tool_use_id)
+                                content = getattr(block, "content", "")
+                                try:
+                                    result_data = json.loads(content) if isinstance(content, str) else {}
+                                    if isinstance(result_data, dict):
+                                        yield {
+                                            "type": "semantic_query_result",
+                                            "model_id": semantic_model_id,
+                                            "result": result_data,
+                                        }
+                                except (json.JSONDecodeError, TypeError) as error:
+                                    logger.warning(f"[CLAUDE MCP] Could not emit semantic query evidence: {error}")
 
                             if tool_use_id in pending_plan_tool_ids:
                                 pending_plan_tool_ids.discard(tool_use_id)

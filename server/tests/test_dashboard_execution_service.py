@@ -936,3 +936,47 @@ async def test_query_dashboard_blocks_unresolved_access_policy_refs_before_execu
         )
     ).scalars().all()
     assert "blocked" in audit_outcomes
+
+
+@pytest.mark.asyncio
+async def test_query_dashboard_blocks_policy_refs_for_semantic_metric_with_null_saved_query(
+    test_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _semantic_metric_manifest_payload(
+        access_policy={
+            "required_scopes": ["dashboard:read", "dashboard:query"],
+            "row_policy_refs": ["tenant_rls"],
+        }
+    )
+    payload["data_views"][0]["saved_query"] = None
+    ids = await _seed_published_dashboard(
+        test_session,
+        payload,
+        slug_suffix=f"semantic-policy-{uuid4()}",
+    )
+    executed = False
+
+    async def fake_run_query_metric(*_args, **_kwargs):
+        nonlocal executed
+        executed = True
+        return {"status": "completed", "result": []}
+
+    monkeypatch.setattr("server.services.dashboard.SemanticModelService.run_query_metric", fake_run_query_metric)
+
+    run = await DashboardService().query_dashboard(
+        session=test_session,
+        tenant_id=ids["tenant_id"],
+        asset_id=ids["asset_id"],
+        actor_id=str(ids["user_id"]),
+        actor_type="human",
+        data_view_ids=["dv-paid-revenue"],
+        correlation_id="semantic-policy-guard",
+    )
+
+    assert executed is False
+    assert run["overall_freshness"] == "blocked"
+    assert run["views"][0]["data_view_id"] == "dv-paid-revenue"
+    assert run["views"][0]["status"] == "permission_denied"
+    assert run["views"][0]["lineage"] == []
+    assert run["views"][0]["error"]["code"] == "policy_not_enforced"

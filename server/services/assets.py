@@ -13,7 +13,7 @@ from server.models.dashboard import Dashboard, DashboardAsset, DashboardAuditEve
 from server.models.datasets import Dataset
 from server.models.knowledge_resources import EvidenceFragment, KnowledgeResource
 from server.models.notebook_assets import NotebookAsset
-from server.models.semantic_models import SemanticModel
+from server.models.semantic_models import SemanticModel, SemanticModelEntity
 from server.models.source_resources import SourceResource
 from server.models.source_snapshots import SourceSnapshot
 
@@ -185,7 +185,12 @@ class AssetService:
         stmt = (
             select(SemanticModel)
             .where(SemanticModel.tenant_id == tenant_id)
-            .options(selectinload(SemanticModel.metrics), selectinload(SemanticModel.dimensions))
+            .options(
+                selectinload(SemanticModel.entities).selectinload(SemanticModelEntity.fields),
+                selectinload(SemanticModel.relationships),
+                selectinload(SemanticModel.metrics),
+                selectinload(SemanticModel.dimensions),
+            )
         )
         if not include_all:
             clauses = []
@@ -402,6 +407,7 @@ class AssetService:
         if publish_state != "published":
             capabilities = {}
             usage_policy = {**usage_policy, "external": False}
+        sample_evidence = self._semantic_model_sample_evidence(model)
         return {
             "asset_type": "semantic_model",
             "asset_id": str(model.id),
@@ -413,6 +419,18 @@ class AssetService:
             "version": model.published_version if model.published_version != "v0" else None,
             "consumers": self._semantic_model_consumers(model),
             "capabilities": capabilities,
+            "capability_kind": "semantic_skill",
+            "capability_package": (
+                self._semantic_model_capability_package(
+                    model=model,
+                    capabilities=capabilities,
+                    gate=gate,
+                    usage_policy=usage_policy,
+                    sample_evidence=sample_evidence,
+                )
+                if publish_state == "published"
+                else {}
+            ),
             "query_url": self._external_query_url("semantic_model", str(model.id)) if publish_state == "published" else None,
             "freshness": {
                 "status": "current" if model.drift_alerts == 0 else "drift_detected",
@@ -427,7 +445,7 @@ class AssetService:
                 "published_version": model.published_version,
             },
             "usage_policy": usage_policy,
-            "sample_evidence": self._semantic_model_sample_evidence(model),
+            "sample_evidence": sample_evidence,
         }
 
     def _dashboard_payload(
@@ -450,6 +468,7 @@ class AssetService:
             usage_policy = {"external": True, **usage_policy}
         else:
             usage_policy = {**usage_policy, "external": False}
+        sample_evidence = self._dashboard_sample_evidence(manifest, recent_cases)
 
         return {
             "asset_type": "dashboard",
@@ -462,11 +481,25 @@ class AssetService:
             "version": f"v{version.version_num}" if version else None,
             "consumers": self._dashboard_consumers(asset),
             "capabilities": capabilities,
+            "capability_kind": "dashboard_skill",
+            "capability_package": (
+                self._dashboard_capability_package(
+                    asset=asset,
+                    version=version,
+                    manifest=manifest,
+                    capabilities=capabilities,
+                    gate=gate,
+                    usage_policy=usage_policy,
+                    sample_evidence=sample_evidence,
+                )
+                if can_consume
+                else {}
+            ),
             "query_url": self._external_query_url("dashboard", str(asset.id)) if can_consume else None,
             "freshness": self._dashboard_freshness(asset),
             "provenance": self._dashboard_provenance(asset, version, manifest),
             "usage_policy": usage_policy,
-            "sample_evidence": self._dashboard_sample_evidence(manifest, recent_cases),
+            "sample_evidence": sample_evidence,
         }
 
     def _knowledge_payload(
@@ -489,6 +522,16 @@ class AssetService:
                 "resource_type": resource.resource_type,
                 "locator_types": self._locator_types(resource.resource_type),
                 "provider": knowledge.provider,
+            },
+            "capability_kind": "retrieval_binding",
+            "capability_package": {
+                "package_type": "retrieval_binding",
+                "resource_id": str(knowledge.id),
+                "provider": knowledge.provider,
+                "retrieval": {
+                    "modes": ["search_knowledge", "read_evidence"],
+                    "debug_uri": knowledge.retrieval_debug_uri,
+                },
             },
             "query_url": None,
             "freshness": {
@@ -558,6 +601,137 @@ class AssetService:
         if asset_type not in self.EXTERNAL_QUERY_TYPES:
             return None
         return f"/api/external/assets/{asset_type}/{asset_id}/query"
+
+    def _semantic_model_capability_package(
+        self,
+        *,
+        model: SemanticModel,
+        capabilities: dict[str, Any],
+        gate: dict[str, Any],
+        usage_policy: dict[str, Any],
+        sample_evidence: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        mcp = self._loads_json(model.mcp_json)
+        allowed_metrics = list(mcp.get("allowedMetrics") or [metric.slug for metric in model.metrics])
+        allowed_dimensions = list(mcp.get("allowedDimensions") or [dimension.slug for dimension in model.dimensions])
+        mdl = {
+            "schema": "byaan.mdl.v1",
+            "model": {
+                "id": str(model.id),
+                "slug": model.slug,
+                "name": model.name,
+                "domain": model.domain,
+                "version": model.published_version,
+            },
+            "entities": [
+                {
+                    "id": entity.slug,
+                    "name": entity.name,
+                    "business_name": entity.business_name,
+                    "table": entity.table_name,
+                    "primary_key": entity.primary_key,
+                    "fields": [
+                        {
+                            "name": field.name,
+                            "source_field": field.source_field,
+                            "type": field.data_type,
+                            "role": field.role,
+                        }
+                        for field in entity.fields
+                    ],
+                }
+                for entity in model.entities
+            ],
+            "relationships": [
+                {
+                    "id": relationship.slug,
+                    "from": relationship.from_entity,
+                    "to": relationship.to_entity,
+                    "join_fields": self._loads_json(relationship.join_fields_json, []),
+                    "cardinality": relationship.cardinality,
+                    "fanout_risk": relationship.fanout_risk,
+                    "validation_status": relationship.validation_status,
+                }
+                for relationship in model.relationships
+                if relationship.status != "rejected"
+            ],
+            "metrics": [
+                {
+                    "id": metric.slug,
+                    "name": metric.name,
+                    "business_name": metric.business_name,
+                    "definition": metric.definition,
+                    "formula": metric.formula,
+                    "filter": metric.filter_expr,
+                    "time_field": metric.time_field,
+                    "default_grain": metric.default_grain,
+                    "dimensions": self._loads_json(metric.dimensions_json, []),
+                    "unit": metric.unit,
+                    "certification": metric.certification,
+                }
+                for metric in model.metrics
+            ],
+            "dimensions": [
+                {
+                    "id": dimension.slug,
+                    "name": dimension.name,
+                    "entity": dimension.entity_slug,
+                    "field": dimension.field,
+                    "description": dimension.description,
+                }
+                for dimension in model.dimensions
+            ],
+        }
+        return {
+            "package_type": "semantic_skill",
+            "runtime": {
+                "query_url": self._external_query_url("semantic_model", str(model.id)),
+                "execution_modes": capabilities.get("execution_modes") or ["run_semantic_query"],
+            },
+            "mdl": mdl,
+            "governance": {
+                "publish_state": "published",
+                "gate": gate,
+                "allowed_metrics": allowed_metrics,
+                "allowed_dimensions": allowed_dimensions,
+                "raw_sql_fallback": bool(mcp.get("rawSqlFallback", False)),
+                "usage_policy": usage_policy,
+            },
+            "evidence": sample_evidence[:8],
+        }
+
+    def _dashboard_capability_package(
+        self,
+        *,
+        asset: DashboardAsset,
+        version: Dashboard | None,
+        manifest: dict[str, Any],
+        capabilities: dict[str, Any],
+        gate: dict[str, Any],
+        usage_policy: dict[str, Any],
+        sample_evidence: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "package_type": "dashboard_skill",
+            "runtime": {
+                "query_url": self._external_query_url("dashboard", str(asset.id)),
+                "execution_modes": capabilities.get("execution_modes") or ["query_dashboard"],
+            },
+            "dashboard": {
+                "id": str(asset.id),
+                "slug": asset.slug,
+                "version": f"v{version.version_num}" if version else None,
+                "data_views": capabilities.get("data_views") or [],
+                "filters": capabilities.get("filters") or [],
+                "semantic_bindings": manifest.get("semantic_bindings") or [],
+            },
+            "governance": {
+                "publish_state": "published",
+                "gate": gate,
+                "usage_policy": usage_policy,
+            },
+            "evidence": sample_evidence[:8],
+        }
 
     def _dashboard_publish_state(
         self,
@@ -822,7 +996,7 @@ class AssetService:
                 {
                     "id": data_view.get("id"),
                     "kind": data_view.get("kind"),
-                    "lineage": data_view.get("lineage") or data_view.get("saved_query", {}).get("lineage", []),
+                    "lineage": data_view.get("lineage") or (data_view.get("saved_query") or {}).get("lineage", []),
                     "evidence": data_view.get("evidence") or [],
                 }
                 for data_view in data_views
@@ -862,13 +1036,14 @@ class AssetService:
         ]
         return next((str(value) for value in candidates if value), None)
 
-    def _loads_json(self, value: str | None) -> Any:
+    def _loads_json(self, value: str | None, default: Any | None = None) -> Any:
+        fallback = {} if default is None else default
         if not value:
-            return {}
+            return fallback
         try:
             return json.loads(value)
         except json.JSONDecodeError:
-            return {}
+            return fallback
 
     def _parse_uuid(self, value: str) -> UUID | None:
         try:

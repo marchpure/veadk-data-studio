@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncGenerator
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.auth.tenant_context import set_tenant_id
 from server.models.knowledge_resources import KnowledgeResource
 from server.models.notebook_assets import NotebookAsset
+from server.models.semantic_models import SemanticModel
 from server.prompts.prompt_variants import detect_model_family
 from server.prompts.prompts import get_unified_agent_prompt_compact
 from server.repositories.connections import ConnectionRepository
@@ -38,6 +40,7 @@ from server.services.llm_service import ModelService
 from server.services.message_service import MessageService
 from server.services.notebook import NotebookService
 from server.services.redaction_service import RedactionService
+from server.services.semantic_model_service import SemanticModelService
 from server.services.skill_registry import SkillRegistry
 from server.services.title_generation import generate_notebook_title
 from server.tools.agentic import (
@@ -50,6 +53,7 @@ from server.tools.agentic import (
     get_dataset_schema_by_id,
     get_existing_html,
     get_user_style_guidelines,
+    query_semantic_metric,
     save_query,
     save_skill_query,
     saved_query_schema,
@@ -91,6 +95,19 @@ HTML_EDIT_COMPLETE_TOOLS = {
 }
 
 HTML_CONTEXT_FETCH_TOOLS = {"get_existing_html"}
+
+
+def _item_field(item: Any, name: str) -> Any:
+    if isinstance(item, dict):
+        return item.get(name)
+    return getattr(item, name, None)
+
+
+def _tool_output_value(item: Any) -> Any:
+    output = _item_field(item, "output")
+    if output is not None:
+        return output
+    return _item_field(_item_field(item, "raw_item"), "output")
 
 
 async def _associate_request_datasource_with_notebook(
@@ -162,6 +179,140 @@ async def _associate_request_datasource_with_notebook(
         )
     )
     await session.commit()
+
+
+async def _resolve_semantic_model_binding(
+    session: AsyncSession,
+    *,
+    tenant_id: UUID | None,
+    user_id: UUID | None,
+    notebook_id: str | UUID | None,
+    requested_model_id: str | None,
+) -> dict[str, Any] | None:
+    if tenant_id is None or notebook_id is None:
+        if requested_model_id:
+            raise ValueError("A tenant and notebook are required for governed Semantic Model queries.")
+        return None
+
+    result = await session.execute(
+        select(NotebookAsset)
+        .where(
+            NotebookAsset.tenant_id == tenant_id,
+            NotebookAsset.notebook_id == notebook_id,
+            NotebookAsset.asset_type == "semantic_model",
+        )
+        .order_by(NotebookAsset.added_at.desc())
+    )
+    bindings = list(result.scalars().all())
+    ask_binding = next(
+        (item for item in bindings if (item.usage_policy_json or {}).get("purpose") == "governed_ask_data"),
+        bindings[0] if bindings else None,
+    )
+    bound_model_id = ask_binding.asset_id if ask_binding else None
+
+    if requested_model_id and bound_model_id and requested_model_id != bound_model_id:
+        raise ValueError(
+            f"This conversation is already bound to Semantic Model {bound_model_id}. Start a new conversation to switch models."
+        )
+
+    model_id = requested_model_id or bound_model_id
+    if not model_id:
+        return None
+
+    model = await SemanticModelService.load_model(session, tenant_id, model_id)
+    if model is None:
+        try:
+            parsed_id = UUID(model_id)
+        except ValueError:
+            parsed_id = None
+        if parsed_id is not None:
+            slug = await session.scalar(
+                select(SemanticModel.slug).where(
+                    SemanticModel.tenant_id == tenant_id,
+                    SemanticModel.id == parsed_id,
+                )
+            )
+            if slug:
+                model = await SemanticModelService.load_model(session, tenant_id, slug)
+    if model is None:
+        raise ValueError("Semantic Model not found in this workspace.")
+    if model.published_version == "v0":
+        raise ValueError("Publish the Semantic Model before starting a governed Ask Data conversation.")
+
+    if ask_binding is None:
+        session.add(
+            NotebookAsset(
+                tenant_id=tenant_id,
+                notebook_id=notebook_id,
+                asset_type="semantic_model",
+                asset_id=model.slug,
+                added_by=user_id,
+                usage_policy_json={
+                    "purpose": "governed_ask_data",
+                    "published_version": model.published_version,
+                    "raw_sql_fallback": False,
+                },
+            )
+        )
+        await session.commit()
+    elif ask_binding.asset_id != model.slug:
+        ask_binding.asset_id = model.slug
+        ask_binding.usage_policy_json = {
+            "purpose": "governed_ask_data",
+            "published_version": model.published_version,
+            "raw_sql_fallback": False,
+        }
+        await session.commit()
+
+    return SemanticModelService.model_to_payload(model)
+
+
+def _requests_dashboard_output(message: str | None) -> bool:
+    if not message:
+        return False
+    normalized = message.casefold()
+    if re.search(
+        r"\b(dashboards?|charts?|graphs?|plots?|visuali[sz](?:e|ed|es|ing|ation|ations))\b",
+        normalized,
+    ):
+        return True
+    return any(term in normalized for term in ("仪表盘", "看板", "图表", "可视化", "画图", "绘图"))
+
+
+def _semantic_model_instructions(model: dict[str, Any], *, dashboard_output_requested: bool = False) -> str:
+    metrics = [
+        {
+            "id": item.get("id"),
+            "business_name": item.get("businessName") or item.get("name"),
+            "definition": item.get("definition"),
+            "unit": item.get("unit"),
+            "dimensions": item.get("dimensions") or [],
+        }
+        for item in model.get("metrics") or []
+    ]
+    dimensions = [
+        {"id": item.get("id"), "name": item.get("name"), "description": item.get("description")}
+        for item in model.get("dimensions") or []
+    ]
+    return f"""
+<governed_semantic_model>
+This conversation is locked to the published Semantic Model below.
+model_id: {model.get('id')}
+model_name: {model.get('name')}
+domain: {model.get('domain')}
+published_version: {model.get('publishedVersion')}
+metrics: {json.dumps(metrics, ensure_ascii=False)}
+dimensions: {json.dumps(dimensions, ensure_ascii=False)}
+dashboard_output_requested: {str(dashboard_output_requested).lower()}
+
+For quantitative answers, call query_semantic_metric with this model_id. Do not use raw SQL or infer values.
+Explain metric definition, model version, freshness, lineage, and policy evidence when useful for verification.
+If the question cannot be answered by an exposed metric and dimension, state the gap instead of bypassing the model.
+Default to a concise conversational answer. Only create or edit dashboard HTML when dashboard_output_requested is true
+because the current user explicitly asked for a dashboard, chart, graph, plot, or visualization. Never create one merely
+because a quantitative result could be visualized.
+</governed_semantic_model>
+""".strip()
 
 
 def _truncate_text(text: str | None, limit: int = 1500) -> str:
@@ -411,9 +562,10 @@ async def _load_skills_for_agent(
     session: AsyncSession,
     tools: list,
     instructions: str,
+    allow_skill_tools: bool = True,
 ) -> tuple[str, dict[str, dict], list[str], dict[str, dict]]:
     """Load enabled skills and custom skills, extend tools, and return context data."""
-    if not tenant_id:
+    if not tenant_id or not allow_skill_tools:
         return instructions, {}, [], {}
 
     try:
@@ -701,6 +853,8 @@ def _build_agent_tools(
     plan_mode: bool = False,
     has_github_repos: bool = False,
     has_local_repos: bool = False,
+    semantic_model_bound: bool = False,
+    allow_dashboard_tools: bool = False,
 ) -> list:
     """
     Build the unified tool list for the agent.
@@ -710,7 +864,22 @@ def _build_agent_tools(
     """
     tools = []
 
-    if database_schemas:
+    if semantic_model_bound:
+        tools = [query_semantic_metric]
+        if allow_dashboard_tools:
+            tools.extend(
+                [
+                    get_chart_styling,
+                    start_html_generation,
+                    get_existing_html,
+                    apply_html_patch,
+                    dashboard_search_replace,
+                    generate_dashboard_screenshot,
+                ]
+            )
+        return tools
+
+    if not semantic_model_bound and database_schemas:
         db_types = {db.get("db_type", "").lower() for db in database_schemas}
 
         if "mongo" in db_types:
@@ -723,20 +892,16 @@ def _build_agent_tools(
             tools.extend(get_dynamodb_tools())
         if "databricks" in db_types:
             tools.extend(get_databricks_tools())
-    else:
+    elif not semantic_model_bound:
         tools.extend(get_sql_tools())
         tools.extend(get_mongo_tools())
         tools.extend(get_duckdb_tools())
         tools.extend(get_dynamodb_tools())
         tools.extend(get_databricks_tools())
 
-    tools.extend(
-        [
-            save_query,
-            get_database_schema,
-            get_chart_styling,
-        ]
-    )
+    if not semantic_model_bound:
+        tools.extend([save_query, get_database_schema])
+    tools.append(get_chart_styling)
 
     tools.extend(
         [
@@ -767,13 +932,13 @@ def _build_agent_tools(
 
     tools.extend(
         [
-            search_datasets,
             search_assets,
             describe_asset,
-            get_dataset_schema_by_id,
-            save_skill_query,
+            query_semantic_metric,
         ]
     )
+    if not semantic_model_bound:
+        tools.extend([search_datasets, get_dataset_schema_by_id, save_skill_query])
 
     tools.extend(get_instruction_tools())
 
@@ -813,6 +978,8 @@ async def create_unified_agent(
     instructions: str | None = None,
     memory: str | None = None,
     learnings: list[dict] | None = None,
+    semantic_model_id: str | None = None,
+    allow_dashboard_tools: bool = False,
 ) -> tuple[Agent, dict[str, dict], list[str], dict[str, dict]]:
     """
     Create a unified agent with all tools - no handoffs.
@@ -855,6 +1022,8 @@ async def create_unified_agent(
             plan_mode=plan_mode,
             has_github_repos=bool(github_repos),
             has_local_repos=bool(local_repos),
+            semantic_model_bound=bool(semantic_model_id),
+            allow_dashboard_tools=allow_dashboard_tools,
         )
 
         if database_schemas:
@@ -866,7 +1035,12 @@ async def create_unified_agent(
             logger.info("No database schemas provided, enabling SQL, MongoDB, and DuckDB tools")
 
         instructions, enabled_skills, enabled_skill_names, custom_skills = await _load_skills_for_agent(
-            tenant_id, user_id, session, tools, instructions
+            tenant_id,
+            user_id,
+            session,
+            tools,
+            instructions,
+            allow_skill_tools=not bool(semantic_model_id),
         )
 
         if github_repos:
@@ -953,6 +1127,7 @@ async def stream_handoff_agent_response(
     tool_runtime_start: float | None = None
     tool_runtime_name: str | None = None
     tool_output_seen = False
+    pending_tool_calls: dict[str, tuple[str, dict[str, Any] | None]] = {}
 
     try:
         # Restore tenant context for background task (ContextVar not inherited by asyncio tasks)
@@ -1034,10 +1209,26 @@ async def stream_handoff_agent_response(
             yield f"data: {event_data}\n\n"
             return
 
+        semantic_model: dict[str, Any] | None = None
+        try:
+            semantic_model = await _resolve_semantic_model_binding(
+                session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                notebook_id=request.notebook_id,
+                requested_model_id=request.semantic_model_id,
+            )
+            if semantic_model:
+                request.semantic_model_id = str(semantic_model["id"])
+        except ValueError as error:
+            event_data = json.dumps({"type": "error", "text": str(error)}, ensure_ascii=False)
+            yield f"data: {event_data}\n\n"
+            return
+
         database_schemas: list[dict] = []
         redaction_rules: dict[str, dict] = {}
 
-        if request.notebook_id:
+        if request.notebook_id and semantic_model is None:
             try:
                 # Fetch ALL datasets for the notebook (supports multi-database)
                 datasets = await DatasetService.get_datasets_by_notebook(session, request.notebook_id)
@@ -1250,6 +1441,15 @@ async def stream_handoff_agent_response(
             except Exception as mem_error:
                 logger.warning(f"Failed to load workspace instructions: {mem_error}")
 
+        if semantic_model:
+            semantic_instructions = _semantic_model_instructions(
+                semantic_model,
+                dashboard_output_requested=_requests_dashboard_output(request.message),
+            )
+            notebook_memory = (
+                f"{notebook_memory}\n\n{semantic_instructions}" if notebook_memory else semantic_instructions
+            )
+
         relevant_learnings: list[dict] | None = None
         if tenant_id:
             try:
@@ -1418,10 +1618,17 @@ async def stream_handoff_agent_response(
                     plan_mode=request.plan_mode,
                     has_github_repos=bool(github_repos),
                     has_local_repos=bool(local_repos),
+                    semantic_model_bound=bool(semantic_model),
+                    allow_dashboard_tools=_requests_dashboard_output(request.message),
                 )
 
                 instructions, enabled_skills, enabled_skill_names, custom_skills = await _load_skills_for_agent(
-                    tenant_id, user_id, session, tools, instructions
+                    tenant_id,
+                    user_id,
+                    session,
+                    tools,
+                    instructions,
+                    allow_skill_tools=not bool(semantic_model),
                 )
 
                 if github_repos:
@@ -1443,6 +1650,8 @@ async def stream_handoff_agent_response(
                     "redaction_rules": redaction_rules,
                     "plan_mode": request.plan_mode,
                     "plan_started": request.plan_mode and bool(request.notebook_id) and not is_first_message,
+                    "semantic_model_id": request.semantic_model_id,
+                    "semantic_model_version": semantic_model.get("publishedVersion") if semantic_model else None,
                 }
                 _add_skill_credentials_to_context(context, enabled_skills, custom_skills)
 
@@ -1707,6 +1916,8 @@ async def stream_handoff_agent_response(
                 plan_mode=request.plan_mode,
                 memory=notebook_memory,
                 learnings=relevant_learnings,
+                semantic_model_id=request.semantic_model_id,
+                allow_dashboard_tools=_requests_dashboard_output(request.message),
             )
         except Exception as agent_error:
             error_msg = f"Failed to create unified agent: {agent_error}"
@@ -1743,6 +1954,8 @@ async def stream_handoff_agent_response(
             "redaction_rules": redaction_rules,
             "plan_mode": request.plan_mode,
             "plan_started": request.plan_mode and bool(request.notebook_id) and not is_first_message,
+            "semantic_model_id": request.semantic_model_id,
+            "semantic_model_version": semantic_model.get("publishedVersion") if semantic_model else None,
         }
         _add_skill_credentials_to_context(context, enabled_skills, custom_skills)
 
@@ -2078,6 +2291,13 @@ async def stream_handoff_agent_response(
                             last_tool_args = arguments
                         else:
                             last_tool_args = None
+                        raw_call_id = str(
+                            getattr(item.raw_item, "call_id", None)
+                            or getattr(item.raw_item, "id", None)
+                            or ""
+                        )
+                        if raw_call_id:
+                            pending_tool_calls[raw_call_id] = (tool_name, last_tool_args)
                         tool_runtime_start = perf_counter()
                         tool_runtime_name = tool_name
 
@@ -2185,13 +2405,14 @@ async def stream_handoff_agent_response(
 
                         tool_call_id = f"tool_{hash(f'{tool_name}_{arguments}_{len(assistant_response)}') % 10000}"
 
-                        # Only return arguments for query execution/saving tools
+                        # Return the governed query contract without exposing datasource credentials.
                         skill_description_override = None
                         if tool_name in [
                             "execute_mongo_query",
                             "execute_sql_query",
                             "execute_duckdb_query",
                             "save_query",
+                            "query_semantic_metric",
                         ]:
                             args_json = json.dumps(arguments) if arguments else "{}"
                         elif tool_name == "get_skill_definition" and arguments:
@@ -2238,6 +2459,34 @@ async def stream_handoff_agent_response(
 
                     elif item.type == "tool_call_output_item":
                         tool_output_seen = True
+                        raw_output_item = getattr(item, "raw_item", None)
+                        output_call_id = str(
+                            _item_field(raw_output_item, "call_id")
+                            or _item_field(raw_output_item, "tool_call_id")
+                            or _item_field(raw_output_item, "id")
+                            or ""
+                        )
+                        output_tool_name, output_tool_args = pending_tool_calls.pop(
+                            output_call_id,
+                            (last_tool_name, last_tool_args),
+                        )
+                        if output_tool_name == "query_semantic_metric":
+                            try:
+                                raw_output = _tool_output_value(item)
+                                result_data = json.loads(raw_output) if isinstance(raw_output, str) else raw_output
+                                if isinstance(result_data, dict):
+                                    semantic_event = json.dumps(
+                                        {
+                                            "type": "semantic_query_result",
+                                            "model_id": request.semantic_model_id,
+                                            "result": result_data,
+                                        },
+                                        ensure_ascii=False,
+                                        default=str,
+                                    )
+                                    yield f"data: {semantic_event}\n\n"
+                            except (json.JSONDecodeError, TypeError) as error:
+                                logger.warning("Could not emit semantic query evidence: %s", error)
                         output_markdown = "\n\nTool executed successfully\n\n"
 
                         assistant_response += output_markdown
@@ -2254,13 +2503,13 @@ async def stream_handoff_agent_response(
                             tool_runtime_start = None
                             tool_runtime_name = None
 
-                        if last_tool_name in HTML_CONTEXT_FETCH_TOOLS and html_context_request_id:
+                        if output_tool_name in HTML_CONTEXT_FETCH_TOOLS and html_context_request_id:
                             context_complete_event = json.dumps(
                                 {
                                     "type": "html_context_refresh",
                                     "stage": "complete",
                                     "message": "Latest dashboard HTML loaded",
-                                    "tool_name": last_tool_name,
+                                    "tool_name": output_tool_name,
                                     "context_id": html_context_request_id,
                                     "edit_session_id": html_edit_session_id,
                                 },
@@ -2269,14 +2518,14 @@ async def stream_handoff_agent_response(
                             yield f"data: {context_complete_event}\n\n"
                             logger.info(
                                 "HTML context fetch completed (tool=%s, notebook=%s, context_id=%s)",
-                                last_tool_name,
+                                output_tool_name,
                                 request.notebook_id,
                                 html_context_request_id,
                             )
                             html_context_request_id = None
 
                         # Check if the last tool was save_query and emit query_saved event
-                        if last_tool_name == "save_query":
+                        if output_tool_name == "save_query":
                             query_saved_flag = json.dumps(
                                 {
                                     "type": "query_saved",
@@ -2286,25 +2535,25 @@ async def stream_handoff_agent_response(
                             )
                             yield f"data: {query_saved_flag}\n\n"
 
-                        if last_tool_name in ("add_instruction", "remove_instruction"):
+                        if output_tool_name in ("add_instruction", "remove_instruction"):
                             memory_updated_event = json.dumps({"type": "memory_updated"}, ensure_ascii=False)
                             yield f"data: {memory_updated_event}\n\n"
 
-                        if last_tool_name in ("add_learning", "update_learning", "remove_learning"):
+                        if output_tool_name in ("add_learning", "update_learning", "remove_learning"):
                             learning_updated_event = json.dumps({"type": "learning_updated"}, ensure_ascii=False)
                             yield f"data: {learning_updated_event}\n\n"
 
                         # Check if the last tool was an HTML edit tool and emit html_edit_complete event
-                        if last_tool_name in HTML_EDIT_COMPLETE_TOOLS:
+                        if output_tool_name in HTML_EDIT_COMPLETE_TOOLS:
                             html_edit_completed = True
                             logger.info(
-                                f"HTML edit complete - tool: {last_tool_name}. Sending html_edit_complete event."
+                                f"HTML edit complete - tool: {output_tool_name}. Sending html_edit_complete event."
                             )
                             html_complete_flag = json.dumps(
                                 {
                                     "type": "html_edit_complete",
                                     "message": "HTML edit applied successfully",
-                                    "tool_name": last_tool_name,
+                                    "tool_name": output_tool_name,
                                     "edit_session_id": html_edit_session_id,
                                 },
                                 ensure_ascii=False,
@@ -2315,7 +2564,7 @@ async def stream_handoff_agent_response(
                             html_edit_session_id = None
 
                         # Check if the last tool was generate_dashboard_screenshot and emit dashboard_screenshot event
-                        if last_tool_name == "generate_dashboard_screenshot" and last_tool_args:
+                        if output_tool_name == "generate_dashboard_screenshot" and output_tool_args:
                             try:
                                 tool_result_raw = item.raw_item.output if hasattr(item, "raw_item") else None
                                 if tool_result_raw:
@@ -2337,16 +2586,16 @@ async def stream_handoff_agent_response(
 
                         # Emit datasource_selected when query execution tools complete
                         if (
-                            last_tool_name
+                            output_tool_name
                             in {
                                 "execute_sql_query",
                                 "execute_mongo_query",
                                 "execute_duckdb_query",
                             }
-                            and last_tool_args
+                            and output_tool_args
                         ):
-                            connection_id = last_tool_args.get("connection_id")
-                            dataset_id = last_tool_args.get("dataset_id")
+                            connection_id = output_tool_args.get("connection_id")
+                            dataset_id = output_tool_args.get("dataset_id")
                             datasource_id = connection_id or dataset_id
                             if datasource_id:
                                 datasource_name = ""
@@ -2384,7 +2633,7 @@ async def stream_handoff_agent_response(
                                 logger.info(
                                     "Datasource selected event emitted (datasource=%s, tool=%s)",
                                     datasource_id,
-                                    last_tool_name,
+                                    output_tool_name,
                                 )
 
                 elif hasattr(event, "type") and event.type == "raw_response_event" and hasattr(event, "data"):

@@ -420,8 +420,9 @@ class DuckDBService:
         try:
             conn = duckdb.connect(database=db_target, read_only=False)
 
-            cls._prepare_connection(conn, descriptors)
-            cls._register_views(conn, descriptors)
+            if descriptors:
+                cls._prepare_connection(conn, descriptors)
+                cls._register_views(conn, descriptors)
 
             query_to_execute, limit_applied = cls._apply_limit(query, limit, has_limit)
 

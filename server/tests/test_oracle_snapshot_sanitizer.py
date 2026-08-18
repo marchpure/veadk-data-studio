@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 
 import duckdb
+import pytest
 
+from server.services.duckdb_service import DuckDBService
 from server.scripts.oracle_snapshot_sanitizer import (
     DIRECT_IDENTIFIER_COLUMNS,
     EXPECTED_ROW_COUNTS,
@@ -165,3 +167,31 @@ def test_generated_text_scan_allows_hashes_and_prefix_dates_but_blocks_sensitive
     findings = _scan_generated_text(dirty)
     assert "forbidden sensitive column or credential field name" in findings
     assert "phone_like" in findings
+
+
+@pytest.mark.asyncio
+async def test_duckdb_service_queries_existing_catalog_without_file_descriptors(tmp_path: Path) -> None:
+    db_path = tmp_path / "oracle.duckdb"
+    con = duckdb.connect(str(db_path))
+    con.execute('create schema "dnyxlstest"')
+    con.execute(
+        '''
+        create table dnyxlstest.P_BL_SELL_HD as
+        select 'B1'::varchar BILLID, 'VNPTTE'::varchar STOREID, date '2026-08-15' SELLDATE,
+               'N'::varchar CANCELSIGN, '002'::varchar STATUS, '01'::varchar SELLSTATEID
+        '''
+    )
+    con.close()
+
+    result = await DuckDBService.execute_sql(
+        [],
+        '''
+        select count(distinct BILLID) ticket_count
+        from dnyxlstest.P_BL_SELL_HD
+        where CANCELSIGN = 'N' and STATUS = '002' and SELLSTATEID in ('01', '02')
+        ''',
+        database_path=db_path,
+    )
+
+    assert result["success"] is True
+    assert result["result"] == [{"ticket_count": 1}]

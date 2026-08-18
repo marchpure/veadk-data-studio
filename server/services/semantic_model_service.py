@@ -756,6 +756,7 @@ class SemanticModelService:
             sql += f" WHERE {metric.filter_expr.strip()}"
         if group_parts:
             sql += f" GROUP BY {', '.join(group_parts)}"
+            sql += f" ORDER BY {_quote_identifier(metric.slug)} DESC"
         return sql
 
     @staticmethod
@@ -835,6 +836,7 @@ class SemanticModelService:
             sql += f" WHERE {str(metric.get('filter')).strip()}"
         if group_parts:
             sql += f" GROUP BY {', '.join(group_parts)}"
+            sql += f" ORDER BY {_quote_identifier(str(metric.get('id') or metric.get('name')))} DESC"
         return sql
 
     @staticmethod

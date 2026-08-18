@@ -14,6 +14,7 @@ class AgentRequest(BaseModel):
     db_type: str | None = None
     current_version: int | None = None
     datasource_ids: list[str | UUID] | None = None
+    semantic_model_id: str | None = None
     create_notebook: bool = False
     is_preview: bool = False
     plan_mode: bool = False

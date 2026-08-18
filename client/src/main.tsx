@@ -2,7 +2,6 @@ import React, { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { PostHogProvider, usePostHog } from "posthog-js/react";
 import posthog from "posthog-js";
 import { queryClient } from "./lib/queryClient";
@@ -11,6 +10,7 @@ import { isAnalyticsOptedOut } from "./lib/analyticsPreference";
 import "./index.css";
 import App from "./App.tsx";
 import BackendGate from "./components/BackendGate";
+import QueryDevtoolsGate from "./components/QueryDevtoolsGate";
 import { CommandPaletteProvider } from "./contexts/CommandPaletteContext";
 
 class ErrorBoundary extends React.Component<
@@ -162,8 +162,8 @@ function AppWithConfig() {
                 <App />
               </BackendGate>
             </CommandPaletteProvider>
+            <QueryDevtoolsGate />
           </BrowserRouter>
-          <ReactQueryDevtools initialIsOpen={false} />
         </QueryClientProvider>
       </ErrorBoundary>
     );
@@ -180,8 +180,8 @@ function AppWithConfig() {
                   <App />
                 </BackendGate>
               </CommandPaletteProvider>
+              <QueryDevtoolsGate />
             </BrowserRouter>
-            <ReactQueryDevtools initialIsOpen={false} />
           </QueryClientProvider>
         </PostHogFlushHandler>
       </ErrorBoundary>

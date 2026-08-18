@@ -1241,10 +1241,17 @@ class DataFrameFileService:
             if not dataset or dataset.type != "file":
                 raise ValueError(f"Dataset {dataset_id} became unavailable during query preparation")
 
-            descriptors = await DataFrameFileService._build_duckdb_descriptors(session, dataset)
-
             duckdb_dir = DatasetStorageService.dataset_duckdb_directory(str(dataset.id))
             db_path = Path(dataset.duckdb_path) if dataset.duckdb_path else duckdb_dir / "dataset.duckdb"
+            file_types = {str(file.type or "").lower() for file in list(dataset.files or [])}
+            use_existing_catalog = (
+                bool(dataset.duckdb_path)
+                and db_path.exists()
+                and db_path.suffix.lower() == ".duckdb"
+                and bool(file_types)
+                and file_types.issubset({"duckdb"})
+            )
+            descriptors = [] if use_existing_catalog else await DataFrameFileService._build_duckdb_descriptors(session, dataset)
 
             if not dataset.duckdb_path:
                 dataset.duckdb_path = str(db_path)

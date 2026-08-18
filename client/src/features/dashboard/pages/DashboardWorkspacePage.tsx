@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -70,6 +70,8 @@ export default function DashboardWorkspacePage({ embeddedAssetId, embedded = fal
   const assetId = embeddedAssetId ?? params.assetId
   const navigate = useNavigate()
   const location = useLocation()
+  const dashboardListPath = kcPath('/dashboard-assets')
+  const shouldOpenDefaultAsset = !embeddedAssetId && !assetId && location.pathname === dashboardListPath
   const [assets, setAssets] = useState<DashboardAsset[]>([])
   const [selectedAsset, setSelectedAsset] = useState<DashboardAssetDetail | null>(null)
   const [selectedVersion, setSelectedVersion] = useState<DashboardVersion | null>(null)
@@ -104,15 +106,12 @@ export default function DashboardWorkspacePage({ embeddedAssetId, embedded = fal
     try {
       const response = await DashboardService.listAssets()
       setAssets(response.items)
-      if (!embedded && !embeddedAssetId && !assetId && response.items.length > 0) {
-        navigate(kcPath(`/dashboard-assets/${response.items[0].id}`), { replace: true })
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load Dashboard assets')
     } finally {
       setLoadingAssets(false)
     }
-  }, [assetId, embedded, embeddedAssetId, kcPath, navigate])
+  }, [])
 
   const loadAudit = useCallback(async (id: string) => {
     try {
@@ -185,6 +184,11 @@ export default function DashboardWorkspacePage({ embeddedAssetId, embedded = fal
     void loadAssets()
   }, [loadAssets])
 
+  useLayoutEffect(() => {
+    if (!shouldOpenDefaultAsset || loadingAssets || assets.length === 0) return
+    navigate(kcPath(`/dashboard-assets/${assets[0].id}`), { replace: true })
+  }, [assets, kcPath, loadingAssets, navigate, shouldOpenDefaultAsset])
+
   useEffect(() => {
     if (assetId) {
       setVersionNum(null)
@@ -196,10 +200,11 @@ export default function DashboardWorkspacePage({ embeddedAssetId, embedded = fal
   }, [assetId, loadDetail])
 
   useEffect(() => {
+    if (shouldOpenDefaultAsset) return
     if (embedded && !assetId && assets.length > 0 && !selectedAsset && !loadingDetail) {
       void loadDetail(assets[0].id, null)
     }
-  }, [assetId, assets, embedded, loadDetail, loadingDetail, selectedAsset])
+  }, [assetId, assets, embedded, loadDetail, loadingDetail, selectedAsset, shouldOpenDefaultAsset])
 
   useEffect(() => {
     if (selectedAsset && selectedVersion && isStructuredDashboardManifest(selectedVersion.manifest) && filtersInitialized) {
@@ -558,7 +563,7 @@ export default function DashboardWorkspacePage({ embeddedAssetId, embedded = fal
 
           <InventoryEvidenceTable assets={filteredAssets} selectedAssetId={assetId} />
 
-          {!selectedAsset && !loadingDetail && (
+          {!selectedAsset && !loadingDetail && !loadingAssets && !(embedded && !assetId && assets.length > 0) && (
             <EmptyPanel title="Open a governed Dashboard" body="Select a structured Dashboard asset from the inventory to inspect manifest-bound tiles, data, freshness, evidence, and lineage." />
           )}
 

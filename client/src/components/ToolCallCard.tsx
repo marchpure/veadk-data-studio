@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ChevronDown, Copy, Play, Database, Leaf, Save, Search, Sparkles } from "lucide-react"
+import { ChevronDown, Copy, Play, Database, Leaf, Save, Search, ShieldCheck, Sparkles } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { Button } from "./ui/button"
 import { CodeHighlight, type CodeHighlightLanguage } from "./CodeHighlight"
@@ -107,6 +107,13 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
     color: 'text-amber-400',
     borderColor: 'border-l-amber-400',
     bgColor: 'bg-amber-500/5'
+  },
+  query_semantic_metric: {
+    icon: ShieldCheck,
+    label: 'Governed metric',
+    color: 'text-emerald-400',
+    borderColor: 'border-l-emerald-400',
+    bgColor: 'bg-emerald-500/5'
   },
   search_instructions: {
     icon: Search,

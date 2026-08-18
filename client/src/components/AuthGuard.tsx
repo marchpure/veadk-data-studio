@@ -9,6 +9,7 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAppConfig } from '../hooks/useAppConfig'
 import { useStore } from '../stores/useStore'
+import { isEmbeddedKnowledgeCenterLocation } from '../contexts/EmbeddedModeContext'
 
 interface AuthGuardProps {
   children: React.ReactNode
@@ -28,6 +29,8 @@ export function AuthGuard({
   const isLoadingTenants = useStore(state => state.isLoadingTenants)
   const tenantsFetched = useStore(state => state.tenantsFetched)
   const { isSelfHosted, isLoading: isConfigLoading } = useAppConfig()
+  const embeddedKnowledgeCenter = isEmbeddedKnowledgeCenterLocation(location)
+  const loginTarget = embeddedKnowledgeCenter ? '/login?embedded=veadk-studio' : '/login'
 
   // Check if we're in an invitation acceptance flow
   const hasPendingInvitation = typeof window !== 'undefined' && localStorage.getItem('pendingInvitationToken') !== null
@@ -63,7 +66,7 @@ export function AuthGuard({
 
   // Protected mode: redirect unauthenticated users to login
   if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location }} replace />
+    return <Navigate to={loginTarget} state={{ from: location }} replace />
   }
 
   // No tenants = needs onboarding (first login)
@@ -71,7 +74,7 @@ export function AuthGuard({
   if (!skipOnboarding && tenants.length === 0) {
     // In self-hosted mode with no tenants, redirect to login
     if (isSelfHosted) {
-      return <Navigate to="/login" state={{ noAccess: true }} replace />
+      return <Navigate to={loginTarget} state={{ noAccess: true, from: location }} replace />
     }
     return <Navigate to="/setup-workspace" replace />
   }

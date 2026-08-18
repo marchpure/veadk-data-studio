@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 AssetType = Literal["dataset", "semantic_model", "knowledge_resource", "dashboard"]
+CapabilityKind = Literal["retrieval_binding", "semantic_skill", "dashboard_skill"]
 PublishState = Literal["draft", "validating", "blocked", "published", "archived"]
 
 
@@ -40,6 +41,8 @@ class AssetDescriptor(BaseModel):
     version: str | None = None
     consumers: list[str] = Field(default_factory=list)
     capabilities: dict[str, Any]
+    capability_kind: CapabilityKind | None = None
+    capability_package: dict[str, Any] = Field(default_factory=dict)
     query_url: str | None = None
     freshness: dict[str, Any]
     provenance: dict[str, Any]

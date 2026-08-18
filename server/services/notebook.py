@@ -88,20 +88,6 @@ class NotebookService:
 
     // Dashboard component definition
     const Dashboard = () => {{
-      const [ready, setReady] = React.useState(false);
-
-      React.useEffect(() => {{
-        waitForDependencies().then(() => setReady(true));
-      }}, []);
-
-      if (!ready) {{
-        return React.createElement('div', {{
-          className: 'flex items-center justify-center h-screen bg-gradient-to-br from-blue-50 to-indigo-100'
-        }}, React.createElement('div', {{
-          className: 'text-2xl font-bold text-indigo-600'
-        }}, 'Loading dashboard...'));
-      }}
-
       return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-8">
           <div className="max-w-7xl mx-auto">

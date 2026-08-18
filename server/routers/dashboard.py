@@ -189,7 +189,7 @@ def _lineage_from_manifest(manifest: dict[str, Any] | None) -> dict[str, Any]:
             {
                 "id": data_view.get("id"),
                 "kind": data_view.get("kind"),
-                "lineage": data_view.get("lineage") or data_view.get("saved_query", {}).get("lineage", []),
+                "lineage": data_view.get("lineage") or (data_view.get("saved_query") or {}).get("lineage", []),
                 "evidence": data_view.get("evidence") or [],
             }
             for data_view in data_views

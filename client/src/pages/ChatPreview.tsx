@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
 import { useParams, useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { Eye, Check, Trash2, ArrowLeft, ArrowUp, Sparkles, AtSign, Table, Pencil, X, ImagePlus, Clock, Calendar } from 'lucide-react'
+import { Eye, Check, Trash2, ArrowLeft, ArrowUp, Sparkles, Pencil, X, ImagePlus, Clock, Calendar, ChevronDown, FileCode2, LineChart, LockKeyhole, MessageSquareText, Network, Plus, ShieldCheck, AtSign, Table } from 'lucide-react'
 import { toast } from 'react-toastify'
 import type { Message } from "../types/chat"
 import { useStore } from "../stores/useStore"
@@ -12,7 +12,7 @@ import { ModelSelector } from "../components/ModelSelector"
 import { DatabaseConnectionDialog } from "../components/DatabaseConnectionDialog"
 import { ConfirmationModal } from "../components/ConfirmationModal"
 import { TableMentionInput } from "../components/TableMentionInput"
-import { ApiService, type LLMConnection, type AgentRequest, type ErrorDetail, type NestedSchemaNode, type Datasource, type ConnectionCreateRequest, type HtmlEditDetectedEvent, type HtmlEditPatchEvent, type HtmlEditCompleteEvent, type HtmlContextRefreshEvent, type DatasourceSelectedEvent, type DashboardFilterDefinition, type BatchFilterPreflightResponse, type PlanStatusEvent } from "../services/api"
+import { ApiService, type LLMConnection, type AgentRequest, type ErrorDetail, type NestedSchemaNode, type Datasource, type ConnectionCreateRequest, type HtmlEditDetectedEvent, type HtmlEditPatchEvent, type HtmlEditCompleteEvent, type HtmlContextRefreshEvent, type DatasourceSelectedEvent, type DashboardFilterDefinition, type BatchFilterPreflightResponse, type PlanStatusEvent, type SemanticModelSummary, type SemanticQueryResultEvent, type NotebookAssetRead } from "../services/api"
 import { type LLMProvider } from "../types/llm"
 import { showToast } from "../utils/toast"
 import ConnectionValidator from "../utils/connectionValidator"
@@ -50,6 +50,7 @@ import { buildActiveFilterChips, removeActiveFilterChip } from '../utils/filterD
 import PlanDisplay from '../components/PlanDisplay'
 import PlanModeToggle from '../components/PlanModeToggle'
 import { ResizableSplitPanel } from '../components/ResizableSplitPanel'
+import { EMBEDDED_KNOWLEDGE_CENTER_BASE } from '../contexts/EmbeddedModeContext'
 
 type ScheduleFrequency = 'daily' | 'weekly' | 'custom'
 const CHAT_PREFLIGHT_DEBUG_STORAGE_KEY = 'chat_preview_filter_preflight_debug'
@@ -83,6 +84,199 @@ const getDatasourceDbType = (datasource?: Datasource | null) => {
     return 'duckdb'
   }
   return datasource.type || null
+}
+
+const semanticModelLabel = (model: SemanticModelSummary) => model.name || model.id
+
+const compactSemanticLabel = (value: string) => {
+  const words = value.trim().split(/\s+/)
+  return words
+    .filter((word, index) => index === 0 || word.toLocaleLowerCase() !== words[index - 1].toLocaleLowerCase())
+    .join(' ')
+}
+
+const contextualDimensionLabel = (value: string, metricName: string) => {
+  const dimensionName = compactSemanticLabel(value)
+  const prefix = `${metricName.toLocaleLowerCase()} `
+  return dimensionName.toLocaleLowerCase().startsWith(prefix)
+    ? dimensionName.slice(metricName.length).trim()
+    : dimensionName
+}
+
+const governedSemanticBinding = (assets: NotebookAssetRead[]) => (
+  assets.find(
+    asset => asset.asset_type === 'semantic_model' && asset.usage_policy_json?.purpose === 'governed_ask_data',
+  ) ?? assets.find(asset => asset.asset_type === 'semantic_model')
+)
+
+const formatEvidenceTime = (value?: string | null) => {
+  if (!value) return 'Not reported'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return parsed.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+const lineageLabel = (item: unknown, index: number) => {
+  if (typeof item === 'string') return item
+  if (!item || typeof item !== 'object') return `Reference ${index + 1}`
+  const record = item as Record<string, unknown>
+  return String(
+    record.name ||
+    record.title ||
+    record.table ||
+    record.ref ||
+    record.source_snapshot_id ||
+    record.id ||
+    `Reference ${index + 1}`
+  )
+}
+
+const generateSemanticExamples = (model?: SemanticModelSummary) => {
+  if (!model) return []
+  const examples: string[] = []
+  for (const metric of model.metrics.slice(0, 2)) {
+    const metricName = compactSemanticLabel(metric.businessName || metric.name || metric.id)
+    const allowedDimensionIds = metric.dimensions?.length
+      ? new Set(metric.dimensions)
+      : new Set(model.dimensions.map(item => item.id))
+    const dimensions = model.dimensions.filter(item => allowedDimensionIds.has(item.id))
+    if (dimensions[0]) examples.push(`Show ${metricName} by ${contextualDimensionLabel(dimensions[0].name, metricName)}`)
+    examples.push(`What is ${metricName}, and how is it defined?`)
+    if (dimensions[1]) examples.push(`Compare ${metricName} across ${contextualDimensionLabel(dimensions[1].name, metricName)}`)
+  }
+  return Array.from(new Set(examples)).slice(0, 4)
+}
+
+function SemanticModelPicker({
+  models,
+  selectedModel,
+  value,
+  locked,
+  loading,
+  error,
+  onChange,
+  onManage,
+}: {
+  models: SemanticModelSummary[]
+  selectedModel?: SemanticModelSummary
+  value: string
+  locked: boolean
+  loading: boolean
+  error: string | null
+  onChange: (value: string) => void
+  onManage: () => void
+}) {
+  return (
+    <div className="relative flex min-w-0 items-center gap-2">
+      <div className="relative min-w-0">
+        <Network className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-emerald-400" />
+        <select
+          aria-label="Semantic Model"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={locked || loading || models.length === 0}
+          className="h-8 w-[min(17rem,calc(100vw-6rem))] appearance-none truncate rounded-md border border-[#343d47] bg-[#161b21] py-0 pl-8 pr-8 text-xs text-[#e7ecf1] outline-none transition-colors hover:border-[#46515d] focus:border-emerald-500/70 disabled:cursor-not-allowed disabled:opacity-70 sm:w-[clamp(11rem,24vw,17rem)]"
+        >
+          <option value="">{loading ? 'Loading models...' : models.length ? 'Select Semantic Model' : 'No published models'}</option>
+          {models.map((model) => (
+            <option key={model.id} value={model.id}>{semanticModelLabel(model)} · {model.publishedVersion}</option>
+          ))}
+        </select>
+        {locked ? (
+          <LockKeyhole className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#8f9aa6]" />
+        ) : (
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#8f9aa6]" />
+        )}
+      </div>
+      {selectedModel && (
+        <span className="hidden items-center gap-1 text-[11px] text-[#87939f] xl:flex">
+          <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+          Published {selectedModel.publishedVersion}
+        </span>
+      )}
+      {!loading && models.length === 0 && (
+        <button type="button" onClick={onManage} className="h-8 whitespace-nowrap rounded-md border border-[#343d47] px-2.5 text-xs text-[#d2d9e0] hover:bg-[#1b2128]">
+          Publish model
+        </button>
+      )}
+      {error && <span className="sr-only">{error}</span>}
+    </div>
+  )
+}
+
+function SemanticEvidencePanel({
+  event,
+  dashboardAvailable,
+  busy,
+  onCreateDashboard,
+}: {
+  event: SemanticQueryResultEvent | null
+  dashboardAvailable: boolean
+  busy: boolean
+  onCreateDashboard: () => void
+}) {
+  if (!event) return null
+  const result = event.result || ({} as SemanticQueryResultEvent['result'])
+  const lineage = Array.isArray(result.lineage) ? result.lineage : []
+  const snapshotLabel = result.snapshotId || result.snapshot?.id || result.snapshotHash || result.snapshot?.hash
+  const sqlEvidence = result.evidence?.find(item => item.kind === 'sql')
+  const sql = result.sql || (typeof sqlEvidence?.content === 'string' ? sqlEvidence.content : '')
+
+  return (
+    <div className="mx-auto mb-2 flex w-full max-w-3xl flex-col gap-2 px-4 sm:flex-row sm:items-start sm:px-6 min-[1440px]:max-w-4xl min-[2560px]:max-w-[1400px]">
+    <details className="min-w-0 flex-1">
+      <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 rounded-md border border-[#29333d] bg-[#12171c] px-3 text-xs text-[#c5ced7] hover:border-[#3b4854]">
+        <span className="flex min-w-0 items-center gap-2">
+          <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+          <span className="truncate">Governed evidence · {result.resolvedMetric || 'Semantic metric'}</span>
+        </span>
+        <span className="shrink-0 text-[11px] text-[#7f8b96]">{result.modelVersion || 'Published'} · {result.policyDecision || 'checked'}</span>
+      </summary>
+      <div className="grid gap-px overflow-hidden rounded-b-md border border-t-0 border-[#29333d] bg-[#29333d] text-xs sm:grid-cols-2 lg:grid-cols-4">
+        <div className="bg-[#12171c] p-3"><div className="text-[#77838e]">Freshness</div><div className="mt-1 break-words text-[#d7dee5]">{formatEvidenceTime(result.dataThrough || result.freshness)}</div></div>
+        <div className="bg-[#12171c] p-3"><div className="text-[#77838e]">Snapshot</div><div className="mt-1 truncate text-[#d7dee5]" title={String(snapshotLabel || '')}>{snapshotLabel || 'Published contract'}</div></div>
+        <div className="bg-[#12171c] p-3"><div className="text-[#77838e]">Lineage</div><div className="mt-1 text-[#d7dee5]">{lineage.length} reference{lineage.length === 1 ? '' : 's'}</div></div>
+        <div className="bg-[#12171c] p-3"><div className="text-[#77838e]">Policy</div><div className="mt-1 text-emerald-400">{result.policyDecision === 'allowed' ? 'Allowed by model' : result.policyDecision || 'Checked'}</div></div>
+        {result.metricDefinition && (
+          <div className="bg-[#12171c] p-3 sm:col-span-2 lg:col-span-4">
+            <div className="text-[#77838e]">Metric definition</div>
+            <div className="mt-1 leading-relaxed text-[#d7dee5]">{result.metricDefinition}</div>
+          </div>
+        )}
+        {lineage.length > 0 && (
+          <div className="bg-[#12171c] p-3 sm:col-span-2 lg:col-span-4">
+            <div className="mb-2 flex items-center gap-1.5 text-[#77838e]"><Network className="h-3.5 w-3.5" />Lineage</div>
+            <div className="flex flex-wrap gap-1.5">
+              {lineage.map((item, index) => (
+                <span key={`${lineageLabel(item, index)}-${index}`} className="rounded border border-[#303b45] bg-[#0f1419] px-2 py-1 text-[11px] text-[#bdc7d0]">
+                  {lineageLabel(item, index)}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {sql && (
+          <div className="bg-[#0d1115] p-3 sm:col-span-2 lg:col-span-4">
+            <div className="mb-2 flex items-center gap-1.5 text-[#77838e]"><FileCode2 className="h-3.5 w-3.5" />Compiled SQL</div>
+            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-[#b9c4ce]">{sql}</pre>
+          </div>
+        )}
+      </div>
+    </details>
+    {!dashboardAvailable && (
+      <button
+        type="button"
+        onClick={onCreateDashboard}
+        disabled={busy}
+        className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-md border border-[#34404b] px-3 text-xs text-[#c9d2da] hover:border-emerald-500/50 hover:bg-emerald-500/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+        title="Create a dashboard from this governed result"
+      >
+        <LineChart className="h-3.5 w-3.5 text-emerald-400" />
+        Create dashboard
+      </button>
+    )}
+    </div>
+  )
 }
 
 // Memoized message list component
@@ -271,6 +465,8 @@ const ChatInput = memo(function ChatInput({
   onCancelSchedule,
   onInputChange,
   grabbedElementText,
+  embedded = false,
+  semanticModelReady = true,
 }: {
   notebookId: string | undefined
   datasources: Array<{ id: string; name: string; tables: Record<string, any> }>
@@ -291,6 +487,8 @@ const ChatInput = memo(function ChatInput({
   onCancelSchedule?: () => void
   onInputChange?: (value: string) => void
   grabbedElementText?: string
+  embedded?: boolean
+  semanticModelReady?: boolean
 }) {
   const [input, setInput] = useState("")
   const [attachedImages, setAttachedImages] = useState<Array<{file_name: string, mime_type: "image/png" | "image/jpeg" | "image/webp", file_data: string}>>([])
@@ -502,7 +700,7 @@ const ChatInput = memo(function ChatInput({
   const hasInput = input.trim().length > 0
 
   return (
-    <div className="px-4 sm:px-6 py-3">
+    <div className="px-4 py-3 sm:px-6">
       {isScheduleMode && (
         <div className="flex items-center justify-between px-4 py-2.5 mb-0 bg-brand-orange/10 border border-brand-orange/30 rounded-t-2xl border-b-0">
           <div className="flex items-center gap-2">
@@ -516,7 +714,7 @@ const ChatInput = memo(function ChatInput({
         </div>
       )}
       <div
-        className={`bg-[#262626] border border-[#333333] px-4 pt-2 pb-2 shadow-sm transition-all focus-within:border-brand-orange focus-within:ring-1 focus-within:ring-brand-orange/30 ${isScheduleMode ? 'rounded-b-2xl rounded-t-none border-t-0' : 'rounded-2xl'}`}
+        className={`${embedded ? 'rounded-md border-[#343e48] bg-[#151a20] focus-within:border-emerald-500/60 focus-within:ring-emerald-500/20' : 'border-[#333333] bg-[#262626] focus-within:border-brand-orange focus-within:ring-brand-orange/30'} border px-4 pb-2 pt-2 shadow-sm transition-all focus-within:ring-1 ${isScheduleMode ? 'rounded-b-2xl rounded-t-none border-t-0' : embedded ? 'rounded-md' : 'rounded-2xl'}`}
         onPaste={handlePaste}
       >
         <input
@@ -562,39 +760,43 @@ const ChatInput = memo(function ChatInput({
               handleSubmit(event)
             }
           }}
-          placeholder={!selectedProvider || !selectedModel ? "Configure your LLM connection first!" : isQueueFull ? "Message queue full (max 3)..." : isScheduleMode ? "What should I report each time this runs?" : "Type your message..."}
-          disabled={!selectedProvider || !selectedModel}
+          placeholder={!semanticModelReady ? "Select a published Semantic Model first" : !selectedProvider || !selectedModel ? "Configure your AI model first" : isQueueFull ? "Message queue full (max 3)..." : isScheduleMode ? "What should I report each time this runs?" : embedded ? "Ask a business question..." : "Type your message..."}
+          disabled={!selectedProvider || !selectedModel || !semanticModelReady}
           className={`w-full text-[#e5e5e5] text-sm min-h-[56px]`}
         />
         {/* Bottom toolbar */}
         <div className="flex items-center justify-between mt-2">
           {/* Left side - Data selector and attachment */}
           <div className="flex items-center gap-1">
-            <DatasourceFooterSelector
-              selectedDatasourceIds={selectedDatasourceIds}
-              onDatasourceChange={onDatasourceChange}
-              onUploadFiles={onUploadFiles}
-              onAddConnector={onAddNewConnection}
-              agentSelectedDatasourceId={agentSelectedDatasourceId}
-              disabled={isQueueFull}
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={!selectedProvider || !selectedModel || isQueueFull}
-              className={`w-8 h-8 rounded-lg transition-all flex items-center justify-center ${
-                selectedProvider && selectedModel && !isQueueFull
-                  ? 'text-gray-400 hover:text-gray-300 hover:bg-[#333333] cursor-pointer'
-                  : 'text-gray-600 cursor-not-allowed'
-              }`}
-              title="Attach image"
-            >
-              <ImagePlus className="w-4 h-4" />
-            </button>
-            {notebookId && <PlanModeToggle notebookId={notebookId} />}
+            {!embedded && (
+              <DatasourceFooterSelector
+                selectedDatasourceIds={selectedDatasourceIds}
+                onDatasourceChange={onDatasourceChange}
+                onUploadFiles={onUploadFiles}
+                onAddConnector={onAddNewConnection}
+                agentSelectedDatasourceId={agentSelectedDatasourceId}
+                disabled={isQueueFull}
+              />
+            )}
+            {!embedded && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!selectedProvider || !selectedModel || isQueueFull}
+                className={`w-8 h-8 rounded-lg transition-all flex items-center justify-center ${
+                  selectedProvider && selectedModel && !isQueueFull
+                    ? 'text-gray-400 hover:text-gray-300 hover:bg-[#333333] cursor-pointer'
+                    : 'text-gray-600 cursor-not-allowed'
+                }`}
+                title="Attach image"
+              >
+                <ImagePlus className="w-4 h-4" />
+              </button>
+            )}
+            {!embedded && notebookId && <PlanModeToggle notebookId={notebookId} />}
           </div>
           {/* Right side - Schedule + Send buttons */}
           <div className="flex items-center gap-2">
-            {onSchedule && notebookId && (
+            {!embedded && onSchedule && notebookId && (
               <button
                 onClick={onSchedule}
                 disabled={isQueueFull}
@@ -626,10 +828,12 @@ const ChatInput = memo(function ChatInput({
                   handleSubmit(event)
                 }
               }}
-              disabled={(!hasInput && attachedImages.length === 0) || !selectedProvider || !selectedModel || isQueueFull}
+              disabled={(!hasInput && attachedImages.length === 0) || !selectedProvider || !selectedModel || !semanticModelReady || isQueueFull}
               className={`w-8 h-8 rounded-lg transition-all flex items-center justify-center ${
-                (hasInput || attachedImages.length > 0) && selectedProvider && selectedModel && !isQueueFull
-                  ? 'bg-brand-orange hover:bg-brand-orange-hover text-white shadow-lg hover:shadow-xl hover:glow-orange-sm cursor-pointer'
+                (hasInput || attachedImages.length > 0) && selectedProvider && selectedModel && semanticModelReady && !isQueueFull
+                  ? embedded
+                    ? 'bg-emerald-500 text-[#07110c] hover:bg-emerald-400 cursor-pointer'
+                    : 'bg-brand-orange hover:bg-brand-orange-hover text-white shadow-lg hover:shadow-xl hover:glow-orange-sm cursor-pointer'
                   : 'bg-[#333333] text-gray-600 cursor-not-allowed'
               }`}
               title={isQueueFull ? "Queue full (max 3 messages)" : (hasInput || attachedImages.length > 0) ? "Send message" : "Type a message or attach an image"}
@@ -654,7 +858,11 @@ type HtmlEditTimelineItem = {
   timestamp: number
 }
 
-export default function ChatPreview() {
+interface ChatPreviewProps {
+  embedded?: boolean
+}
+
+export default function ChatPreview({ embedded = false }: ChatPreviewProps) {
   const { id: notebookId } = useParams<{ id: string }>()
   const location = useLocation()
   const navigate = useNavigate()
@@ -669,10 +877,21 @@ export default function ChatPreview() {
   const emptyStateInputRef = useRef<HTMLTextAreaElement>(null)
   const [, setEmptyInputHeight] = useState(36)
 
-  // Check if this is a new notebook (not created yet)
-  // Use pathname check instead of parameter since /notebook/new has no :id parameter
-  const isNewNotebook = location.pathname === '/notebook/new'
-  const isPreviewRoute = /^\/notebook\/[^/]+\/preview\/?$/.test(location.pathname)
+  const embeddedAskBase = `${EMBEDDED_KNOWLEDGE_CENTER_BASE}/ask`
+  const isNewNotebook = embedded
+    ? location.pathname === embeddedAskBase || location.pathname === `${embeddedAskBase}/`
+    : location.pathname === '/notebook/new'
+  const isPreviewRoute = embedded
+    ? new RegExp(`^${embeddedAskBase}/[^/]+/preview/?$`).test(location.pathname)
+    : /^\/notebook\/[^/]+\/preview\/?$/.test(location.pathname)
+  const conversationHomePath = embedded ? embeddedAskBase : '/'
+  const datasourceHomePath = embedded ? `${EMBEDDED_KNOWLEDGE_CENTER_BASE}/sources` : '/databases'
+  const notebookPath = (id: string, preview = false) => (
+    embedded
+      ? `${embeddedAskBase}/${id}${preview ? '/preview' : ''}`
+      : `/notebook/${id}${preview ? '/preview' : ''}`
+  )
+  const viewportHeightClass = embedded ? 'h-full' : 'h-screen'
   const { isSelfHosted, features } = useAppConfig()
 
   // State for new notebook datasource selection
@@ -780,6 +999,19 @@ export default function ChatPreview() {
   const [availableModels, setAvailableModels] = useState<Record<string, string[]>>({})
   const [llmDataLoaded, setLlmDataLoaded] = useState(false)
   const [isLoadingLLMData, setIsLoadingLLMData] = useState(true)
+  const [semanticModels, setSemanticModels] = useState<SemanticModelSummary[]>([])
+  const [selectedSemanticModelId, setSelectedSemanticModelId] = useState('')
+  const [boundSemanticModelId, setBoundSemanticModelId] = useState('')
+  const [isLoadingSemanticModels, setIsLoadingSemanticModels] = useState(embedded)
+  const [semanticModelsError, setSemanticModelsError] = useState<string | null>(null)
+  const [latestSemanticEvidence, setLatestSemanticEvidence] = useState<SemanticQueryResultEvent | null>(null)
+  const selectedSemanticModel = useMemo(
+    () => semanticModels.find(model => model.id === selectedSemanticModelId),
+    [semanticModels, selectedSemanticModelId],
+  )
+  const semanticExamples = useMemo(() => generateSemanticExamples(selectedSemanticModel), [selectedSemanticModel])
+  const semanticModelReady = !embedded || Boolean(selectedSemanticModelId && selectedSemanticModel)
+  const assistantReady = Boolean(selectedProvider && selectedModel && selectedConnectionId)
 
   // Preferred model from store
   const preferredProvider = useStore(state => state.preferredProvider)
@@ -806,6 +1038,7 @@ export default function ChatPreview() {
   })
   const filterPreflightRequestSeqRef = useRef(0)
   const [generatedCode, setGeneratedCode] = useState("")
+  const [dashboardAvailable, setDashboardAvailable] = useState(false)
   const [copied, setCopied] = useState(false)
   const [isExportingPdf, setIsExportingPdf] = useState(false)
   const [isExportingHtml, setIsExportingHtml] = useState(false)
@@ -814,7 +1047,7 @@ export default function ChatPreview() {
   const [isNotebookFolderModalOpen, setIsNotebookFolderModalOpen] = useState(false)
   const [isPreviewOpen, setIsPreviewOpen] = useState(() => {
     if (typeof window === 'undefined' || !notebookId) return false
-    if (/^\/notebook\/[^/]+\/preview\/?$/.test(window.location.pathname)) return true
+    if (isPreviewRoute) return true
     return localStorage.getItem(ACTIVE_PREVIEW_NOTEBOOK_KEY) === notebookId
   })
   const userClosedPreviewRef = useRef(false)
@@ -875,25 +1108,31 @@ export default function ChatPreview() {
     }
   }, [existingSchedule?.slack_channel_id])
   
-  // Show dashboard card as soon as we have a notebook ID
-  // The tabs will be available but some actions might show "no content" messages
+  // Standalone notebooks keep the legacy preview behavior. Embedded Ask Data only
+  // exposes a Dashboard result after the blank version-1 template has been edited.
   const showDashboardCard = !!notebookId
   const hasHtmlContent = !!(processedHtmlContent || generatedCode)
+  const dashboardReady = dashboardAvailable && !isNotebookStreaming && !isHtmlBeingEdited && !isHtmlGenerationAnimationActive
+  const canOpenDashboard = embedded ? dashboardReady : hasHtmlContent
 
   useEffect(() => {
     if (!notebookId) {
       setIsPreviewOpen(false)
       return
     }
-    if (isPreviewRoute) {
+    if (isPreviewRoute && (!embedded || canOpenDashboard)) {
       setIsPreviewOpen(true)
       userClosedPreviewRef.current = false
       localStorage.setItem(ACTIVE_PREVIEW_NOTEBOOK_KEY, notebookId)
       return
     }
+    if (embedded) {
+      setIsPreviewOpen(false)
+      return
+    }
     const stored = localStorage.getItem(ACTIVE_PREVIEW_NOTEBOOK_KEY)
     setIsPreviewOpen(stored === notebookId)
-  }, [notebookId, isPreviewRoute])
+  }, [canOpenDashboard, embedded, notebookId, isPreviewRoute])
 
   const clearStoredPreviewIfCurrent = useCallback(() => {
     if (!notebookId) return
@@ -935,10 +1174,10 @@ export default function ChatPreview() {
   const [latestVersionNum, setLatestVersionNum] = useState<number>(1)
 
   useEffect(() => {
-    if (availableVersions.length > 1 && !userClosedPreviewRef.current) {
+    if (!embedded && availableVersions.length > 1 && !userClosedPreviewRef.current) {
       handleOpenPreview()
     }
-  }, [availableVersions, handleOpenPreview])
+  }, [availableVersions, embedded, handleOpenPreview])
 
   const activeDashboardId = useMemo(() => {
     const versionToUse = selectedVersion ?? latestVersionNum
@@ -1635,6 +1874,56 @@ Please modify this element to: `
   }, [llmDataLoaded, notebookId, isNewNotebook])
 
   useEffect(() => {
+    if (!embedded) return
+    let cancelled = false
+
+    const loadSemanticWorkspace = async () => {
+      setIsLoadingSemanticModels(true)
+      setSemanticModelsError(null)
+      try {
+        const [modelsResponse, assetsResponse] = await Promise.all([
+          ApiService.listSemanticModels(),
+          notebookId ? ApiService.getNotebookAssets(notebookId) : Promise.resolve(null),
+        ])
+        if (cancelled) return
+        const published = modelsResponse.items
+          .filter(model => model.publishedVersion && model.publishedVersion !== 'v0')
+          .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())
+        const binding = governedSemanticBinding(assetsResponse?.items || [])
+        const bindingId = binding?.asset_id || ''
+        setSemanticModels(published)
+        setBoundSemanticModelId(bindingId)
+        setSelectedSemanticModelId(current => {
+          if (bindingId && published.some(model => model.id === bindingId)) return bindingId
+          if (current && published.some(model => model.id === current)) return current
+          return published.length === 1 ? published[0].id : ''
+        })
+        const storedEvidence = binding?.usage_policy_json?.latest_query
+        if (storedEvidence && typeof storedEvidence === 'object') {
+          setLatestSemanticEvidence({
+            type: 'semantic_query_result',
+            model_id: bindingId,
+            result: storedEvidence as SemanticQueryResultEvent['result'],
+          })
+        } else {
+          setLatestSemanticEvidence(null)
+        }
+      } catch (error) {
+        if (cancelled) return
+        setSemanticModelsError(error instanceof Error ? error.message : 'Could not load Semantic Models')
+        setSemanticModels([])
+      } finally {
+        if (!cancelled) setIsLoadingSemanticModels(false)
+      }
+    }
+
+    loadSemanticWorkspace()
+    return () => {
+      cancelled = true
+    }
+  }, [embedded, notebookId])
+
+  useEffect(() => {
     setLlmDataLoaded(false)
   }, [notebookId])
 
@@ -1756,6 +2045,7 @@ Please modify this element to: `
       setIsHtmlBeingEdited(false)
       setHtmlContent("")
       setGeneratedCode("")
+      setDashboardAvailable(false)
       setProcessedHtmlContent("")
       setIframeErrors([])
       setStatus("")
@@ -1798,6 +2088,7 @@ Please modify this element to: `
     setIsHtmlBeingEdited(false)
     setHtmlContent("")
     setGeneratedCode("")
+    setDashboardAvailable(false)
     setProcessedHtmlContent("")
     setIframeErrors([])
     setStatus("")
@@ -1920,6 +2211,7 @@ Please modify this element to: `
     try {
       const versions = await ApiService.getNotebookDashboardVersions(notebookId)
       setAvailableVersions(versions)
+      setDashboardAvailable(versions.some(version => version.version_num > 1))
 
       const latestNum = versions.length > 0 ? Math.max(...versions.map(v => v.version_num)) : undefined
       if (latestNum) setLatestVersionNum(latestNum)
@@ -1951,6 +2243,7 @@ Please modify this element to: `
     try {
       const versions = await ApiService.getNotebookDashboardVersions(notebookId)
       setAvailableVersions(versions)
+      setDashboardAvailable(versions.some(version => version.version_num > 1))
       if (versions.length > 0) {
         const latest = Math.max(...versions.map(v => v.version_num))
         setLatestVersionNum(latest)
@@ -2012,7 +2305,7 @@ Please modify this element to: `
     console.log('[ChatPreview] HTML edit detected - showing loading indicators')
     setIsHtmlBeingEdited(true)
     setIsHtmlGenerationAnimationActive(true)
-    setIsPreviewOpen(true)
+    if (!embedded) setIsPreviewOpen(true)
     setPreviewPanelTab("code")
     setCurrentActivity("Applying changes to HTML...")
     htmlEditInProgressRef.current = true
@@ -2063,6 +2356,7 @@ Please modify this element to: `
         }
 
         setAvailableVersions(versions)
+        setDashboardAvailable(versions.some(version => version.version_num > 1))
 
         if (versions.length > 0) {
           const latest = Math.max(...versions.map(v => v.version_num))
@@ -2437,6 +2731,10 @@ Please modify this element to: `
   }, [iframeErrors, hasAttemptedAutoFix, htmlContent, isNotebookStreaming, isHtmlBeingEdited, selectedProvider, selectedModel, selectedConnectionId, notebookId])
 
   const ensureAssistantReady = () => {
+    if (embedded && !selectedSemanticModelId) {
+      showToast.error("Select a published Semantic Model first")
+      return false
+    }
     if (!selectedProvider || !selectedModel || !selectedConnectionId) {
       showToast.error("Please configure your LLM connection first")
       return false
@@ -2540,7 +2838,12 @@ Please modify this element to: `
         current_version: getVersionForEdit(),
         create_notebook: shouldCreateNotebook,
         datasource_ids: shouldCreateNotebook ? pendingDatasourceIdsRef.current : undefined,
+        semantic_model_id: embedded ? selectedSemanticModelId : undefined,
         plan_mode: planMode,
+      }
+
+      if (embedded) {
+        setBoundSemanticModelId(selectedSemanticModelId)
       }
 
       await ApiService.streamAgent(request, {
@@ -2581,7 +2884,7 @@ Please modify this element to: `
           queryClient.invalidateQueries({ queryKey: ['notebooks'] })
 
           // Navigate after updating state
-          navigate(`/notebook/${newNotebookId}/preview`, { replace: true })
+          navigate(notebookPath(newNotebookId, false), { replace: true })
 
           // Immediately try to load HTML content and versions
           // This ensures tabs show up right away with proper state
@@ -2596,6 +2899,7 @@ Please modify this element to: `
             // Load dashboard versions
             const versions = await ApiService.getNotebookDashboardVersions(newNotebookId)
             setAvailableVersions(versions)
+            setDashboardAvailable(versions.some(version => version.version_num > 1))
             if (versions.length > 0) {
               const latest = Math.max(...versions.map(v => v.version_num))
               setLatestVersionNum(latest)
@@ -2627,6 +2931,7 @@ Please modify this element to: `
 
                 const versions = await ApiService.getNotebookDashboardVersions(currentNotebookId)
                 setAvailableVersions(versions)
+                setDashboardAvailable(versions.some(version => version.version_num > 1))
                 if (versions.length > 0) {
                   const latest = Math.max(...versions.map(v => v.version_num))
                   setLatestVersionNum(latest)
@@ -2642,7 +2947,7 @@ Please modify this element to: `
             }
           }
           // If HTML edits happened during this response, ensure preview is showing
-          if (htmlEditHappenedRef.current && !userClosedPreviewRef.current) {
+          if (!embedded && htmlEditHappenedRef.current && !userClosedPreviewRef.current) {
             setIsPreviewOpen(true)
             setPreviewPanelTab("preview")
           }
@@ -2667,6 +2972,10 @@ Please modify this element to: `
             await handleDatasourceSelect(event.datasource_id, targetNotebookId)
           }
           setAgentSelectedDatasourceId(event.datasource_id)
+        },
+        onSemanticQueryResult: (event: SemanticQueryResultEvent) => {
+          setLatestSemanticEvidence(event)
+          if (event.model_id) setBoundSemanticModelId(event.model_id)
         },
         onQuerySaved: handleQuerySaved,
         onInstructionUpdated: () => {
@@ -2697,7 +3006,7 @@ Please modify this element to: `
           if (htmlEditInProgressRef.current) {
             await handleHtmlEditComplete()
           }
-          if (!userClosedPreviewRef.current) {
+          if (!embedded && !userClosedPreviewRef.current) {
             setIsPreviewOpen(true)
             setPreviewPanelTab("preview")
           }
@@ -2706,6 +3015,27 @@ Please modify this element to: `
         }
 
         throw new Error("No response received from the assistant")
+      }
+
+      if (embedded) {
+        const targetNotebookId = createdNotebookIdRef.current || notebookId
+        if (targetNotebookId) {
+          try {
+            const assets = await ApiService.getNotebookAssets(targetNotebookId)
+            const binding = governedSemanticBinding(assets.items)
+            const storedEvidence = binding?.usage_policy_json?.latest_query
+            if (binding?.asset_id) setBoundSemanticModelId(binding.asset_id)
+            if (storedEvidence && typeof storedEvidence === 'object') {
+              setLatestSemanticEvidence({
+                type: 'semantic_query_result',
+                model_id: binding?.asset_id || selectedSemanticModelId,
+                result: storedEvidence as SemanticQueryResultEvent['result'],
+              })
+            }
+          } catch (error) {
+            console.warn('Could not refresh governed query evidence:', error)
+          }
+        }
       }
     } catch (error) {
       const isAbortError =
@@ -2724,7 +3054,7 @@ Please modify this element to: `
         if (htmlEditInProgressRef.current) {
           await handleHtmlEditComplete()
         }
-        if (!userClosedPreviewRef.current) {
+        if (!embedded && !userClosedPreviewRef.current) {
           setIsPreviewOpen(true)
           setPreviewPanelTab("preview")
         }
@@ -3123,6 +3453,7 @@ Please modify this element to: `
   }
 
   const handleCodeInject = useCallback((data: { query: string; connectionId?: string }) => {
+    if (embedded) return
     const resolvedConnectionId = resolveConnectionId(data.connectionId)
 
     setInjectedQuery(data.query)
@@ -3130,7 +3461,7 @@ Please modify this element to: `
     setInjectedQueryVersion(prev => prev + 1)
     setPreviewPanelTab('queries')
     setIsPreviewOpen(true)
-  }, [resolveConnectionId])
+  }, [embedded, resolveConnectionId])
 
   const handleFixPreviewErrors = async (errors: IframeError[]) => {
     if (errors.length === 0) {
@@ -3350,7 +3681,7 @@ Can you help me fix this query?`
   }
 
   const handleAddNewConnection = () => {
-    navigate('/databases')
+    navigate(datasourceHomePath)
   }
 
   const handleDatasourceChange = async (ids: string[]) => {
@@ -3574,7 +3905,7 @@ Can you help me fix this query?`
   if (isInitialLoading) {
     return (
       <React.Fragment>
-        <div className="flex h-screen bg-[#1a1a1a] text-white items-center justify-center">
+        <div className={`flex ${viewportHeightClass} bg-[#1a1a1a] text-white items-center justify-center`}>
           <div className="flex flex-col items-center gap-4">
             <div className="w-8 h-8 border-2 border-brand-orange border-t-transparent rounded-full animate-spin"></div>
             <span className="text-sm text-gray-400">Loading notebook...</span>
@@ -3587,10 +3918,10 @@ Can you help me fix this query?`
 
   // Empty state: centered text + input until first chat message.
   // A direct /preview URL still needs the split layout so the dashboard pane is visible.
-  if (messages.length === 0 && !isPreviewOpen) {
+  if (!embedded && messages.length === 0 && !isPreviewOpen) {
     return (
       <React.Fragment>
-        <div className="flex h-screen bg-[#1a1a1a] text-white">
+        <div className={`flex ${viewportHeightClass} bg-[#1a1a1a] text-white`}>
           <div className="flex flex-col flex-1">
             {/* Simplified Header with Input */}
             <div className="flex flex-col h-full">
@@ -3599,7 +3930,7 @@ Can you help me fix this query?`
                 {/* Left Side: Back Arrow + Notebook Name */}
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <button
-                    onClick={() => navigate('/')}
+                    onClick={() => navigate(conversationHomePath)}
                     className="p-1 hover:bg-[#2a2a2a] rounded-lg transition-colors flex-shrink-0"
                     title="Go back to Notebooks"
                   >
@@ -3883,27 +4214,155 @@ Can you help me fix this query?`
     )
   }
 
+  if (embedded && messages.length === 0 && !isPreviewOpen) {
+    const canAsk = semanticModelReady && assistantReady && !isNotebookStreaming
+    return (
+      <div className={`flex ${viewportHeightClass} min-w-0 flex-col overflow-hidden bg-[#0f1115] text-white`} data-ask-data-workspace="empty">
+        <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[#29313a] bg-[#101418] px-3 py-2 sm:h-12 sm:flex-nowrap sm:px-4 sm:py-0">
+          <div className="flex min-w-0 items-center gap-2.5">
+            {!isNewNotebook && (
+              <button type="button" onClick={() => navigate(conversationHomePath)} className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[#9ba7b2] hover:bg-[#1b2128] hover:text-white" title="New question">
+                <Plus className="h-4 w-4" />
+              </button>
+            )}
+            <SemanticModelPicker
+              models={semanticModels}
+              selectedModel={selectedSemanticModel}
+              value={selectedSemanticModelId}
+              locked={Boolean(boundSemanticModelId)}
+              loading={isLoadingSemanticModels}
+              error={semanticModelsError}
+              onChange={setSelectedSemanticModelId}
+              onManage={() => navigate(`${EMBEDDED_KNOWLEDGE_CENTER_BASE}/data-models`)}
+            />
+          </div>
+          <div className="hidden shrink-0 items-center gap-1.5 text-[11px] text-[#7f8a95] sm:flex">
+            <ShieldCheck className={`h-3.5 w-3.5 ${assistantReady ? 'text-emerald-400' : 'text-amber-400'}`} />
+            {isLoadingLLMData ? 'Loading workspace AI...' : assistantReady ? 'Workspace AI ready' : 'Admin setup required'}
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-6 sm:py-12">
+          <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center min-[1440px]:max-w-4xl">
+            <div className="mb-6">
+              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#eef2f6]">
+                <LineChart className="h-4 w-4 text-emerald-400" />
+                Ask Data
+              </div>
+              <h1 className="text-2xl font-semibold leading-tight text-[#f4f7f9] sm:text-3xl">What do you need to know?</h1>
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#8d99a5]">
+                {selectedSemanticModel
+                  ? `Answers use the published ${semanticModelLabel(selectedSemanticModel)} contract. Metric definitions, SQL, lineage, freshness, and policy evidence stay available for review.`
+                  : isLoadingSemanticModels
+                    ? 'Loading published metrics and dimensions...'
+                    : semanticModelsError
+                      ? 'Published Semantic Models could not be loaded.'
+                      : 'Select a published Semantic Model to start a governed conversation.'}
+              </p>
+            </div>
+
+            <div className="border border-[#343e48] bg-[#151a20] p-3 shadow-[0_12px_30px_rgba(0,0,0,0.24)] focus-within:border-emerald-500/60">
+              <TableMentionInput
+                ref={emptyStateInputRef}
+                value={input}
+                datasources={[]}
+                tableNames={[]}
+                getTableColumns={() => []}
+                singleLine={false}
+                onHeightChange={setEmptyInputHeight}
+                onValueChange={setInput}
+                onSubmit={() => {
+                  if (canAsk && input.trim()) {
+                    const message = input.trim()
+                    setInput('')
+                    handleSubmitMessage(message)
+                  }
+                }}
+                placeholder={semanticModelReady ? 'Ask a business question about the published metrics...' : 'Select a published Semantic Model first'}
+                disabled={!canAsk}
+                className="min-h-[76px] w-full text-sm leading-relaxed text-white"
+              />
+              <div className="mt-2 flex items-center justify-between border-t border-[#29313a] pt-2">
+                <div className="flex items-center gap-1.5 text-[11px] text-[#78848f]">
+                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                  Published metrics only
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!canAsk || !input.trim()) return
+                    const message = input.trim()
+                    setInput('')
+                    await handleSubmitMessage(message)
+                  }}
+                  disabled={!canAsk || !input.trim()}
+                  className="grid h-8 w-8 place-items-center rounded-md bg-emerald-500 text-[#07110c] hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-[#283139] disabled:text-[#65717c]"
+                  title="Send question"
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {!isLoadingLLMData && !assistantReady && (
+              <div className="mt-3 flex items-center justify-between gap-3 border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-100">
+                <span>Ask Data needs an organization AI connection configured by a Data Studio administrator.</span>
+                <a href="/llm-connections" target="_blank" rel="noreferrer" className="shrink-0 font-medium text-amber-300 hover:text-amber-200">
+                  Configure in Data Studio
+                </a>
+              </div>
+            )}
+
+            {semanticExamples.length > 0 && (
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {semanticExamples.map(example => (
+                  <button
+                    key={example}
+                    type="button"
+                    onClick={() => setInput(example)}
+                    className="min-h-10 border border-[#29313a] bg-[#11161b] px-3 py-2 text-left text-xs leading-relaxed text-[#b9c3cc] hover:border-[#3c4955] hover:bg-[#151b21] hover:text-white"
+                  >
+                    {example}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {!isLoadingSemanticModels && semanticModels.length === 0 && (
+              <button type="button" onClick={() => navigate(`${EMBEDDED_KNOWLEDGE_CENTER_BASE}/data-models`)} className="mt-4 w-fit text-xs font-medium text-emerald-400 hover:text-emerald-300">
+                Open Data Models to publish a contract
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // Main chat view with messages - SPLIT LAYOUT
   return (
     <React.Fragment>
-      <div className="flex flex-col h-screen bg-[#1a1a1a] text-white overflow-hidden relative">
-      {/* Gradient Background Orbs */}
-      <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-brand-orange/5 rounded-full blur-3xl animate-pulse pointer-events-none"></div>
-      <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-purple-500/5 rounded-full blur-3xl animate-pulse pointer-events-none" style={{ animationDelay: '1s' }}></div>
+      <div className={`relative flex min-w-0 flex-col ${viewportHeightClass} ${embedded ? 'bg-[#0f1115]' : 'bg-[#1a1a1a]'} overflow-hidden text-white`} data-ask-data-workspace={embedded ? 'conversation' : undefined}>
+      {!embedded && (
+        <>
+          <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-brand-orange/5 rounded-full blur-3xl animate-pulse pointer-events-none"></div>
+          <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-purple-500/5 rounded-full blur-3xl animate-pulse pointer-events-none" style={{ animationDelay: '1s' }}></div>
+        </>
+      )}
       {/* Top Navigation Bar */}
-      <div className="flex items-center justify-between px-5 h-12 bg-[#1a1a1a] flex-shrink-0 border-b border-[#2a2a2a] z-10">
+      <div className={`z-10 flex h-12 min-w-0 flex-shrink-0 items-center justify-between gap-2 border-b px-3 sm:gap-3 sm:px-5 ${embedded ? 'bg-[#101418] border-[#29313a]' : 'bg-[#1a1a1a] border-[#2a2a2a]'}`}>
         {/* Left Side: Back Arrow + Notebook Name */}
-        <div className="flex items-center gap-3 min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate(conversationHomePath)}
             className="p-1 hover:bg-[#2a2a2a] rounded-lg transition-colors flex-shrink-0"
-            title="Go back to Notebooks"
+            title={embedded ? 'New question' : 'Go back to Notebooks'}
           >
-            <ArrowLeft className="w-4 h-4 text-white" />
+            {embedded ? <Plus className="w-4 h-4 text-white" /> : <ArrowLeft className="w-4 h-4 text-white" />}
           </button>
 
-          {/* Notebook Name - Always visible */}
-          {isEditingName ? (
+          {/* The embedded workspace prioritizes the governed model over notebook metadata. */}
+          {!embedded && (isEditingName ? (
             <div className="flex items-center gap-1.5">
               <input
                 ref={nameInputRef}
@@ -3943,23 +4402,56 @@ Can you help me fix this query?`
                 <Pencil className="w-3 h-3 text-white" />
               </button>
             </div>
+          ))}
+
+          {embedded && (
+            <SemanticModelPicker
+              models={semanticModels}
+              selectedModel={selectedSemanticModel}
+              value={selectedSemanticModelId}
+              locked={Boolean(boundSemanticModelId)}
+              loading={isLoadingSemanticModels}
+              error={semanticModelsError}
+              onChange={setSelectedSemanticModelId}
+              onManage={() => navigate(`${EMBEDDED_KNOWLEDGE_CENTER_BASE}/data-models`)}
+            />
           )}
 
           {/* Clear Button - Only shows when there are messages */}
-          {useStore.getState().currentMessages.length > 0 && notebookId && (
+          {messages.length > 0 && notebookId && (
             <button
               onClick={openConfirmModal}
-              className="ml-3 flex items-center gap-1.5 px-2.5 py-1 bg-transparent hover:bg-[#2a2a2a] text-red-400 hover:text-red-300 border border-[#404040] hover:border-red-400 rounded-md transition-colors text-xs flex-shrink-0"
+              className={`${embedded ? 'grid h-8 w-8 place-items-center text-[#8f9ba6] hover:bg-[#1b2128] hover:text-red-300' : 'ml-3 flex items-center gap-1.5 px-2.5 py-1 text-red-400 hover:text-red-300 border border-[#404040] hover:border-red-400'} flex-shrink-0 rounded-md bg-transparent text-xs transition-colors`}
               title="Clear conversation"
             >
-              <Trash2 className="w-3 h-3" />
-              Clear
+              <Trash2 className="h-3.5 w-3.5" />
+              {!embedded && 'Clear'}
             </button>
           )}
         </div>
 
         {/* Right Side: Model Selector + Connection */}
-        <div className="flex items-center gap-3">
+        {embedded && dashboardReady && notebookId && (
+          <button
+            type="button"
+            onClick={() => {
+              if (isPreviewOpen) {
+                handleClosePreview()
+                navigate(notebookPath(notebookId), { replace: true })
+              } else {
+                handleOpenPreview()
+                navigate(notebookPath(notebookId, true), { replace: true })
+              }
+            }}
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[#303a44] px-2.5 text-xs text-[#c5ced7] hover:border-[#43515e] hover:bg-[#171d23] hover:text-white"
+            title={isPreviewOpen ? 'Return to answer' : 'View generated dashboard'}
+          >
+            {isPreviewOpen ? <MessageSquareText className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            <span className="hidden sm:inline">{isPreviewOpen ? 'Answer' : 'Dashboard'}</span>
+          </button>
+        )}
+
+        <div className={`flex shrink-0 items-center ${embedded ? 'hidden' : ''} gap-3`}>
           {isLoadingLLMData ? (
             <div className="flex items-center justify-center h-7 px-2 py-1 border border-[#404040] rounded-lg bg-[#262626]">
               <span className="text-gray-400 text-[11px]">Loading...</span>
@@ -3984,7 +4476,7 @@ Can you help me fix this query?`
         )}
 
 
-          <button
+          {!embedded && <button
             onClick={isPreviewOpen ? handleClosePreview : handleOpenPreview}
             className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
               isPreviewOpen
@@ -3994,15 +4486,15 @@ Can you help me fix this query?`
             title={isPreviewOpen ? 'Hide preview' : 'Show preview'}
           >
             <Eye className="w-4 h-4" />
-          </button>
+          </button>}
 
-          <button
+          {!embedded && <button
             onClick={() => useStore.getState().openSidebar('instructions')}
             className="p-1.5 hover:bg-[#2a2a2a] rounded-lg transition-colors flex-shrink-0"
             title="Context"
           >
             <Sparkles className="w-4 h-4 text-brand-orange" />
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -4013,7 +4505,7 @@ Can you help me fix this query?`
           leftPanel={
             <div className={`chat-area flex flex-col h-full ${isPreviewOpen ? 'chat-area-with-preview' : 'chat-area-centered'}`}>
                 <div className="flex flex-col h-full w-full">
-                  {existingSchedule && !isScheduleMode && (
+                  {!embedded && existingSchedule && !isScheduleMode && (
                     <div className="max-w-3xl min-[1440px]:max-w-4xl min-[2560px]:max-w-[1400px] mx-auto w-full">
                       <ScheduleBanner
                         schedule={existingSchedule}
@@ -4032,6 +4524,24 @@ Can you help me fix this query?`
                   />
 
                   <div className="max-w-3xl min-[1440px]:max-w-4xl min-[2560px]:max-w-[1400px] mx-auto w-full">
+                    {embedded && !isLoadingLLMData && !assistantReady && (
+                      <div className="mx-4 mb-2 flex items-center justify-between gap-3 border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-100 sm:mx-6">
+                        <span>Ask Data needs an organization AI connection configured by an administrator.</span>
+                        <a href="/llm-connections" target="_blank" rel="noreferrer" className="shrink-0 font-medium text-amber-300 hover:text-amber-200">
+                          Configure
+                        </a>
+                      </div>
+                    )}
+                    {embedded && (
+                      <SemanticEvidencePanel
+                        event={latestSemanticEvidence}
+                        dashboardAvailable={dashboardAvailable}
+                        busy={isNotebookStreaming}
+                        onCreateDashboard={() => {
+                          void handleSubmitMessage('Create a dashboard from the latest governed result.')
+                        }}
+                      />
+                    )}
                     <ChatInput
                       notebookId={notebookId}
                       datasources={schemaDatasets}
@@ -4051,15 +4561,17 @@ Can you help me fix this query?`
                       onUploadFiles={handleUploadFilesForChat}
                       onAddNewConnection={handleAddNewConnection}
                       agentSelectedDatasourceId={agentSelectedDatasourceId}
-                      onSchedule={isScheduleMode ? undefined : handleEnterScheduleMode}
+                      onSchedule={embedded || isScheduleMode ? undefined : handleEnterScheduleMode}
                       hasSchedule={!!existingSchedule}
                       isScheduleMode={isScheduleMode}
                       onCancelSchedule={handleCancelScheduleMode}
                       onInputChange={setScheduleInstruction}
                       grabbedElementText={grabbedElementText}
+                      embedded={embedded}
+                      semanticModelReady={semanticModelReady}
                     />
 
-                    {isScheduleMode && !isNotebookStreaming && messages.length > 0 && (
+                    {!embedded && isScheduleMode && !isNotebookStreaming && messages.length > 0 && (
                       <ScheduleConfigPanel
                         config={scheduleConfig}
                         onConfigChange={setScheduleConfig}
