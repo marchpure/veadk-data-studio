@@ -25,6 +25,7 @@ import {
   sourceOverviewKeys,
 } from '../hooks/useDBConnections'
 import { ApiService, isMultiDatabaseSchema, type DatabaseSchemaResponse, type EvidenceReadResponse, type SourceConsumerItem, type SourceEvidence, type SourceLineageEdge, type SourceLineageNode, type SourceOverviewItem, type SourceParsedAssetItem, type SourceProjectionReview, type SourceResource, type SourceResourceProcessing, type SourceSnapshot } from '../services/api'
+import { useKnowledgeCenterPath } from '../contexts/EmbeddedModeContext'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 const sourceDetailSteps = [
@@ -255,6 +256,7 @@ const modelingStatusTone = (status?: SourceOverviewItem['modeling_status'] | nul
 export default function SourceDetailPage() {
   const { sourceId } = useParams()
   const navigate = useNavigate()
+  const kcPath = useKnowledgeCenterPath()
   const queryClient = useQueryClient()
   const [evidenceQuery, setEvidenceQuery] = useState('')
   const [removeConfirmation, setRemoveConfirmation] = useState('')
@@ -436,7 +438,7 @@ export default function SourceDetailPage() {
       <div className="min-h-screen bg-[#0a0a0a] p-8 text-white">
         <div className="mx-auto max-w-4xl">
           <Button asChild variant="ghost" className="mb-6 text-gray-300 hover:text-white">
-            <Link to="/sources"><ArrowLeft className="h-4 w-4" /> Sources</Link>
+            <Link to={kcPath('/sources')}><ArrowLeft className="h-4 w-4" /> Sources</Link>
           </Button>
           <Card className="border-red-900/40 bg-red-950/20 p-6">
             <div className="flex items-start gap-3">
@@ -476,7 +478,7 @@ export default function SourceDetailPage() {
       <div className="min-h-screen bg-[#0a0a0a] p-8 text-white">
         <div className="mx-auto max-w-4xl">
           <Button asChild variant="ghost" className="mb-6 text-gray-300 hover:text-white">
-            <Link to="/sources"><ArrowLeft className="h-4 w-4" /> Sources</Link>
+            <Link to={kcPath('/sources')}><ArrowLeft className="h-4 w-4" /> Sources</Link>
           </Button>
           <Card className="border-red-900/40 bg-red-950/20 p-6">
             <div className="flex items-start gap-3">
@@ -516,7 +518,7 @@ export default function SourceDetailPage() {
   }
   const handleRemoveSource = () => {
     deleteResourceMutation.mutate(sourceResource.id, {
-      onSuccess: () => navigate('/sources'),
+      onSuccess: () => navigate(kcPath('/sources')),
     })
   }
   const handleDisconnectConnection = () => disconnectSourceConnection(sourceResource.source_connection_id)
@@ -536,7 +538,7 @@ export default function SourceDetailPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <Button asChild variant="ghost" className="-ml-3 mb-3 text-gray-300 hover:text-white">
-              <Link to="/sources"><ArrowLeft className="h-4 w-4" /> Sources</Link>
+              <Link to={kcPath('/sources')}><ArrowLeft className="h-4 w-4" /> Sources</Link>
             </Button>
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-md bg-brand-orange/15">
@@ -1014,6 +1016,7 @@ function OverviewSourceDetail({
   onReconnectFeishu?: () => void
   onReopenFeishuAuthorization: () => void
 }) {
+  const kcPath = useKnowledgeCenterPath()
   const schemaTables = sourceSchemaTables(schema)
   const progressIndex = overviewProgressIndex(source)
   const icon = source.family === 'warehouses' || source.family === 'databases' || source.family === 'nosql'
@@ -1026,7 +1029,7 @@ function OverviewSourceDetail({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <Button asChild variant="ghost" className="-ml-3 mb-3 text-gray-300 hover:text-white">
-              <Link to="/sources"><ArrowLeft className="h-4 w-4" /> Sources</Link>
+              <Link to={kcPath('/sources')}><ArrowLeft className="h-4 w-4" /> Sources</Link>
             </Button>
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-md bg-brand-orange/15">

@@ -127,6 +127,16 @@ function App() {
 
           {/* Protected routes */}
           <Route
+            path="/embedded/knowledge-center/*"
+            element={
+              <AuthGuard>
+                <Layout>
+                  <DataModelsHomePage />
+                </Layout>
+              </AuthGuard>
+            }
+          />
+          <Route
             path="/"
             element={
               <AuthGuard>

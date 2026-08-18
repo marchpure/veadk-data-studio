@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import { Input } from '../../../components/ui/input'
+import { useKnowledgeCenterPath } from '../../../contexts/EmbeddedModeContext'
 import { DashboardApiError, DashboardService } from '../../../services/dashboard'
 import type {
   DashboardAsset,
@@ -64,6 +65,7 @@ const statusTone: Record<string, string> = {
 }
 
 export default function DashboardWorkspacePage({ embeddedAssetId, embedded = false }: { embeddedAssetId?: string; embedded?: boolean } = {}) {
+  const kcPath = useKnowledgeCenterPath()
   const params = useParams<{ assetId?: string }>()
   const assetId = embeddedAssetId ?? params.assetId
   const navigate = useNavigate()
@@ -103,14 +105,14 @@ export default function DashboardWorkspacePage({ embeddedAssetId, embedded = fal
       const response = await DashboardService.listAssets()
       setAssets(response.items)
       if (!embedded && !embeddedAssetId && !assetId && response.items.length > 0) {
-        navigate(`/dashboard-assets/${response.items[0].id}`, { replace: true })
+        navigate(kcPath(`/dashboard-assets/${response.items[0].id}`), { replace: true })
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load Dashboard assets')
     } finally {
       setLoadingAssets(false)
     }
-  }, [assetId, embedded, embeddedAssetId, navigate])
+  }, [assetId, embedded, embeddedAssetId, kcPath, navigate])
 
   const loadAudit = useCallback(async (id: string) => {
     try {
@@ -471,7 +473,7 @@ export default function DashboardWorkspacePage({ embeddedAssetId, embedded = fal
           {!loadingAssets && filteredAssets.map(asset => (
             <Link
               key={asset.id}
-              to={`/dashboard-assets/${asset.id}`}
+              to={kcPath(`/dashboard-assets/${asset.id}`)}
               className={cn(
                 'mb-2 block rounded-md border p-3 transition-colors',
                 asset.id === assetId ? 'border-brand-orange/60 bg-brand-orange/10' : 'border-[#293037] bg-[#171b1f] hover:border-[#4a5660]',
@@ -536,7 +538,7 @@ export default function DashboardWorkspacePage({ embeddedAssetId, embedded = fal
                 {filteredAssets.map(asset => (
                   <Link
                     key={asset.id}
-                    to={`/dashboard-assets/${asset.id}`}
+                    to={kcPath(`/dashboard-assets/${asset.id}`)}
                     className={cn(
                       'min-w-[240px] rounded-md border p-3',
                       asset.id === assetId ? 'border-brand-orange/60 bg-brand-orange/10' : 'border-[#293037] bg-[#101316]',
@@ -768,6 +770,7 @@ function getConflictState(error: unknown): ConflictState | null {
 }
 
 function InventoryEvidenceTable({ assets, selectedAssetId }: { assets: DashboardAsset[]; selectedAssetId?: string }) {
+  const kcPath = useKnowledgeCenterPath()
   if (assets.length === 0) return null
   return (
     <section className="rounded-md border border-[#293037] bg-[#14181c]">
@@ -795,7 +798,7 @@ function InventoryEvidenceTable({ assets, selectedAssetId }: { assets: Dashboard
             {assets.map(asset => (
               <tr key={asset.id} className={cn('border-t border-[#242b31]', asset.id === selectedAssetId ? 'bg-brand-orange/5' : '')}>
                 <td className="max-w-[220px] px-3 py-2">
-                  <Link to={`/dashboard-assets/${asset.id}`} className="font-medium text-[#f3f5f5] hover:text-brand-orange">
+                  <Link to={kcPath(`/dashboard-assets/${asset.id}`)} className="font-medium text-[#f3f5f5] hover:text-brand-orange">
                     {asset.name}
                   </Link>
                   <div className="truncate text-[#818c95]">{asset.slug}</div>
@@ -1810,6 +1813,7 @@ function LegacyMigrationReviewPanel({
   onStartReview: () => void
   onRefresh: () => void
 }) {
+  const kcPath = useKnowledgeCenterPath()
   const migrationSummary = isRecord(asset.health_summary.migration) ? asset.health_summary.migration : {}
   const migrationState = manifest?.migration.state
     ?? version?.migration_state
@@ -1851,7 +1855,7 @@ function LegacyMigrationReviewPanel({
             Refresh
           </Button>
           <Button asChild variant="secondary">
-            <Link to="/dashboard-assets">Back to list</Link>
+            <Link to={kcPath('/dashboard-assets')}>Back to list</Link>
           </Button>
           {asset.notebook_id && (
             <Button asChild variant="secondary">

@@ -8,10 +8,12 @@ import { Input } from '../components/ui/input'
 import { Search, FolderOpen, Trash2, Users, BookOpen, Loader2, LayoutDashboard, ArrowLeft, FolderPlus } from 'lucide-react'
 import { useScopes } from '../hooks/useScopes'
 import { CreateFolderModal } from '../components/folders/CreateFolderModal'
+import { useKnowledgeCenterPath } from '../contexts/EmbeddedModeContext'
 import type { Folder } from '../types/folder'
 
 export default function FoldersPage() {
   const navigate = useNavigate()
+  const kcPath = useKnowledgeCenterPath()
   const { isViewer, canDeleteFolder, canCreateFolder } = useScopes()
   const folders = useStore(state => state.folders)
   const isLoadingFolders = useStore(state => state.isLoadingFolders)
@@ -63,7 +65,7 @@ export default function FoldersPage() {
     })
 
   const handleFolderClick = (folder: Folder) => {
-    navigate(`/folders/${folder.id}`)
+    navigate(kcPath(`/folders/${folder.id}`))
   }
 
   const handleDeleteClick = (folder: Folder, event: React.MouseEvent) => {
@@ -101,7 +103,7 @@ export default function FoldersPage() {
           <div className="mb-8 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button
-                onClick={() => navigate('/')}
+                onClick={() => navigate(kcPath('/data-models'))}
                 className="p-1.5 text-gray-400 hover:text-white transition-colors rounded hover:bg-gray-800"
                 title="Back to home"
               >

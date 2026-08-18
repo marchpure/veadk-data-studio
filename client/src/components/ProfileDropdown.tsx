@@ -160,6 +160,7 @@ export function ProfileDropdown({ isExpanded, onExpandSidebar }: ProfileDropdown
     <div className="relative" ref={dropdownRef}>
       {/* Profile Button */}
       <button
+        data-testid="profile-menu-trigger"
         onClick={handleClick}
         className={`flex items-center w-full rounded-lg hover:bg-[#333333] transition-colors ${
           isExpanded ? 'px-3 py-2 gap-3' : 'px-0.3 py-2 justify-center'
@@ -309,6 +310,7 @@ export function ProfileDropdown({ isExpanded, onExpandSidebar }: ProfileDropdown
             )}
             {isSelfHosted && canManageTeam && (
               <button
+                data-testid="profile-menu-integrations"
                 onClick={handleCollaborationClick}
                 className="w-full px-3 py-2.5 flex items-center gap-3 hover:bg-[#333333] transition-colors text-white"
               >
@@ -333,6 +335,7 @@ export function ProfileDropdown({ isExpanded, onExpandSidebar }: ProfileDropdown
             )}
             {isSelfHosted && canManageTeam && (
               <button
+                data-testid="profile-menu-team"
                 onClick={handleTeamClick}
                 className="w-full px-3 py-2.5 flex items-center gap-3 hover:bg-[#333333] transition-colors text-white"
               >

@@ -3,12 +3,14 @@ import { Link } from 'react-router-dom'
 import { Boxes, Database, GitBranch, Layers3, Plus, RefreshCcw, Search, ShieldCheck, Workflow } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import { Input } from '../../../components/ui/input'
+import { useKnowledgeCenterPath } from '../../../contexts/EmbeddedModeContext'
 import { CreateModelPanel } from '../components/CreateModelPanel'
 import { EmptyState, ErrorState, MetricTile, PermissionState, ScoreBar, StatusPill, modelingStyles } from '../components/modelingUi'
 import { useDataModelingStore } from '../store/useDataModelingStore'
 import type { SemanticModel } from '../types'
 
 export default function DataModelsHomePage() {
+  const kcPath = useKnowledgeCenterPath()
   const [createOpen, setCreateOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<'all' | 'Draft' | 'Published'>('all')
@@ -107,7 +109,7 @@ export default function DataModelsHomePage() {
                 action={<Button variant="brand-primary" onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" /> Generate from Data</Button>}
               />
             )}
-            {!homeLoading && !homeError && filteredModels.length > 0 && <ModelTable models={filteredModels} onOpen={setActiveModel} />}
+            {!homeLoading && !homeError && filteredModels.length > 0 && <ModelTable models={filteredModels} onOpen={setActiveModel} toPath={kcPath} />}
           </div>
         </section>
       </div>
@@ -116,7 +118,7 @@ export default function DataModelsHomePage() {
   )
 }
 
-function ModelTable({ models, onOpen }: { models: SemanticModel[]; onOpen: (id: string) => void }) {
+function ModelTable({ models, onOpen, toPath }: { models: SemanticModel[]; onOpen: (id: string) => void; toPath: (path: string) => string }) {
   return (
     <div className="overflow-x-auto rounded-md border border-[#2d3338] custom-scrollbar">
       <table className="min-w-[1060px] w-full text-left text-sm">
@@ -138,7 +140,7 @@ function ModelTable({ models, onOpen }: { models: SemanticModel[]; onOpen: (id: 
             <tr key={model.id} className={modelingStyles.tableRow}>
               <td className="px-4 py-3">
                 <Link
-                  to={`/data-models/${model.id}`}
+                  to={toPath(`/data-models/${model.id}`)}
                   onClick={() => onOpen(model.id)}
                   className="font-semibold text-[#f3f5f5] underline-offset-4 hover:text-brand-orange hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >

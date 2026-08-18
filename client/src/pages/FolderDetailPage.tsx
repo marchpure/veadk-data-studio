@@ -26,12 +26,14 @@ import { showToast } from '../utils/toast'
 import { FolderContentRow } from '../components/folders/FolderContentRow'
 import { MembersPanel } from '../components/folders/MembersPanel'
 import { ShareNotebookModal } from '../components/folders/ShareNotebookModal'
+import { useKnowledgeCenterPath } from '../contexts/EmbeddedModeContext'
 import type { Folder, FolderContentItem, FolderDashboard } from '../types/folder'
 import { rewriteDashboardHtmlForBackend, ensureBaseHref, getBackendUrlForHtmlProcessing, injectViewerConfig } from '../utils/dashboardHtml'
 
 export default function FolderDetailPage() {
   const { id: folderId } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const kcPath = useKnowledgeCenterPath()
   const { userId, isViewer, canManageFolderMembers, canShareNotebookToFolder } = useScopes()
 
   // Store
@@ -373,7 +375,7 @@ export default function FolderDetailPage() {
           <p className="text-gray-400 mb-6">
             {error || 'The folder you are looking for does not exist or you do not have access.'}
           </p>
-          <Button variant="brand-primary" onClick={() => navigate('/folders')}>
+          <Button variant="brand-primary" onClick={() => navigate(kcPath('/folders'))}>
             Back to Folders
           </Button>
         </Card>
@@ -389,7 +391,7 @@ export default function FolderDetailPage() {
           {/* Breadcrumb */}
           <nav className="flex items-center text-sm text-gray-400 mb-4">
             <Link
-              to="/folders"
+              to={kcPath('/folders')}
               className="hover:text-white transition-colors"
             >
               Folders

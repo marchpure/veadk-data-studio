@@ -377,6 +377,27 @@ class AssetService:
             "published_version": model.published_version,
             "readiness": model.readiness,
             "readiness_level": model.readiness_level,
+            "metrics": [
+                {
+                    "id": metric.slug,
+                    "name": metric.name,
+                    "businessName": metric.business_name,
+                    "definition": metric.definition,
+                    "formula": metric.formula,
+                    "unit": metric.unit,
+                }
+                for metric in model.metrics
+            ],
+            "dimensions": [
+                {
+                    "id": dimension.slug,
+                    "name": dimension.name,
+                    "field": dimension.field,
+                    "description": dimension.description,
+                }
+                for dimension in model.dimensions
+            ],
+            "time_field": self._semantic_model_time_field(model),
         }
         if publish_state != "published":
             capabilities = {}
@@ -406,7 +427,7 @@ class AssetService:
                 "published_version": model.published_version,
             },
             "usage_policy": usage_policy,
-            "sample_evidence": [],
+            "sample_evidence": self._semantic_model_sample_evidence(model),
         }
 
     def _dashboard_payload(
@@ -722,6 +743,40 @@ class AssetService:
         for case in recent_cases:
             evidence.append({"kind": "evaluation_case", **case})
         return evidence[:8]
+
+    def _semantic_model_sample_evidence(self, model: SemanticModel) -> list[dict[str, Any]]:
+        evidence: list[dict[str, Any]] = []
+        for metric in model.metrics:
+            evidence.append(
+                {
+                    "kind": "metric_definition",
+                    "title": metric.business_name or metric.name or metric.slug,
+                    "metric": metric.slug,
+                    "definition": metric.definition,
+                    "formula": metric.formula,
+                    "filter": metric.filter_expr,
+                    "lineage": self._loads_json(metric.lineage_json),
+                }
+            )
+        policy = self._loads_json(model.mcp_json)
+        if policy:
+            evidence.append(
+                {
+                    "kind": "permission_policy",
+                    "title": "Semantic model external query policy",
+                    "policy": {
+                        "allowedMetrics": policy.get("allowedMetrics") or [],
+                        "allowedDimensions": policy.get("allowedDimensions") or [],
+                    },
+                }
+            )
+        return evidence[:8]
+
+    def _semantic_model_time_field(self, model: SemanticModel) -> str | None:
+        for metric in model.metrics:
+            if metric.time_field:
+                return metric.time_field
+        return None
 
     def _dashboard_case_payload(self, event: DashboardAuditEvent) -> dict[str, Any]:
         return {

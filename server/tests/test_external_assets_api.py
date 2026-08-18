@@ -5,8 +5,10 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from server.models.mcp_api_key import MCPAPIKey
+from server.models.semantic_models import SemanticModel
 from server.models.tenant import Tenant
 from server.models.user import User
 from server.services.dashboard import DashboardService
@@ -214,3 +216,123 @@ async def test_external_semantic_model_query_dispatches_service(
     assert captured["tenant_id"] == tenant.id
     assert captured["slug"] == model.slug
     assert captured["request"]["metric"] == "paid_revenue"
+
+
+async def test_external_semantic_model_query_returns_completed_data_and_evidence(
+    test_client,
+    test_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant = await current_tenant(test_session)
+    api_key = await _seed_mcp_key(test_session, tenant)
+    uploaded = await test_client.post(
+        "/api/source-resources/files",
+        files={
+            "file": (
+                "revenue.csv",
+                b"order_id,region,revenue,paid_at\n"
+                b"1,East,120,2026-08-01\n"
+                b"2,West,80,2026-08-02\n",
+                "text/csv",
+            )
+        },
+        data={"name": "external projected revenue"},
+    )
+    assert uploaded.status_code == 201
+    projected_dataset_id = uploaded.json()["data"]["projected_dataset_id"]
+
+    analyzed = await test_client.post(
+        f"/api/datasources/{projected_dataset_id}/understanding/analyze",
+        json={},
+    )
+    assert analyzed.status_code == 200
+    selected = [
+        candidate
+        for candidate in analyzed.json()["data"]["candidates"]
+        if candidate["candidate_type"] in {"schema_map", "data_truth", "relationship"}
+    ]
+    assert {candidate["candidate_type"] for candidate in selected} >= {"schema_map", "data_truth"}
+    for candidate in selected:
+        reviewed = await test_client.post(
+            f"/api/datasources/{projected_dataset_id}/understanding/candidates/{candidate['id']}/review",
+            json={"action": "accept"},
+        )
+        assert reviewed.status_code == 200
+
+    model_slug = f"external-revenue-{uuid4().hex[:8]}"
+    drafted = await test_client.post(
+        f"/api/datasources/{projected_dataset_id}/understanding/semantic-model-draft",
+        json={
+            "model_id": model_slug,
+            "name": "External Revenue Semantic",
+            "domain": "Sales / Orders",
+            "owner": "Revenue Analytics",
+            "candidate_ids": [candidate["id"] for candidate in selected],
+        },
+    )
+    assert drafted.status_code == 200
+
+    validated = await test_client.post(f"/api/data-models/{model_slug}/validate")
+    assert validated.status_code == 200
+    assert validated.json()["data"]["readinessDetail"]["blockers"] == []
+    published = await test_client.post(f"/api/data-models/{model_slug}/publish")
+    assert published.status_code == 200
+
+    model = await test_session.scalar(
+        select(SemanticModel).where(
+            SemanticModel.tenant_id == tenant.id,
+            SemanticModel.slug == model_slug,
+        )
+    )
+    assert model is not None
+
+    from server.services.file_operations import DataFrameFileService
+
+    original_execute = DataFrameFileService.execute_duckdb_query_on_dataset
+    calls: list[dict[str, str]] = []
+
+    async def tracked_execute_duckdb_query_on_dataset(**kwargs):
+        calls.append({"dataset_id": kwargs["dataset_id"], "query": kwargs["query"]})
+        return await original_execute(**kwargs)
+
+    monkeypatch.setattr(
+        "server.services.semantic_model_service.DataFrameFileService.execute_duckdb_query_on_dataset",
+        tracked_execute_duckdb_query_on_dataset,
+    )
+    monkeypatch.setattr(
+        "server.services.semantic_model_service.AsyncRawQueryService.execute_raw_query",
+        pytest.fail,
+    )
+
+    described = await test_client.get(
+        f"/api/external/assets/semantic_model/{model.id}",
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    assert described.status_code == 200
+    asset_payload = described.json()["data"]
+    assert asset_payload["publish_state"] == "published"
+    assert asset_payload["capabilities"]["metrics"]
+    assert asset_payload["capabilities"]["dimensions"]
+    assert asset_payload["sample_evidence"]
+
+    response = await test_client.post(
+        f"/api/external/assets/semantic_model/{model.id}/query",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={"metric": "revenue_revenue", "dimension": "revenue_region", "limit": 10},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["status"] == "completed"
+    assert payload["policyDecision"] == "allowed"
+    assert payload["result"]
+    assert sorted(payload["result"], key=lambda item: item["revenue_region"]) == [
+        {"revenue_region": "East", "revenue_revenue": 120},
+        {"revenue_region": "West", "revenue_revenue": 80},
+    ]
+    assert payload["sql"]
+    assert payload["metricDefinition"]
+    assert any(item["kind"] == "sql" for item in payload["evidence"])
+    assert any(item["kind"] == "metric_definition" for item in payload["evidence"])
+    assert any(item["kind"] == "permission_policy" for item in payload["evidence"])
+    assert calls and calls[0]["dataset_id"] == projected_dataset_id

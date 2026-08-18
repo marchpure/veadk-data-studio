@@ -15,6 +15,7 @@ import { useStore } from '../stores/useStore'
 import { useScopes } from '../hooks/useScopes'
 import { useAppConfig } from '../hooks/useAppConfig'
 import { DatabricksOAuthSettings } from '../components/databricks/DatabricksOAuthSettings'
+import { useKnowledgeCenterPath } from '../contexts/EmbeddedModeContext'
 import { isTauriApp, openExternalUrl } from '../lib/tauri-api'
 
 type DatabricksPair = { catalog: string; schema: string | null }
@@ -204,6 +205,7 @@ const missingReadinessGates = (connector?: ConnectorDefinition) =>
   connector?.readiness_gates?.filter(gate => gate.status !== 'passed') || []
 
 export default function DatabasesPage() {
+  const kcPath = useKnowledgeCenterPath()
   const queryClient = useQueryClient()
   const openSidebar = useStore(state => state.openSidebar)
   const setActiveSection = useStore(state => state.setActiveSection)
@@ -1630,7 +1632,7 @@ export default function DatabasesPage() {
                 variant="outline"
                 className="border-gray-700 bg-transparent text-white hover:bg-[#1f1f1f] hover:text-white"
               >
-                <Link to="/data-models">
+                <Link to={kcPath('/data-models')}>
                   <Network className="w-4 h-4" />
                   Generate Data Model
                 </Link>
@@ -1766,7 +1768,7 @@ export default function DatabasesPage() {
                           const datasource = datasourceForSource(source)
                           const canEdit = datasource.source_type !== 'source_resource' && canEditDatasource(datasource.created_by)
                           const canDelete = canDeleteDatasource(datasource.created_by)
-                          const sourceDetailHref = `/sources/${source.id}`
+                          const sourceDetailHref = kcPath(`/sources/${source.id}`)
                           return (
                             <tr key={source.id} className="group hover:bg-white/[0.03]">
                               <td className="px-4 py-4 align-top">
@@ -1877,7 +1879,7 @@ export default function DatabasesPage() {
                                       className="text-gray-400 hover:text-white hover:bg-gray-800"
                                       title="Generate Data Model"
                                     >
-                                      <Link to="/data-models" onClick={(e) => e.stopPropagation()}>
+                                      <Link to={kcPath('/data-models')} onClick={(e) => e.stopPropagation()}>
                                         <Network className="w-4 h-4" />
                                       </Link>
                                     </Button>
@@ -1908,7 +1910,7 @@ export default function DatabasesPage() {
                       const datasource = datasourceForSource(source)
                       const canEdit = datasource.source_type !== 'source_resource' && canEditDatasource(datasource.created_by)
                       const canDelete = canDeleteDatasource(datasource.created_by)
-                      const sourceDetailHref = `/sources/${source.id}`
+                      const sourceDetailHref = kcPath(`/sources/${source.id}`)
                       return (
                         <Card
                           key={source.id}
@@ -3647,6 +3649,7 @@ function DirectSourceProcessingPanel({
   resource: SourceResource
   onAddAnother: () => void
 }) {
+  const kcPath = useKnowledgeCenterPath()
   const processingQuery = useSourceResourceProcessing(resource.id)
   const processing = processingQuery.data
   const progressIndex = directSourceProgressIndex(resource, processing)
@@ -3725,13 +3728,13 @@ function DirectSourceProcessingPanel({
 
           <div className="mt-4 flex flex-wrap gap-2">
             <Button asChild size="sm" className="bg-brand-orange hover:bg-brand-orange/90">
-              <Link to={`/sources/${resource.id}`}>Open source</Link>
+              <Link to={kcPath(`/sources/${resource.id}`)}>Open source</Link>
             </Button>
             <Button asChild size="sm" variant="outline" className="border-[#555555] text-white hover:bg-[#3a3a3a]">
-              <Link to={`/sources/${resource.id}#evidence`}>Search evidence</Link>
+              <Link to={kcPath(`/sources/${resource.id}#evidence`)}>Search evidence</Link>
             </Button>
             <Button asChild size="sm" variant="outline" className="border-[#555555] text-white hover:bg-[#3a3a3a]">
-              <Link to="/data-models">Create model</Link>
+              <Link to={kcPath('/data-models')}>Create model</Link>
             </Button>
             <Button type="button" size="sm" variant="ghost" onClick={onAddAnother} className="text-gray-300 hover:text-white">
               Add another source
@@ -3750,6 +3753,7 @@ function DatabricksCreatedSourcesPanel({
   sources: DatabricksCreatedSource[]
   onAddAnother: () => void
 }) {
+  const kcPath = useKnowledgeCenterPath()
   const mappedCount = sources.filter(source => source.sourceId).length
 
   return (
@@ -3779,15 +3783,15 @@ function DatabricksCreatedSourcesPanel({
                   <div className="flex flex-wrap gap-2">
                     {source.sourceId ? (
                       <Button asChild size="sm" className="bg-brand-orange hover:bg-brand-orange/90">
-                        <Link to={`/sources/${source.sourceId}`}>Open source</Link>
+                        <Link to={kcPath(`/sources/${source.sourceId}`)}>Open source</Link>
                       </Button>
                     ) : (
                       <Button asChild size="sm" variant="outline" className="border-[#555555] text-white hover:bg-[#3a3a3a]">
-                        <Link to="/sources">Open Sources</Link>
+                        <Link to={kcPath('/sources')}>Open Sources</Link>
                       </Button>
                     )}
                     <Button asChild size="sm" variant="outline" className="border-[#555555] text-white hover:bg-[#3a3a3a]">
-                      <Link to="/data-models">Create model</Link>
+                      <Link to={kcPath('/data-models')}>Create model</Link>
                     </Button>
                   </div>
                 </div>
@@ -3800,7 +3804,7 @@ function DatabricksCreatedSourcesPanel({
               Add another warehouse source
             </Button>
             <Button asChild size="sm" variant="ghost" className="text-green-100 hover:text-white">
-              <Link to="/sources">Review Sources inventory</Link>
+              <Link to={kcPath('/sources')}>Review Sources inventory</Link>
             </Button>
           </div>
         </div>

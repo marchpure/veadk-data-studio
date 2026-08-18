@@ -2,6 +2,14 @@ import { useEffect, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import CollapsibleSidebar from './CollapsibleSidebar'
 import { ContextSidebar } from './context/ContextSidebar'
+import EmbeddedLayout from './EmbeddedLayout'
+import {
+  EmbeddedModeProvider,
+  isEmbeddedKnowledgeCenterPath,
+  isKnowledgeCenterChildPath,
+  isRunningInEmbeddedFrame,
+  knowledgeCenterPath,
+} from '../contexts/EmbeddedModeContext'
 import { useStore } from '../stores/useStore'
 import { useScopes } from '../hooks/useScopes'
 
@@ -37,16 +45,37 @@ export default function Layout({ children }: LayoutProps) {
 
   const isPreviewPage = location.pathname.includes('/preview')
   const isFullPageRoute = isFullEditorRoute(location.pathname)
+  const isEmbeddedRoute = isEmbeddedKnowledgeCenterPath(location.pathname)
+  const shouldPreserveEmbeddedRoute = !isEmbeddedRoute && isKnowledgeCenterChildPath(location.pathname) && isRunningInEmbeddedFrame()
+
+  useEffect(() => {
+    if (!shouldPreserveEmbeddedRoute) return
+    navigate(`${knowledgeCenterPath(location.pathname)}${location.search}${location.hash}`, { replace: true })
+  }, [location.hash, location.pathname, location.search, navigate, shouldPreserveEmbeddedRoute])
+
+  if (shouldPreserveEmbeddedRoute) {
+    return null
+  }
+
+  if (isEmbeddedRoute) {
+    return (
+      <EmbeddedModeProvider enabled>
+        <EmbeddedLayout />
+      </EmbeddedModeProvider>
+    )
+  }
 
   return (
-    <div className={`flex h-screen bg-[#1a1a1a] overflow-hidden ${isFullPageRoute ? 'relative' : ''}`}>
-      <CollapsibleSidebar />
+    <EmbeddedModeProvider enabled={false}>
+      <div className={`flex h-screen bg-[#1a1a1a] overflow-hidden ${isFullPageRoute ? 'relative' : ''}`}>
+        <CollapsibleSidebar />
 
-      <div className={`flex-1 min-h-0 ${isPreviewPage ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar'}`}>
-        {children}
+        <div className={`flex-1 min-h-0 ${isPreviewPage ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar'}`}>
+          {children}
+        </div>
+
+        <ContextSidebar />
       </div>
-
-      <ContextSidebar />
-    </div>
+    </EmbeddedModeProvider>
   )
 }

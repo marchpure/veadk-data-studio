@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import { Input } from '../../../components/ui/input'
+import { useKnowledgeCenterPath } from '../../../contexts/EmbeddedModeContext'
 import { cn } from '../../../lib/utils'
 import { EvaluationService } from '../../../services/evaluation'
 import type {
@@ -90,6 +91,7 @@ const statusTone: Record<string, string> = {
 }
 
 export default function EvaluationWorkspacePage() {
+  const kcPath = useKnowledgeCenterPath()
   const { suiteId } = useParams<{ suiteId?: string }>()
   const navigate = useNavigate()
   const [suites, setSuites] = useState<EvaluationSuite[]>([])
@@ -130,14 +132,14 @@ export default function EvaluationWorkspacePage() {
       const response = await EvaluationService.listSuites({ query, limit: 100 })
       setSuites(response.items)
       if (!suiteId && response.items.length > 0) {
-        navigate(`/evaluation/${response.items[0].id}`, { replace: true })
+        navigate(kcPath(`/evaluation/${response.items[0].id}`), { replace: true })
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load Evaluation suites')
     } finally {
       setLoadingSuites(false)
     }
-  }, [navigate, query, suiteId])
+  }, [kcPath, navigate, query, suiteId])
 
   const loadVersionData = useCallback(async (versionId: string) => {
     const [caseResponse, runResponse, advisorResponse] = await Promise.all([
@@ -311,7 +313,7 @@ export default function EvaluationWorkspacePage() {
       const response = await EvaluationService.createSuite(payload)
       setActionMessage(`Suite created: ${response.suite.slug}`)
       await loadSuites()
-      navigate(`/evaluation/${response.suite.id}`)
+      navigate(kcPath(`/evaluation/${response.suite.id}`))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to create Evaluation suite')
     } finally {
@@ -425,7 +427,7 @@ export default function EvaluationWorkspacePage() {
           {!loadingSuites && filteredSuites.map(item => (
             <Link
               key={item.id}
-              to={`/evaluation/${item.id}`}
+              to={kcPath(`/evaluation/${item.id}`)}
               className={cn(
                 'mb-2 block rounded-md border p-3 transition-colors',
                 item.id === suiteId ? 'border-brand-orange/60 bg-brand-orange/10' : 'border-[#293037] bg-[#171b1f] hover:border-[#4a5660]',

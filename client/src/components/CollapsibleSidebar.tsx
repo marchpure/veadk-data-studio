@@ -121,14 +121,15 @@ export default function CollapsibleSidebar() {
         />
       )}
       <div
-      className={`h-full shrink-0 bg-[#1a1a1a] border-r border-[#2a2a2a] flex flex-col overflow-hidden transition-all duration-300 ${
-        isExpanded
-          ? isMobile ? 'fixed inset-y-0 left-0 z-50 w-72 shadow-2xl' : 'w-72'
-          : 'w-12 cursor-pointer hover:bg-[#222222]'
-      }`}
-      onClick={!isExpanded ? handleToggleSidebar : undefined}
-      title={!isExpanded ? "Click to expand sidebar" : undefined}
-    >
+        data-testid="byaan-global-sidebar"
+        className={`h-full shrink-0 bg-[#1a1a1a] border-r border-[#2a2a2a] flex flex-col overflow-hidden transition-all duration-300 ${
+          isExpanded
+            ? isMobile ? 'fixed inset-y-0 left-0 z-50 w-72 shadow-2xl' : 'w-72'
+            : 'w-12 cursor-pointer hover:bg-[#222222]'
+        }`}
+        onClick={!isExpanded ? handleToggleSidebar : undefined}
+        title={!isExpanded ? "Click to expand sidebar" : undefined}
+      >
         <div className={`flex items-center justify-between bg-[#1a1a1a] h-[52px] transition-all duration-300 ${isExpanded ? 'px-4' : 'px-1'}`}>
         {isExpanded ? (
           <>

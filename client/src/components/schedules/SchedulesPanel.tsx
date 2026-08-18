@@ -39,19 +39,17 @@ export function SchedulesPanel({ open, onClose }: SchedulesPanelProps) {
 
   const activeCount = schedules.filter((s) => s.is_enabled).length
 
+  if (!open) return null
+
   return (
     <>
-      {open && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 transition-opacity"
-          onClick={onClose}
-        />
-      )}
+      <div
+        className="fixed inset-0 bg-black/50 z-40 transition-opacity"
+        onClick={onClose}
+      />
 
       <div
-        className={`fixed right-0 top-0 h-full w-96 bg-[#1a1a1a] border-l border-gray-800 z-50 transform transition-transform duration-300 ease-in-out ${
-          open ? 'translate-x-0' : 'translate-x-full'
-        }`}
+        className="fixed right-0 top-0 h-full w-96 bg-[#1a1a1a] border-l border-gray-800 z-50 transform transition-transform duration-300 ease-in-out translate-x-0"
       >
         <div className="flex flex-col h-full">
           <div className="flex items-center justify-between p-4 border-b border-gray-800">

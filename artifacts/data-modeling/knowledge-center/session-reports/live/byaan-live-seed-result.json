@@ -1,0 +1,278 @@
+{
+  "ok": true,
+  "runId": "session-f-team-20260818100622",
+  "baseUrl": "http://127.0.0.1:18100",
+  "deployment": {
+    "mode": "self-hosted",
+    "appConfig": {
+      "features": {
+        "worker_features_enabled": false,
+        "external_sharing_enabled": false,
+        "notebook_import_enabled": false,
+        "public_registration_enabled": false,
+        "local_auth_enabled": true,
+        "invitation_only": true,
+        "google_oauth_enabled": false,
+        "team_sharing_enabled": true,
+        "enterprise_licensed": true
+      },
+      "org_name": "Knowledge Center Team Gate"
+    },
+    "featureFlags": {
+      "worker_features_enabled": false,
+      "external_sharing_enabled": false,
+      "notebook_import_enabled": false,
+      "public_registration_enabled": false,
+      "local_auth_enabled": true,
+      "invitation_only": true,
+      "google_oauth_enabled": false,
+      "team_sharing_enabled": true,
+      "enterprise_licensed": true
+    },
+    "auth": {
+      "mode": "self-hosted",
+      "tenantId": "e3b48c29-8f52-4938-a135-198941f6782f",
+      "tenantName": "Knowledge Center Team Gate",
+      "userId": "fbc08168-a635-46e6-a6cc-6badece97d52",
+      "email": "<redacted>",
+      "role": "owner",
+      "scopesCount": 51,
+      "dbIdentity": {
+        "tenantId": "e3b48c29-8f52-4938-a135-198941f6782f",
+        "tenantName": "Knowledge Center Team Gate",
+        "userId": "fbc08168-a635-46e6-a6cc-6badece97d52",
+        "role": "owner"
+      }
+    },
+    "communityBootstrapPresent": false,
+    "knowledgeProvider": {
+      "provider": "native",
+      "allowNativeLocalDiagnostics": true
+    }
+  },
+  "tenantId": "e3b48c29-8f52-4938-a135-198941f6782f",
+  "userId": "fbc08168-a635-46e6-a6cc-6badece97d52",
+  "source": {
+    "name": "KC Live Revenue session-f-team-20260818100622",
+    "resourceId": "f4f3b4f6-d7f8-4a0c-b98a-c491db166039",
+    "projectedDatasetId": "6ae51a4e-6a66-4ae8-9ede-fa7fa9c01eb0",
+    "csvSha256": "3ee94278651e03966eebd414746006e432f3a1e8fd440a4600c29f227c0fe3f6"
+  },
+  "model": {
+    "slug": "kc-live-revenue-session-f-team-20260818100622-76cc4a97",
+    "name": "KC Live Revenue session-f-team-20260818100622",
+    "externalAssetId": "6556a544-5164-4fba-8f79-a0ae47c073bd",
+    "publishedVersion": "v1"
+  },
+  "externalApi": {
+    "apiKeyEnv": "BYAAN_MCP_API_KEY",
+    "apiKey": "<redacted>",
+    "asset": {
+      "asset_type": "semantic_model",
+      "asset_id": "6556a544-5164-4fba-8f79-a0ae47c073bd",
+      "name": "KC Live Revenue session-f-team-20260818100622",
+      "description": "Draft initialized from verified projected dataset Source Understanding candidates.",
+      "status": "Published",
+      "publish_state": "published",
+      "gate": {
+        "score": 100,
+        "passed": 3,
+        "total": 3,
+        "blockers": []
+      },
+      "version": "v1",
+      "consumers": [
+        "agent",
+        "mcp"
+      ],
+      "capabilities": {
+        "execution_modes": [
+          "run_semantic_query"
+        ],
+        "slug": "kc-live-revenue-session-f-team-20260818100622-76cc4a97",
+        "domain": "Sales / Orders",
+        "published_version": "v1",
+        "readiness": 82,
+        "readiness_level": "warning",
+        "metrics": [
+          {
+            "id": "revenue_revenue",
+            "name": "revenue_revenue",
+            "businessName": "Revenue Revenue",
+            "definition": "Sum of revenue.revenue.",
+            "formula": "SUM(revenue.revenue)",
+            "unit": ""
+          }
+        ],
+        "dimensions": [
+          {
+            "id": "revenue_region",
+            "name": "Revenue Region",
+            "field": "region",
+            "description": "region from Revenue."
+          },
+          {
+            "id": "revenue_paid_at",
+            "name": "Revenue Paid At",
+            "field": "paid_at",
+            "description": "paid_at from Revenue."
+          }
+        ],
+        "time_field": "revenue.paid_at"
+      },
+      "query_url": "/api/external/assets/semantic_model/6556a544-5164-4fba-8f79-a0ae47c073bd/query",
+      "freshness": {
+        "status": "current",
+        "drift_alerts": 0,
+        "updated_at": "2026-08-18T02:14:46.308493"
+      },
+      "provenance": {
+        "semantic_model_id": "6556a544-5164-4fba-8f79-a0ae47c073bd",
+        "datasource_id": "6ae51a4e-6a66-4ae8-9ede-fa7fa9c01eb0",
+        "datasource_kind": "duckdb",
+        "draft_revision": "draft-source-1",
+        "published_version": "v1"
+      },
+      "usage_policy": {},
+      "sample_evidence": [
+        {
+          "kind": "metric_definition",
+          "title": "Revenue Revenue",
+          "metric": "revenue_revenue",
+          "definition": "Sum of revenue.revenue.",
+          "formula": "SUM(revenue.revenue)",
+          "filter": "",
+          "lineage": [
+            {
+              "candidate_id": "9f6a0bd0-41e8-4e87-98b6-9a1f3167aaa6",
+              "candidate_type": "data_truth",
+              "confidence": 0.78,
+              "evidence_ids": [
+                "69f775d2-de50-48aa-917f-70f45503bfa0",
+                "a9f20240-5b7f-4968-94ac-5734d9799b64",
+                "405b54ca-964a-44c8-8bb6-7ce9189a7f80",
+                "d7dc7f9a-434b-4884-a19e-4697186f1c1a",
+                "9eef20ec-2739-4f5f-89ce-f3e822ee2b5b"
+              ],
+              "source_resource_id": "1f630b4a-cbef-4f86-9506-6bb9fcfe3d70",
+              "source_snapshot_id": "b7df1932-18b0-416b-bbd5-64410c7156c6",
+              "validation": {
+                "reason": "Needs reviewer confirmation of business definition.",
+                "status": "warning"
+              }
+            },
+            "revenue.revenue"
+          ]
+        },
+        {
+          "kind": "permission_policy",
+          "title": "Semantic model external query policy",
+          "policy": {
+            "allowedMetrics": [
+              "revenue_revenue"
+            ],
+            "allowedDimensions": [
+              "revenue_region",
+              "revenue_paid_at"
+            ]
+          }
+        }
+      ]
+    },
+    "listCount": 2,
+    "query": {
+      "resolvedMetric": "Revenue Revenue",
+      "metricDefinition": "Sum of revenue.revenue.",
+      "modelVersion": "v1",
+      "status": "completed",
+      "result": [
+        {
+          "revenue_region": "East",
+          "revenue_revenue": 150
+        },
+        {
+          "revenue_region": "West",
+          "revenue_revenue": 80
+        }
+      ],
+      "error": null,
+      "returnedCount": 2,
+      "totalCount": 2,
+      "limited": false,
+      "sql": "SELECT \"revenue\".\"region\" AS \"revenue_region\", SUM(revenue.revenue) AS \"revenue_revenue\" FROM \"revenue\" AS \"revenue\" GROUP BY \"revenue\".\"region\"",
+      "lineage": [
+        {
+          "candidate_id": "9f6a0bd0-41e8-4e87-98b6-9a1f3167aaa6",
+          "candidate_type": "data_truth",
+          "confidence": 0.78,
+          "evidence_ids": [
+            "69f775d2-de50-48aa-917f-70f45503bfa0",
+            "a9f20240-5b7f-4968-94ac-5734d9799b64",
+            "405b54ca-964a-44c8-8bb6-7ce9189a7f80",
+            "d7dc7f9a-434b-4884-a19e-4697186f1c1a",
+            "9eef20ec-2739-4f5f-89ce-f3e822ee2b5b"
+          ],
+          "source_resource_id": "1f630b4a-cbef-4f86-9506-6bb9fcfe3d70",
+          "source_snapshot_id": "b7df1932-18b0-416b-bbd5-64410c7156c6",
+          "validation": {
+            "reason": "Needs reviewer confirmation of business definition.",
+            "status": "warning"
+          }
+        },
+        "revenue.revenue"
+      ],
+      "evidence": [
+        {
+          "kind": "sql",
+          "title": "Compiled SQL for Revenue Revenue",
+          "content": "SELECT \"revenue\".\"region\" AS \"revenue_region\", SUM(revenue.revenue) AS \"revenue_revenue\" FROM \"revenue\" AS \"revenue\" GROUP BY \"revenue\".\"region\""
+        },
+        {
+          "kind": "metric_definition",
+          "title": "Revenue Revenue",
+          "metric": "revenue_revenue",
+          "definition": "Sum of revenue.revenue.",
+          "formula": "SUM(revenue.revenue)",
+          "lineage": [
+            {
+              "candidate_id": "9f6a0bd0-41e8-4e87-98b6-9a1f3167aaa6",
+              "candidate_type": "data_truth",
+              "confidence": 0.78,
+              "evidence_ids": [
+                "69f775d2-de50-48aa-917f-70f45503bfa0",
+                "a9f20240-5b7f-4968-94ac-5734d9799b64",
+                "405b54ca-964a-44c8-8bb6-7ce9189a7f80",
+                "d7dc7f9a-434b-4884-a19e-4697186f1c1a",
+                "9eef20ec-2739-4f5f-89ce-f3e822ee2b5b"
+              ],
+              "source_resource_id": "1f630b4a-cbef-4f86-9506-6bb9fcfe3d70",
+              "source_snapshot_id": "b7df1932-18b0-416b-bbd5-64410c7156c6",
+              "validation": {
+                "reason": "Needs reviewer confirmation of business definition.",
+                "status": "warning"
+              }
+            },
+            "revenue.revenue"
+          ]
+        },
+        {
+          "kind": "permission_policy",
+          "title": "Semantic model external query policy",
+          "policy": {
+            "allowedMetrics": [
+              "revenue_revenue"
+            ],
+            "allowedDimensions": [
+              "revenue_region",
+              "revenue_paid_at"
+            ]
+          }
+        }
+      ],
+      "freshness": "2026-08-18T02:14:46.473865",
+      "policyDecision": "allowed",
+      "warnings": []
+    }
+  },
+  "secretEnvPath": "/tmp/session-f-team-20260818100622.byaan-live-env.sh"
+}

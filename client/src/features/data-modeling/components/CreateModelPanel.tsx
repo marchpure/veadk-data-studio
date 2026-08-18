@@ -4,6 +4,7 @@ import { AlertCircle, ArrowRight, Bot, CheckCircle2, Database, FileText, Globe2,
 import { Button } from '../../../components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../../components/ui/dialog'
 import { DataProfileWorkspace } from '../profile/DataProfileWorkspace'
+import { useKnowledgeCenterPath } from '../../../contexts/EmbeddedModeContext'
 import { EmptyState, ErrorState, MetricTile, Panel, PanelHeader, ScoreBar, SectionTitle, StatusPill, Surface, modelingStyles } from './modelingUi'
 import { useDataModelingStore, selectActiveModel } from '../store/useDataModelingStore'
 import type { DataModelingDatasource, DataSourceProfile } from '../types'
@@ -12,6 +13,7 @@ const milestones = ['Data', 'Profile', 'Generate', 'Explore']
 
 export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const navigate = useNavigate()
+  const kcPath = useKnowledgeCenterPath()
   const [step, setStep] = useState(0)
   const profiles = useDataModelingStore(state => state.profiles)
   const datasourceOptions = useDataModelingStore(state => state.datasourceOptions)
@@ -49,7 +51,7 @@ export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpen
     setActiveModel(model.id)
     setWorkspaceMode('dashboard')
     onOpenChange(false)
-    navigate(`/data-models/${model.id}`)
+    navigate(kcPath(`/data-models/${model.id}`))
   }
 
   const runGeneration = () => {
@@ -106,7 +108,7 @@ export function CreateModelPanel({ open, onOpenChange }: { open: boolean; onOpen
                 onNext={() => setStep(1)}
                 onOpenSourceDetail={sourceId => {
                   onOpenChange(false)
-                  navigate(`/sources/${sourceId}`)
+                  navigate(kcPath(`/sources/${sourceId}`))
                 }}
               />
             )}

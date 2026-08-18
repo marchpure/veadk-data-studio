@@ -1129,17 +1129,31 @@ class SemanticModelService:
         if result.get("success") is False or result.get("error"):
             return {
                 "resolvedMetric": metric.business_name,
+                "metricDefinition": metric.definition,
                 "modelVersion": model.published_version,
                 "status": "failed",
                 "error": result.get("error") or "Semantic query failed",
                 "sql": safe_sql,
                 "lineage": _json_load(metric.lineage_json, []),
+                "evidence": SemanticModelService._query_evidence(
+                    sql=safe_sql,
+                    metric_id=metric.slug,
+                    metric_name=metric.business_name,
+                    metric_definition=metric.definition,
+                    metric_formula=metric.formula,
+                    lineage=_json_load(metric.lineage_json, []),
+                    policy={
+                        "allowedMetrics": list(mcp.get("allowedMetrics") or []),
+                        "allowedDimensions": list(mcp.get("allowedDimensions") or []),
+                    },
+                ),
                 "freshness": datetime.utcnow().isoformat(),
                 "policyDecision": "allowed",
                 "warnings": result.get("hint") or "",
             }
         payload = {
             "resolvedMetric": metric.business_name,
+            "metricDefinition": metric.definition,
             "modelVersion": model.published_version,
             "status": "completed",
             "result": _query_rows(result),
@@ -1148,6 +1162,18 @@ class SemanticModelService:
             "limited": result.get("limited"),
             "sql": safe_sql,
             "lineage": _json_load(metric.lineage_json, []),
+            "evidence": SemanticModelService._query_evidence(
+                sql=safe_sql,
+                metric_id=metric.slug,
+                metric_name=metric.business_name,
+                metric_definition=metric.definition,
+                metric_formula=metric.formula,
+                lineage=_json_load(metric.lineage_json, []),
+                policy={
+                    "allowedMetrics": list(mcp.get("allowedMetrics") or []),
+                    "allowedDimensions": list(mcp.get("allowedDimensions") or []),
+                },
+            ),
             "freshness": datetime.utcnow().isoformat(),
             "policyDecision": "allowed",
             "warnings": [],
@@ -1212,6 +1238,7 @@ class SemanticModelService:
         )
         payload = {
             "resolvedMetric": metric.get("businessName") or metric.get("name"),
+            "metricDefinition": metric.get("definition") or "",
             "modelVersion": model.published_version,
             "status": "completed" if not (result.get("success") is False or result.get("error")) else "failed",
             "result": _query_rows(result) if not result.get("error") else None,
@@ -1221,6 +1248,18 @@ class SemanticModelService:
             "limited": result.get("limited"),
             "sql": safe_sql,
             "lineage": metric.get("lineage") or [],
+            "evidence": SemanticModelService._query_evidence(
+                sql=safe_sql,
+                metric_id=str(metric.get("id") or metric.get("name") or ""),
+                metric_name=str(metric.get("businessName") or metric.get("name") or ""),
+                metric_definition=str(metric.get("definition") or ""),
+                metric_formula=str(metric.get("formula") or ""),
+                lineage=metric.get("lineage") or [],
+                policy={
+                    "allowedMetrics": list(allowed_metrics),
+                    "allowedDimensions": list(allowed_dimensions),
+                },
+            ),
             "freshness": datetime.utcnow().isoformat(),
             "policyDecision": "allowed",
             "warnings": [] if not result.get("hint") else result.get("hint"),
@@ -1256,3 +1295,35 @@ class SemanticModelService:
         )
         await session.commit()
         return payload
+
+    @staticmethod
+    def _query_evidence(
+        *,
+        sql: str,
+        metric_id: str,
+        metric_name: str,
+        metric_definition: str,
+        metric_formula: str,
+        lineage: list[Any],
+        policy: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "kind": "sql",
+                "title": f"Compiled SQL for {metric_name or metric_id}",
+                "content": sql,
+            },
+            {
+                "kind": "metric_definition",
+                "title": metric_name or metric_id,
+                "metric": metric_id,
+                "definition": metric_definition,
+                "formula": metric_formula,
+                "lineage": lineage,
+            },
+            {
+                "kind": "permission_policy",
+                "title": "Semantic model external query policy",
+                "policy": policy,
+            },
+        ]

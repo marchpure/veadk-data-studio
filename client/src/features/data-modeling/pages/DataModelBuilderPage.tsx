@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { Button } from '../../../components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../../components/ui/dialog'
+import { useKnowledgeCenterPath } from '../../../contexts/EmbeddedModeContext'
 import DashboardWorkspacePage from '../../dashboard/pages/DashboardWorkspacePage'
 import { EmptyState, MetricTile, Panel, PanelHeader, SectionTitle, StatusPill, Surface, modelingStyles } from '../components/modelingUi'
 import { SemanticGraphWorkspace } from '../model/SemanticGraphWorkspace'
@@ -34,6 +35,7 @@ const steps: Array<{ id: KnowledgeCenterStep; label: string; detail: string }> =
 ]
 
 export default function DataModelBuilderPage() {
+  const kcPath = useKnowledgeCenterPath()
   const params = useParams()
   const model = useDataModelingStore(selectActiveModel)
   const activeModelId = useDataModelingStore(state => state.activeModelId)
@@ -59,7 +61,7 @@ export default function DataModelBuilderPage() {
   if (!model?.id) {
     return (
       <div className={`flex h-full min-h-0 flex-col p-4 ${modelingStyles.page}`}>
-        <EmptyState title="Loading Data Model" body="The Semantic Model is being loaded from the backend. Return to the model list if this ID no longer exists." action={<Button asChild variant="secondary"><Link to="/data-models">Back to models</Link></Button>} />
+        <EmptyState title="Loading Data Model" body="The Semantic Model is being loaded from the backend. Return to the model list if this ID no longer exists." action={<Button asChild variant="secondary"><Link to={kcPath('/data-models')}>Back to models</Link></Button>} />
       </div>
     )
   }
@@ -72,7 +74,7 @@ export default function DataModelBuilderPage() {
         <div className="grid gap-3 px-4 py-3 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <Button asChild size="sm" variant="ghost" className="shrink-0"><Link to="/data-models"><ArrowLeft className="h-4 w-4" /> Models</Link></Button>
+              <Button asChild size="sm" variant="ghost" className="shrink-0"><Link to={kcPath('/data-models')}><ArrowLeft className="h-4 w-4" /> Models</Link></Button>
               <div className="min-w-0">
                 <h1 className="truncate text-lg font-semibold leading-6 text-[#f3f5f5]">{model.name}</h1>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[#9aa4ac]">
@@ -141,6 +143,7 @@ export default function DataModelBuilderPage() {
 }
 
 function ConnectorsStep({ model }: { model: SemanticModel }) {
+  const kcPath = useKnowledgeCenterPath()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const datasourceOptions = useDataModelingStore(state => state.datasourceOptions)
   const datasourceLoading = useDataModelingStore(state => state.datasourceLoading)
@@ -273,7 +276,7 @@ function ConnectorsStep({ model }: { model: SemanticModel }) {
                     <div className="text-sm font-semibold text-[#f3f5f5]">{kind}</div>
                     <div className="mt-1 text-xs text-[#9aa4ac]">Opens the source connector setup outside this journey.</div>
                   </div>
-                  <Button size="sm" variant="secondary" asChild><Link to="/sources">Open</Link></Button>
+                  <Button size="sm" variant="secondary" asChild><Link to={kcPath('/sources')}>Open</Link></Button>
                 </div>
               </Surface>
             ))}
