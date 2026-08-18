@@ -1239,6 +1239,10 @@ class SemanticModelService:
         payload = {
             "resolvedMetric": metric.get("businessName") or metric.get("name"),
             "metricDefinition": metric.get("definition") or "",
+            "metric": SemanticModelService._metric_contract(
+                metric=metric,
+                version=model.published_version,
+            ),
             "modelVersion": model.published_version,
             "status": "completed" if not (result.get("success") is False or result.get("error")) else "failed",
             "result": _query_rows(result) if not result.get("error") else None,
@@ -1264,6 +1268,12 @@ class SemanticModelService:
             "policyDecision": "allowed",
             "warnings": [] if not result.get("hint") else result.get("hint"),
         }
+        snapshot = SemanticModelService._snapshot_contract(model=model, published=published, metric=metric)
+        if snapshot:
+            payload["snapshot"] = snapshot
+            payload["dataThrough"] = snapshot.get("data_through")
+            payload["snapshotId"] = snapshot.get("id")
+            payload["snapshotHash"] = snapshot.get("hash")
         mcp_state = _json_load(model.mcp_json, {})
         mcp_state["lastResult"] = {
             "resolvedMetric": payload["resolvedMetric"],
@@ -1295,6 +1305,56 @@ class SemanticModelService:
         )
         await session.commit()
         return payload
+
+    @staticmethod
+    def _metric_contract(*, metric: dict[str, Any], version: str) -> dict[str, Any]:
+        return {
+            "id": str(metric.get("id") or metric.get("name") or ""),
+            "definition": str(metric.get("definition") or ""),
+            "formula": str(metric.get("formula") or ""),
+            "version": version,
+            "grain": str(metric.get("grain") or metric.get("defaultGrain") or ""),
+            "unit": str(metric.get("unit") or ""),
+        }
+
+    @staticmethod
+    def _snapshot_contract(
+        *,
+        model: SemanticModel,
+        published: dict[str, Any],
+        metric: dict[str, Any],
+    ) -> dict[str, Any]:
+        review = _json_load(model.review_json, {})
+        provenance = _json_load(model.mcp_json, {}).get("snapshot") or review.get("snapshot") or {}
+        for source in (
+            metric.get("lineage") or [],
+            published.get("review", {}).get("sourceUnderstandingLineage") or [],
+            review.get("sourceUnderstandingLineage") or [],
+        ):
+            if isinstance(source, dict):
+                provenance = {**source, **provenance}
+                break
+            if isinstance(source, list):
+                first = next((item for item in source if isinstance(item, dict)), None)
+                if first:
+                    provenance = {**first, **provenance}
+                    break
+        snapshot_id = (
+            provenance.get("id")
+            or provenance.get("snapshot_id")
+            or provenance.get("source_snapshot_id")
+            or provenance.get("sourceSnapshotId")
+        )
+        snapshot_hash = provenance.get("hash") or provenance.get("sha256") or provenance.get("content_hash")
+        data_through = provenance.get("data_through") or provenance.get("dataThrough")
+        if not any([snapshot_id, snapshot_hash, data_through]):
+            return {}
+        return {
+            "id": str(snapshot_id or ""),
+            "data_through": str(data_through or ""),
+            "hash": str(snapshot_hash or ""),
+            "provenance": str(provenance.get("provenance") or provenance.get("source") or "published_semantic_model"),
+        }
 
     @staticmethod
     def _query_evidence(

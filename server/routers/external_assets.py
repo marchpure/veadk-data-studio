@@ -25,6 +25,10 @@ WRITE_SQL_PATTERN = re.compile(
     r"\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|TRUNCATE|MERGE|REPLACE|GRANT|REVOKE|CALL|COPY|VACUUM|OPTIMIZE)\b",
     re.IGNORECASE,
 )
+SENSITIVE_QUERY_PATTERN = re.compile(
+    r"(CUST_NAME|CUST_ADDR|CUST_TEL|MARKETVIPCARDNO|PASSPORT|BOARDINGPASS|客户姓名|客户电话|电话|手机号|phone|tel)",
+    re.IGNORECASE,
+)
 
 
 class ExternalAssetListResponse(BaseModel):
@@ -201,12 +205,17 @@ async def _published_asset_or_404(
 
 
 def _assert_read_only_payload(payload: ExternalAssetQueryRequest) -> None:
+    encoded = " ".join(_flatten_strings(payload.model_dump(mode="json")))
+    if SENSITIVE_QUERY_PATTERN.search(encoded):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Policy denied: direct customer identifiers and contact fields are not queryable.",
+        )
     if payload.query:
         try:
             validate_sql_query(payload.query)
         except ValueError as error:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error))
-    encoded = " ".join(_flatten_strings(payload.model_dump(mode="json")))
     if WRITE_SQL_PATTERN.search(encoded):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Write operations are not allowed")
 

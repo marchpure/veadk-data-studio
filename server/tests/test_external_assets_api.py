@@ -218,6 +218,22 @@ async def test_external_semantic_model_query_dispatches_service(
     assert captured["request"]["metric"] == "paid_revenue"
 
 
+async def test_external_semantic_model_query_denies_customer_contact_fields(test_client, test_session) -> None:
+    tenant = await current_tenant(test_session)
+    api_key = await _seed_mcp_key(test_session, tenant)
+    model = await seed_semantic_model(test_session, tenant, published=True)
+
+    response = await test_client.post(
+        f"/api/external/assets/semantic_model/{model.id}/query",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={"query": "列出客户姓名和电话", "metric": "paid_revenue"},
+    )
+
+    assert response.status_code == 403
+    body = response.json()
+    assert "Policy denied" in (body.get("detail") or body.get("message") or str(body))
+
+
 async def test_external_semantic_model_query_returns_completed_data_and_evidence(
     test_client,
     test_session,
@@ -325,6 +341,9 @@ async def test_external_semantic_model_query_returns_completed_data_and_evidence
     payload = response.json()["data"]
     assert payload["status"] == "completed"
     assert payload["policyDecision"] == "allowed"
+    assert payload["metric"]["id"] == "revenue_revenue"
+    assert payload["metric"]["definition"] == payload["metricDefinition"]
+    assert payload["metric"]["version"] == payload["modelVersion"]
     assert payload["result"]
     assert sorted(payload["result"], key=lambda item: item["revenue_region"]) == [
         {"revenue_region": "East", "revenue_revenue": 120},
