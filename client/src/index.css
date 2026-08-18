@@ -300,29 +300,29 @@ div[class*="custom-scrollbar"]::-webkit-scrollbar-corner {
 }
 
 [data-embedded-layout="knowledge-center"] {
-  --kc-embed-bg: #f7f7f8;
+  --kc-embed-bg: #ffffff;
   --kc-embed-surface: #ffffff;
   --kc-embed-panel: #ffffff;
-  --kc-embed-panel-muted: #f4f4f5;
-  --kc-embed-panel-hover: rgba(24, 24, 27, 0.045);
+  --kc-embed-panel-muted: #f7f7f8;
+  --kc-embed-panel-hover: rgba(24, 24, 27, 0.035);
   --kc-embed-row: #ffffff;
   --kc-embed-row-alt: #fbfbfc;
-  --kc-embed-row-hover: #f4f4f5;
-  --kc-embed-border: #e4e4e7;
-  --kc-embed-border-strong: #d4d4d8;
-  --kc-embed-input-border: #d4d4d8;
-  --kc-embed-text: #242426;
-  --kc-embed-text-strong: #202124;
-  --kc-embed-text-secondary: #4f5159;
-  --kc-embed-muted: #707078;
+  --kc-embed-row-hover: #f7f7f8;
+  --kc-embed-border: #f0f0f3;
+  --kc-embed-border-strong: #e0e1e6;
+  --kc-embed-input-border: #e0e1e6;
+  --kc-embed-text: #1c2024;
+  --kc-embed-text-strong: #1c2024;
+  --kc-embed-text-secondary: #60646c;
+  --kc-embed-muted: #60646c;
   --kc-embed-subtle: #a1a1aa;
-  --kc-embed-code: #f4f4f5;
-  --kc-embed-primary: #18181b;
-  --kc-embed-primary-hover: #2f3033;
+  --kc-embed-code: #f7f7f8;
+  --kc-embed-primary: #0081f2;
+  --kc-embed-primary-hover: #0d74ce;
   --kc-embed-accent: #0081f2;
-  --kc-embed-primary-soft: rgba(0, 129, 242, 0.08);
-  --kc-embed-primary-border: rgba(0, 129, 242, 0.22);
-  --kc-embed-focus: rgba(0, 129, 242, 0.26);
+  --kc-embed-primary-soft: rgba(0, 129, 242, 0.06);
+  --kc-embed-primary-border: rgba(0, 129, 242, 0.18);
+  --kc-embed-focus: rgba(0, 129, 242, 0.22);
   --background: 0 0% 100%;
   --foreground: 240 10% 3.9%;
   --card: 0 0% 100%;
@@ -479,7 +479,7 @@ div[class*="custom-scrollbar"]::-webkit-scrollbar-corner {
   background-color: var(--kc-embed-primary) !important;
   color: #ffffff !important;
   border-color: var(--kc-embed-primary) !important;
-  border-radius: 999px !important;
+  border-radius: 8px !important;
   box-shadow: none !important;
 }
 
