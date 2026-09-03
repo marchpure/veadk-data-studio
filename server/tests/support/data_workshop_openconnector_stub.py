@@ -218,7 +218,7 @@ async def get_identity(request: Request):
 @app.get("/v1/mcp/status")
 async def get_mcp_status(request: Request):
     check_auth(request)
-    return {"status": "healthy", "protocol": "streamable-http", "checked_at": datetime.now(UTC).isoformat()}
+    return {"status": "healthy", "protocol": "streamable-http", "checked_at": "2026-09-04T00:00:00Z"}
 
 
 @app.post("/v1/mcp/tests/tools-list")
