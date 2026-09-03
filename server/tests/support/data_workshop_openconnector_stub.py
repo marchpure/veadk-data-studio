@@ -10,41 +10,45 @@ PUBLIC_ORIGIN = "https://s4j054gh1e125mqsipi2e.apigateway-cn-beijing.volceapi.co
 
 connection = {
     "id": "oracle-prod",
-    "name": "Oracle 经营分析库",
-    "provider": "Oracle",
-    "description": "核心经营数据，只读查询已验证。",
-    "status": "ready",
-    "action_count": 4,
-    "updated_at": "2026-09-04 11:20",
+    "service": "oracle",
+    "status": "active",
+    "alias": "经营分析库",
+    "authType": "custom_credential",
+    "displayName": "Oracle 经营分析库",
+    "accountLabel": "Oracle 经营分析库",
+    "isDefault": True,
+    "scopes": [],
 }
 actions = [
-    {"id": "discover_schema", "name": "发现 Schema", "description": "读取可见表和字段", "risk": "low", "read_only": True},
-    {"id": "query_rows", "name": "查询数据", "description": "执行受限 SELECT 查询", "risk": "low", "read_only": True},
-    {"id": "export_result", "name": "导出结果", "description": "导出查询结果文件", "risk": "medium", "read_only": True},
-    {"id": "refresh_snapshot", "name": "刷新快照", "description": "触发数据快照更新", "risk": "high", "read_only": False},
+    {"id": "discover_schema", "service": "oracle", "name": "discover_schema", "description": "读取可见表和字段"},
+    {"id": "query_rows", "service": "oracle", "name": "query_rows", "description": "执行受限 SELECT 查询"},
+    {"id": "export_result", "service": "oracle", "name": "export_result", "description": "导出查询结果文件"},
+    {"id": "refresh_snapshot", "service": "oracle", "name": "refresh_snapshot", "description": "触发数据快照更新"},
 ]
 subjects = [
-    {"id": "group-finance", "type": "group", "display_name": "财务分析组", "secondary_text": "18 位成员"},
-    {"id": "group-ops", "type": "group", "display_name": "运营值班组", "secondary_text": "9 位成员"},
-    {"id": "user-alice", "type": "user", "display_name": "Alice Chen", "secondary_text": "alice.chen@example.com"},
+    {
+        "issuer": "https://identity.example.com/tenant/dw",
+        "audience": "data-workshop",
+        "userPoolRef": "dw-enterprise-users",
+        "sub": "user-alice",
+        "groups": ["财务分析组", "运营值班组"],
+    },
 ]
 grants: list[dict[str, Any]] = []
 providers = [
     {
-        "id": "oracle-prod",
-        "name": "Oracle",
-        "category": "数据库",
-        "description": "企业级关系数据库，支持 Schema 与只读 Actions 发现。",
-        "color": "#c74634",
-        "available": True,
+        "service": "oracle",
+        "displayName": "Oracle",
+        "categories": [{"id": "数据库", "displayName": "数据库"}],
+        "scenario": "企业级关系数据库",
+        "authTypes": ["custom_credential"],
     },
     {
-        "id": "postgresql",
-        "name": "PostgreSQL",
-        "category": "数据库",
-        "description": "连接 PostgreSQL 实例并发现表、视图和查询能力。",
-        "color": "#336791",
-        "available": True,
+        "service": "postgresql",
+        "displayName": "PostgreSQL",
+        "categories": [{"id": "数据库", "displayName": "数据库"}],
+        "scenario": "连接 PostgreSQL 实例",
+        "authTypes": ["custom_credential"],
     },
 ]
 
@@ -56,8 +60,20 @@ def check_auth(request: Request) -> None:
         raise HTTPException(status_code=403, detail="tenant context required")
 
 
-@app.get("/v1/connections")
+@app.get("/v1/health")
+async def runtime_health(request: Request):
+    check_auth(request)
+    return {"ok": True, "runtime": "openconnector"}
+
+
+@app.get("/v1/apps")
 async def list_connections(request: Request):
+    check_auth(request)
+    return {"items": [connection]}
+
+
+@app.get("/v1/connections")
+async def list_connections_v3(request: Request):
     check_auth(request)
     return {"items": [connection]}
 
@@ -68,56 +84,41 @@ async def list_providers(request: Request):
     return {"items": providers}
 
 
-@app.get("/v1/connections/{connection_id}")
-async def get_connection(connection_id: str, request: Request):
-    check_auth(request)
-    if connection_id != connection["id"]:
-        raise HTTPException(status_code=404, detail="connection not found")
-    return connection
-
-
 @app.get("/v1/actions")
-async def list_actions(connection_id: str, request: Request):
+async def list_actions(request: Request, service: str | None = None):
     check_auth(request)
-    return {"items": actions if connection_id == connection["id"] else []}
+    return {"items": actions if service in {None, connection["service"]} else []}
 
 
 @app.get("/v1/access-grants")
-async def list_grants(connection_id: str, request: Request):
+async def list_grants(request: Request):
     check_auth(request)
-    return {"items": [grant for grant in grants if grant["connection_id"] == connection_id]}
+    return {"items": grants}
 
 
 @app.get("/v1/identity/subjects")
-async def list_subjects(request: Request, query: str = "", subject_type: str = "all"):
+async def list_subjects(request: Request):
     check_auth(request)
-    query_lower = query.lower()
-    items = [
-        subject
-        for subject in subjects
-        if (subject_type == "all" or subject["type"] == subject_type)
-        and (not query_lower or query_lower in subject["display_name"].lower())
-    ]
-    return {"items": items}
+    return {"items": subjects}
 
 
 @app.post("/v1/access-grants")
 async def create_grant(request: Request):
     check_auth(request)
     payload = await request.json()
-    if payload["role_id"] in {"reader", "operator"} and payload["action_scope"]:
+    if payload["role"] in {"reader", "operator"} and payload["customActions"]:
         raise HTTPException(status_code=422, detail="predefined role scope must be resolved by OpenConnector")
-    if payload["role_id"] == "reader":
-        payload["action_scope"] = [action["id"] for action in actions if action["read_only"]]
-    elif payload["role_id"] == "operator":
-        payload["action_scope"] = [action["id"] for action in actions]
+    if payload["role"] == "reader":
+        payload["customActions"] = [
+            action["id"] for action in actions if action["name"].startswith(("get", "list", "query", "discover"))
+        ]
+    elif payload["role"] == "operator":
+        payload["customActions"] = [action["id"] for action in actions]
     grant = {
         **payload,
         "id": f"grant-{len(grants) + 1}",
-        "status": "active",
-        "updated_at": datetime.now(UTC).isoformat(),
-        "updated_by": "林默",
-        "version": 1,
+        "createdAt": datetime.now(UTC).isoformat(),
+        "updatedAt": datetime.now(UTC).isoformat(),
     }
     grants.append(grant)
     return grant
@@ -127,15 +128,17 @@ async def create_grant(request: Request):
 async def update_grant(grant_id: str, request: Request):
     check_auth(request)
     payload = await request.json()
-    if payload["role_id"] in {"reader", "operator"} and payload["action_scope"]:
+    if payload["role"] in {"reader", "operator"} and payload["customActions"]:
         raise HTTPException(status_code=422, detail="predefined role scope must be resolved by OpenConnector")
-    if payload["role_id"] == "reader":
-        payload["action_scope"] = [action["id"] for action in actions if action["read_only"]]
-    elif payload["role_id"] == "operator":
-        payload["action_scope"] = [action["id"] for action in actions]
+    if payload["role"] == "reader":
+        payload["customActions"] = [
+            action["id"] for action in actions if action["name"].startswith(("get", "list", "query", "discover"))
+        ]
+    elif payload["role"] == "operator":
+        payload["customActions"] = [action["id"] for action in actions]
     for index, grant in enumerate(grants):
         if grant["id"] == grant_id:
-            updated = {**grant, **payload, "version": grant["version"] + 1}
+            updated = {**grant, **payload, "updatedAt": datetime.now(UTC).isoformat()}
             grants[index] = updated
             return updated
     raise HTTPException(status_code=404, detail="grant not found")
@@ -146,7 +149,7 @@ async def revoke_grant(grant_id: str, request: Request):
     check_auth(request)
     for grant in grants:
         if grant["id"] == grant_id:
-            grant["status"] = "revoked"
+            grant["revokedAt"] = datetime.now(UTC).isoformat()
             return grant
     raise HTTPException(status_code=404, detail="grant not found")
 
@@ -155,28 +158,49 @@ async def revoke_grant(grant_id: str, request: Request):
 async def preview_access(request: Request):
     check_auth(request)
     payload = await request.json()
-    subject = next(item for item in subjects if item["id"] == payload["subject_id"])
-    active_grants = [grant for grant in grants if grant["status"] == "active"]
-    allowed_ids = {
-        action_id
+    subject = payload["subject"]
+    action = next(item for item in actions if item["id"] == payload["actionId"])
+    active_grants = [grant for grant in grants if not grant.get("revokedAt")]
+    matching = [
+        grant
         for grant in active_grants
-        if grant["subject_id"] in {subject["id"], "group-finance"}
-        for action_id in grant["action_scope"]
-    }
+        if grant["connectionId"] == payload["connectionId"]
+        and (
+            grant["subjectType"] == "user"
+            and grant["subject"] == subject["sub"]
+            or grant["subjectType"] == "group"
+            and grant["subject"] in subject["groups"]
+        )
+    ]
+    allowed = any(
+        grant["effect"] == "allow"
+        and (
+            grant["role"] == "operator"
+            or grant["role"] == "reader"
+            and action["name"].startswith(("get", "list", "query", "discover"))
+            or grant["role"] == "custom"
+            and action["id"] in grant["customActions"]
+        )
+        for grant in matching
+    )
     return {
         "subject": subject,
-        "connections": [
-            {
-                "connection_id": connection["id"],
-                "connection_name": connection["name"],
-                "actions": [action for action in actions if action["id"] in allowed_ids],
-                "reasons": [
-                    {"grant_id": grant["id"], "source": f"用户组 {grant['subject_display_snapshot']}", "effect": "allow"}
-                    for grant in active_grants
-                    if grant["subject_id"] == "group-finance"
-                ],
-            }
-        ],
+        "connectionId": payload["connectionId"],
+        "actionId": payload["actionId"],
+        "decision": {
+            "allowed": allowed,
+            "checks": [
+                {
+                    "source": "access_grant",
+                    "outcome": "allow_match",
+                    "grantId": grant["id"],
+                    "role": grant["role"],
+                    "reason": f"用户组 {grant['subject']}",
+                }
+                for grant in matching
+            ],
+        },
+        "policyVersion": len(grants),
     }
 
 
@@ -187,11 +211,13 @@ async def get_audit(request: Request):
         "items": [
             {
                 "id": f"audit-{grant['id']}",
-                "event_type": "AccessGrant 创建",
-                "subject_display": grant["subject_display_snapshot"],
-                "decision": "allow",
-                "created_at": grant["updated_at"],
-                "request_id": f"req-{grant['id']}",
+                "subject": subjects[0],
+                "connectionId": grant["connectionId"],
+                "decision": {
+                    "allowed": grant["effect"] == "allow",
+                    "checks": [{"source": "access_grant", "outcome": "allow_match", "grantId": grant["id"]}],
+                },
+                "createdAt": grant["updatedAt"],
             }
             for grant in grants
         ]

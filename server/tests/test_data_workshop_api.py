@@ -21,18 +21,98 @@ class FakeOpenConnector:
 
     async def request(self, method: str, path: str, **kwargs: Any) -> Any:
         self.calls.append((method, path, kwargs))
+        if path == "/v1/connections":
+            raise OpenConnectorError("OpenConnector rejected the request", status_code=404)
+        if method == "POST" and path == "/v1/access-grants":
+            payload = kwargs["json"]
+            return {
+                "id": "grant-created",
+                **payload,
+                "createdAt": "2026-09-04T00:00:00Z",
+                "updatedAt": "2026-09-04T00:00:00Z",
+            }
         responses = {
-            "/v1/providers": [{"id": "oracle", "name": "Oracle"}],
-            "/v1/connections": [{"id": "oracle-prod", "name": "Oracle Production"}],
+            "/v1/providers": [
+                {
+                    "service": "oracle",
+                    "displayName": "Oracle",
+                    "categories": [{"id": "data", "displayName": "Data"}],
+                    "scenario": "database",
+                    "authTypes": ["custom_credential"],
+                }
+            ],
+            "/v1/apps": [
+                {
+                    "id": "oracle-prod",
+                    "service": "oracle",
+                    "status": "active",
+                    "alias": "production",
+                    "authType": "custom_credential",
+                    "displayName": "Oracle Production",
+                    "accountLabel": "Oracle Production",
+                    "isDefault": True,
+                    "scopes": [],
+                }
+            ],
+            "/v1/actions": [
+                {
+                    "id": "oracle.query_rows",
+                    "service": "oracle",
+                    "name": "query_rows",
+                    "description": "Query rows",
+                }
+            ],
+            "/v1/access-grants": [
+                {
+                    "id": "grant-1",
+                    "subjectType": "group",
+                    "subject": "finance",
+                    "connectionId": "oracle-prod",
+                    "role": "reader",
+                    "effect": "allow",
+                    "customActions": [],
+                    "createdAt": "2026-09-04T00:00:00Z",
+                    "updatedAt": "2026-09-04T00:00:00Z",
+                }
+            ],
             "/v1/mcp/config": {
                 "endpoint": "https://connector.example.com/mcp",
                 "admin_token": "must-not-leak",
                 "client_secret": "must-not-leak",
             },
-            "/v1/identity-provider": {"status": "ready", "issuer": "https://identity.example.com"},
+            "/v1/identity-provider": {
+                "issuer": "https://identity.example.com",
+                "audience": "data-workshop",
+                "jwksUri": "https://identity.example.com/jwks",
+                "userPoolRef": "dw-users",
+                "subjectClaim": "sub",
+                "groupsClaim": "groups",
+            },
+            "/v1/identity/subjects": [
+                {
+                    "issuer": "https://identity.example.com",
+                    "audience": "data-workshop",
+                    "userPoolRef": "dw-users",
+                    "sub": "alice",
+                    "groups": ["finance"],
+                }
+            ],
+            "/v1/health": {"ok": True, "runtime": "openconnector"},
             "/v1/mcp/status": {"status": "healthy"},
             "/v1/mcp/tests/tools-list": {"tools": [{"name": "list_connections"}]},
         }
+        if path == "/v1/access:preview":
+            action_id = kwargs["json"]["actionId"]
+            return {
+                "subject": kwargs["json"]["subject"],
+                "connectionId": "oracle-prod",
+                "actionId": action_id,
+                "decision": {
+                    "allowed": True,
+                    "checks": [{"source": "access_grant", "outcome": "allow_match", "grantId": "grant-1"}],
+                },
+                "policyVersion": 1,
+            }
         return responses.get(path, {"ok": True})
 
     async def proxy(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
@@ -136,6 +216,7 @@ def test_provider_catalog_uses_v1_upstream(client: TestClient, fake_client: Fake
 
     assert response.status_code == 200
     assert response.json()["data"][0]["name"] == "Oracle"
+    assert response.json()["data"][0]["id"] == "oracle"
     assert fake_client.calls[-1][1] == "/v1/providers"
 
 
@@ -146,8 +227,125 @@ def test_identity_status_exposes_only_operational_metadata(
     response = client.get("/api/v1/identity-provider")
 
     assert response.status_code == 200
-    assert response.json()["data"] == {"status": "ready"}
+    assert response.json()["data"] == {
+        "status": "ready",
+        "user_pool_ref": "dw-users",
+        "jwks_status": None,
+        "jwks_last_refresh_at": None,
+    }
     assert fake_client.calls[-1][1] == "/v1/identity-provider"
+
+
+def test_unconfigured_identity_is_explicit_not_an_upstream_error(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+) -> None:
+    original_request = fake_client.request
+
+    async def no_identity(method: str, path: str, **kwargs: Any) -> Any:
+        if path == "/v1/identity-provider":
+            return None
+        return await original_request(method, path, **kwargs)
+
+    fake_client.request = no_identity
+
+    status_response = client.get("/api/v1/identity-provider")
+    docs_response = client.get("/api/v1/connection-docs/config")
+
+    assert status_response.status_code == 200
+    assert status_response.json()["data"]["status"] == "unconfigured"
+    assert docs_response.status_code == 200
+    assert docs_response.json()["data"]["identity"]["status"] == "unconfigured"
+
+
+def test_connections_and_actions_translate_w1_runtime_contract(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+) -> None:
+    connections = client.get("/api/v1/connections")
+    actions = client.get("/api/v1/connections/oracle-prod/actions")
+
+    assert connections.json()["data"][0] == {
+        "id": "oracle-prod",
+        "name": "Oracle Production",
+        "provider": "oracle",
+        "description": "Oracle Production",
+        "status": "ready",
+        "action_count": None,
+        "updated_at": None,
+    }
+    assert actions.json()["data"][0]["read_only"] is True
+    assert actions.json()["data"][0]["risk"] == "low"
+    assert [call[1] for call in fake_client.calls] == [
+        "/v1/connections",
+        "/v1/apps",
+        "/v1/connections",
+        "/v1/apps",
+        "/v1/actions",
+    ]
+    assert fake_client.calls[-1][2]["params"] == {"service": "oracle"}
+
+
+def test_access_grants_translate_w2_runtime_contract(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+) -> None:
+    response = client.get("/api/v1/connections/oracle-prod/access")
+
+    assert response.status_code == 200
+    grant = response.json()["data"][0]
+    assert grant["connection_id"] == "oracle-prod"
+    assert grant["subject_type"] == "group"
+    assert grant["subject_id"] == "finance"
+    assert grant["subject_display_snapshot"] == "finance"
+    assert grant["role_id"] == "reader"
+    assert grant["status"] == "active"
+    assert [call[1] for call in fake_client.calls] == ["/v1/access-grants", "/v1/identity/subjects"]
+
+
+def test_grant_write_translates_to_w2_camel_case(client: TestClient, fake_client: FakeOpenConnector) -> None:
+    response = client.post(
+        "/api/v1/access-grants",
+        json={
+            "connection_id": "oracle-prod",
+            "subject_type": "group",
+            "subject_id": "finance",
+            "subject_display_snapshot": "Finance",
+            "role_id": "reader",
+            "effect": "allow",
+            "action_scope": [],
+        },
+    )
+
+    assert response.status_code == 200
+    assert fake_client.calls[-1][2]["json"] == {
+        "connectionId": "oracle-prod",
+        "subjectType": "group",
+        "subject": "finance",
+        "role": "reader",
+        "effect": "allow",
+        "customActions": [],
+    }
+    assert response.json()["data"]["role_id"] == "reader"
+
+
+def test_access_preview_uses_verified_subject_and_per_action_decisions(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+) -> None:
+    response = client.post(
+        "/api/v1/access:preview",
+        json={"connection_id": "oracle-prod", "subject_id": "alice"},
+    )
+
+    assert response.status_code == 200
+    preview = response.json()["data"]
+    assert preview["subject"]["id"] == "alice"
+    assert [action["id"] for action in preview["connections"][0]["actions"]] == ["oracle.query_rows"]
+    preview_call = next(call for call in fake_client.calls if call[1] == "/v1/access:preview")
+    assert preview_call[2]["json"]["subject"]["sub"] == "alice"
+    assert preview_call[2]["json"]["connectionId"] == "oracle-prod"
+    assert preview_call[2]["json"]["actionId"] == "oracle.query_rows"
 
 
 def test_connection_payload_recursively_removes_secret_fields(
@@ -162,7 +360,20 @@ def test_connection_payload_recursively_removes_secret_fields(
                 "items": [
                     {
                         "id": "oracle-prod",
-                        "name": "Oracle",
+                        "displayName": "Oracle",
+                        "service": "oracle",
+                        "credentials": {"password": "hidden"},
+                        "metadata": {"api_key": "hidden", "region": "cn-beijing"},
+                    }
+                ]
+            }
+        if path == "/v1/apps":
+            return {
+                "items": [
+                    {
+                        "id": "oracle-prod",
+                        "displayName": "Oracle",
+                        "service": "oracle",
                         "credentials": {"password": "hidden"},
                         "metadata": {"api_key": "hidden", "region": "cn-beijing"},
                     }
@@ -174,7 +385,7 @@ def test_connection_payload_recursively_removes_secret_fields(
     response = client.get("/api/v1/connections")
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"][0]["metadata"] == {"region": "cn-beijing"}
+    assert response.json()["data"][0]["name"] == "Oracle"
     assert "hidden" not in response.text
 
 
@@ -196,7 +407,7 @@ def test_upstream_error_details_are_not_forwarded(client: TestClient, fake_clien
 @pytest.mark.parametrize(
     ("operation", "method", "path"),
     [
-        ("health", "GET", "/v1/mcp/status"),
+        ("health", "GET", "/v1/health"),
         ("identity", "GET", "/v1/identity-provider"),
         ("tools_list", "POST", "/v1/mcp/tests/tools-list"),
         ("list_connections", "POST", "/v1/mcp/tests/read-only"),

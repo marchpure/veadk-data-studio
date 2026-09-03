@@ -34,7 +34,7 @@ console_router = APIRouter(prefix="/oc")
 
 LAUNCH_COOKIE = "dw_oc_launch"
 READ_ONLY_TESTS = {
-    "health": ("GET", "/v1/mcp/status"),
+    "health": ("GET", "/v1/health"),
     "identity": ("GET", "/v1/identity-provider"),
     "tools_list": ("POST", "/v1/mcp/tests/tools-list"),
     "list_connections": ("POST", "/v1/mcp/tests/read-only"),
@@ -94,8 +94,12 @@ def _https_url(value: Any, field_name: str) -> str:
 
 
 def _public_docs_config(config: Any, identity: Any) -> dict[str, Any]:
-    if not isinstance(config, dict) or not isinstance(identity, dict):
+    if not isinstance(config, dict):
         raise OpenConnectorError("OpenConnector returned invalid connection documentation metadata")
+    if identity is None:
+        identity = {}
+    if not isinstance(identity, dict):
+        raise OpenConnectorError("OpenConnector returned invalid identity metadata")
 
     endpoint = _https_url(config.get("endpoint"), "MCP endpoint")
     public_mcp: dict[str, Any] = {
@@ -127,11 +131,190 @@ def _public_docs_config(config: Any, identity: Any) -> dict[str, Any]:
             public_mcp[source_key] = _https_url(config[source_key], source_key)
 
     public_identity = {
-        key: identity[key]
-        for key in ("status", "issuer", "audience", "user_pool_ref", "jwks_status", "jwks_last_refresh_at")
-        if key in identity
+        "status": identity.get("status") or ("ready" if identity.get("issuer") else "unconfigured"),
+        "issuer": identity.get("issuer"),
+        "audience": [identity["audience"]] if isinstance(identity.get("audience"), str) else identity.get("audience"),
+        "user_pool_ref": identity.get("userPoolRef") or identity.get("user_pool_ref"),
+        "jwks_status": identity.get("jwksStatus") or identity.get("jwks_status"),
+        "jwks_last_refresh_at": identity.get("jwksLastRefreshAt") or identity.get("jwks_last_refresh_at"),
     }
     return {"mcp": public_mcp, "identity": public_identity}
+
+
+def _items(data: Any) -> list[dict[str, Any]]:
+    unwrapped = _unwrap(data)
+    if isinstance(unwrapped, list):
+        return [item for item in unwrapped if isinstance(item, dict)]
+    if isinstance(unwrapped, dict) and isinstance(unwrapped.get("items"), list):
+        return [item for item in unwrapped["items"] if isinstance(item, dict)]
+    return []
+
+
+def _connection_view(connection: dict[str, Any]) -> dict[str, Any]:
+    status = connection.get("status")
+    if status == "active":
+        status = "ready"
+    elif status == "disconnected":
+        status = "disabled"
+    return {
+        "id": str(connection.get("id") or ""),
+        "name": str(connection.get("displayName") or connection.get("connectionName") or connection.get("alias") or ""),
+        "provider": str(connection.get("service") or ""),
+        "description": connection.get("accountLabel"),
+        "status": status or ("ready" if connection.get("configured") else "pending"),
+        "action_count": connection.get("actionCount"),
+        "updated_at": connection.get("updatedAt"),
+    }
+
+
+def _provider_view(provider: dict[str, Any]) -> dict[str, Any]:
+    categories = provider.get("categories")
+    category = ""
+    if isinstance(categories, list) and categories:
+        first = categories[0]
+        category = str(first.get("displayName") or first.get("id") or "") if isinstance(first, dict) else str(first)
+    return {
+        "id": str(provider.get("service") or provider.get("id") or ""),
+        "name": str(provider.get("displayName") or provider.get("name") or provider.get("service") or ""),
+        "category": category or str(provider.get("category") or ""),
+        "description": str(provider.get("description") or provider.get("scenario") or ""),
+        "color": provider.get("color"),
+        "available": bool(provider.get("available", True)),
+    }
+
+
+def _connection_matches(connection: dict[str, Any], connection_id: str) -> bool:
+    return str(connection.get("id") or "") == connection_id
+
+
+def _is_read_action(action: dict[str, Any]) -> bool:
+    name = str(action.get("name") or action.get("id") or "").lower()
+    return name.startswith(
+        (
+            "get",
+            "list",
+            "read",
+            "search",
+            "find",
+            "query",
+            "describe",
+            "retrieve",
+            "fetch",
+            "lookup",
+            "export",
+            "download",
+            "count",
+            "inspect",
+            "preview",
+        )
+    )
+
+
+def _action_view(action: dict[str, Any]) -> dict[str, Any]:
+    read_only = bool(action.get("readOnly", action.get("read_only", _is_read_action(action))))
+    return {
+        "id": str(action.get("id") or ""),
+        "name": str(action.get("name") or action.get("id") or ""),
+        "description": action.get("description"),
+        "risk": str(action.get("risk") or ("low" if read_only else "high")),
+        "read_only": read_only,
+    }
+
+
+def _decision_reasons(decision: dict[str, Any]) -> list[dict[str, Any]]:
+    effect = "allow" if decision.get("allowed") else "deny"
+    return [
+        {
+            "grant_id": str(check.get("grantId") or ""),
+            "source": str(check.get("reason") or check.get("source") or check.get("outcome") or ""),
+            "effect": effect,
+        }
+        for check in decision.get("checks", [])
+        if isinstance(check, dict)
+    ]
+
+
+def _grant_view(grant: dict[str, Any], subjects: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    subject_id = str(grant.get("subject") or grant.get("subject_id") or "")
+    subject = (subjects or {}).get(subject_id)
+    revoked = grant.get("revokedAt") or grant.get("revoked_at")
+    return {
+        "id": str(grant.get("id") or ""),
+        "connection_id": str(grant.get("connectionId") or grant.get("connection_id") or ""),
+        "subject_type": str(grant.get("subjectType") or grant.get("subject_type") or "user"),
+        "subject_id": subject_id,
+        "subject_display_snapshot": str(
+            grant.get("subjectDisplaySnapshot")
+            or grant.get("subject_display_snapshot")
+            or (subject or {}).get("display_name")
+            or subject_id
+        ),
+        "role_id": str(grant.get("role") or grant.get("role_id") or "custom"),
+        "effect": str(grant.get("effect") or "allow"),
+        "action_scope": list(grant.get("customActions") or grant.get("action_scope") or []),
+        "status": "revoked" if revoked else str(grant.get("status") or "active"),
+        "updated_at": grant.get("updatedAt") or grant.get("updated_at"),
+        "updated_by": grant.get("updatedBy") or grant.get("updated_by"),
+        "version": grant.get("version"),
+    }
+
+
+def _subject_views(subjects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: dict[tuple[str, str], dict[str, Any]] = {}
+    for subject in subjects:
+        sub = str(subject.get("sub") or subject.get("id") or "")
+        if sub:
+            result[("user", sub)] = {
+                "id": sub,
+                "type": "user",
+                "display_name": str(subject.get("displayName") or subject.get("display_name") or sub),
+                "secondary_text": subject.get("email") or subject.get("userPoolRef"),
+                "_runtime_subject": subject,
+            }
+        for group in subject.get("groups") or []:
+            group_id = str(group)
+            result[("group", group_id)] = {
+                "id": group_id,
+                "type": "group",
+                "display_name": group_id,
+                "secondary_text": "Identity 用户组",
+            }
+    return list(result.values())
+
+
+def _public_subject(subject: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in subject.items() if not key.startswith("_")}
+
+
+def _grant_input(payload: GrantPayload, *, partial: bool = False) -> dict[str, Any]:
+    if partial:
+        return {
+            "role": payload.role_id,
+            "effect": payload.effect,
+            "customActions": payload.action_scope if payload.role_id == "custom" else [],
+        }
+    return {
+        "connectionId": payload.connection_id,
+        "subjectType": payload.subject_type,
+        "subject": payload.subject_id,
+        "role": payload.role_id,
+        "effect": payload.effect,
+        "customActions": payload.action_scope if payload.role_id == "custom" else [],
+    }
+
+
+def _audit_view(event: dict[str, Any]) -> dict[str, Any]:
+    decision = event.get("decision") if isinstance(event.get("decision"), dict) else {}
+    subject = event.get("subject") if isinstance(event.get("subject"), dict) else {}
+    return {
+        "id": str(event.get("id") or ""),
+        "event_type": str(decision.get("code") or ("Access allowed" if decision.get("allowed") else "Access denied")),
+        "subject_display": subject.get("displayName") or subject.get("sub"),
+        "action_name": event.get("actionId"),
+        "decision": "allow" if decision.get("allowed") else "deny",
+        "created_at": event.get("createdAt"),
+        "request_id": event.get("requestId"),
+    }
 
 
 class GrantPayload(BaseModel):
@@ -202,16 +385,15 @@ async def list_connections(
 ):
     client = get_openconnector_client()
     try:
-        return success_response(
-            data=_unwrap(
-                await client.request(
-                    "GET",
-                    "/v1/connections",
-                    params={"search": search},
-                    tenant_id=str(auth.tenant_id),
-                )
-            )
-        )
+        connections = [_connection_view(connection) for connection in await _list_apps(client, str(auth.tenant_id))]
+        if search:
+            needle = search.casefold()
+            connections = [
+                connection
+                for connection in connections
+                if needle in f"{connection['name']} {connection['provider']}".casefold()
+            ]
+        return success_response(data=connections)
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -220,9 +402,8 @@ async def list_connections(
 async def list_providers(auth: AuthContext = Depends(require_workshop_member)):
     client = get_openconnector_client()
     try:
-        return success_response(
-            data=_unwrap(await client.request("GET", "/v1/providers", tenant_id=str(auth.tenant_id)))
-        )
+        providers = _items(await client.request("GET", "/v1/providers", tenant_id=str(auth.tenant_id)))
+        return success_response(data=[_provider_view(provider) for provider in providers])
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -234,15 +415,11 @@ async def get_connection(
 ):
     client = get_openconnector_client()
     try:
-        return success_response(
-            data=_unwrap(
-                await client.request(
-                    "GET",
-                    f"/v1/connections/{connection_id}",
-                    tenant_id=str(auth.tenant_id),
-                )
-            )
-        )
+        connections = await _list_apps(client, str(auth.tenant_id))
+        connection = next((item for item in connections if _connection_matches(item, connection_id)), None)
+        if connection is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
+        return success_response(data=_connection_view(connection))
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -254,13 +431,19 @@ async def get_connection_actions(
 ):
     client = get_openconnector_client()
     try:
-        data = await client.request(
-            "GET",
-            "/v1/actions",
-            params={"connection_id": connection_id},
-            tenant_id=str(auth.tenant_id),
+        connections = await _list_apps(client, str(auth.tenant_id))
+        connection = next((item for item in connections if _connection_matches(item, connection_id)), None)
+        if connection is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
+        actions = _items(
+            await client.request(
+                "GET",
+                "/v1/actions",
+                params={"service": connection.get("service")},
+                tenant_id=str(auth.tenant_id),
+            )
         )
-        return success_response(data=_unwrap(data))
+        return success_response(data=[_action_view(action) for action in actions])
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -272,15 +455,27 @@ async def get_connection_access(
 ):
     client = get_openconnector_client()
     try:
-        grants = await client.request(
-            "GET",
-            "/v1/access-grants",
-            params={"connection_id": connection_id},
-            tenant_id=str(auth.tenant_id),
+        tenant_id = str(auth.tenant_id)
+        grants, subjects = await _access_records(client, tenant_id)
+        subject_map = {subject["id"]: subject for subject in _subject_views(subjects)}
+        return success_response(
+            data=[
+                _grant_view(grant, subject_map)
+                for grant in grants
+                if str(grant.get("connectionId") or grant.get("connection_id")) == connection_id
+            ]
         )
-        return success_response(data=_unwrap(grants))
     except OpenConnectorError as error:
         _raise_upstream(error)
+
+
+async def _list_apps(client: OpenConnectorClient, tenant_id: str) -> list[dict[str, Any]]:
+    try:
+        return _items(await client.request("GET", "/v1/connections", tenant_id=tenant_id))
+    except OpenConnectorError as error:
+        if error.status_code != status.HTTP_404_NOT_FOUND:
+            raise
+        return _items(await client.request("GET", "/v1/apps", tenant_id=tenant_id))
 
 
 @router.get("/identity/subjects")
@@ -291,15 +486,45 @@ async def search_subjects(
 ):
     client = get_openconnector_client()
     try:
-        data = await client.request(
-            "GET",
-            "/v1/identity/subjects",
-            params={"query": query, "subject_type": subject_type},
-            tenant_id=str(auth.tenant_id),
+        subjects = _subject_views(
+            _items(
+                await client.request(
+                    "GET",
+                    "/v1/identity/subjects",
+                    tenant_id=str(auth.tenant_id),
+                )
+            )
         )
-        return success_response(data=_unwrap(data))
+        needle = query.strip().casefold()
+        data = [
+            {key: value for key, value in subject.items() if not key.startswith("_")}
+            for subject in subjects
+            if (subject_type == "all" or subject["type"] == subject_type)
+            and (
+                not needle
+                or needle in str(subject["display_name"]).casefold()
+                or needle in str(subject["id"]).casefold()
+                or needle in str(subject.get("secondary_text") or "").casefold()
+            )
+        ]
+        return success_response(data=data)
     except OpenConnectorError as error:
         _raise_upstream(error)
+
+
+async def _access_records(
+    client: OpenConnectorClient,
+    tenant_id: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    grants = _items(
+        await client.request(
+            "GET",
+            "/v1/access-grants",
+            tenant_id=tenant_id,
+        )
+    )
+    subjects = _items(await client.request("GET", "/v1/identity/subjects", tenant_id=tenant_id))
+    return grants, subjects
 
 
 @router.get("/identity-provider")
@@ -308,16 +533,17 @@ async def get_identity_provider(
 ):
     client = get_openconnector_client()
     try:
-        identity = _unwrap(
-            await client.request("GET", "/v1/identity-provider", tenant_id=str(auth.tenant_id))
-        )
+        identity = _unwrap(await client.request("GET", "/v1/identity-provider", tenant_id=str(auth.tenant_id)))
+        if identity is None:
+            identity = {}
         if not isinstance(identity, dict):
             raise OpenConnectorError("OpenConnector returned invalid identity metadata")
         return success_response(
             data={
-                key: identity[key]
-                for key in ("status", "user_pool_ref", "jwks_status", "jwks_last_refresh_at")
-                if key in identity
+                "status": identity.get("status") or ("ready" if identity.get("issuer") else "unconfigured"),
+                "user_pool_ref": identity.get("userPoolRef") or identity.get("user_pool_ref"),
+                "jwks_status": identity.get("jwksStatus") or identity.get("jwks_status"),
+                "jwks_last_refresh_at": identity.get("jwksLastRefreshAt") or identity.get("jwks_last_refresh_at"),
             }
         )
     except OpenConnectorError as error:
@@ -334,10 +560,13 @@ async def create_access_grant(
         data = await client.request(
             "POST",
             "/v1/access-grants",
-            json=payload.model_dump(exclude_none=True),
+            json=_grant_input(payload),
             tenant_id=str(auth.tenant_id),
         )
-        return success_response(data=_unwrap(data), message="Access grant created")
+        created = _unwrap(data)
+        if not isinstance(created, dict):
+            raise OpenConnectorError("OpenConnector returned an invalid AccessGrant")
+        return success_response(data=_grant_view(created), message="Access grant created")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -353,10 +582,13 @@ async def update_access_grant(
         data = await client.request(
             "PATCH",
             f"/v1/access-grants/{grant_id}",
-            json=payload.model_dump(exclude_none=True),
+            json=_grant_input(payload, partial=True),
             tenant_id=str(auth.tenant_id),
         )
-        return success_response(data=_unwrap(data), message="Access grant updated")
+        updated = _unwrap(data)
+        if not isinstance(updated, dict):
+            raise OpenConnectorError("OpenConnector returned an invalid AccessGrant")
+        return success_response(data=_grant_view(updated), message="Access grant updated")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -373,7 +605,10 @@ async def revoke_access_grant(
             f"/v1/access-grants/{grant_id}:revoke",
             tenant_id=str(auth.tenant_id),
         )
-        return success_response(data=_unwrap(data), message="Access grant revoked")
+        revoked = _unwrap(data)
+        if not isinstance(revoked, dict):
+            raise OpenConnectorError("OpenConnector returned an invalid AccessGrant")
+        return success_response(data=_grant_view(revoked), message="Access grant revoked")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -385,13 +620,63 @@ async def preview_access(
 ):
     client = get_openconnector_client()
     try:
-        data = await client.request(
-            "POST",
-            "/v1/access:preview",
-            json=payload.model_dump(exclude_none=True),
-            tenant_id=str(auth.tenant_id),
+        tenant_id = str(auth.tenant_id)
+        subjects = _subject_views(_items(await client.request("GET", "/v1/identity/subjects", tenant_id=tenant_id)))
+        subject_view = next(
+            (subject for subject in subjects if subject["type"] == "user" and subject["id"] == payload.subject_id),
+            None,
         )
-        return success_response(data=_unwrap(data), message="Access preview calculated")
+        if subject_view is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Identity subject not found")
+        runtime_subject = subject_view.get("_runtime_subject")
+        connections = await _list_apps(client, tenant_id)
+        selected_connections = [
+            connection
+            for connection in connections
+            if payload.connection_id is None or str(connection.get("id")) == payload.connection_id
+        ]
+        preview_connections = []
+        for connection in selected_connections:
+            action_items = _items(
+                await client.request(
+                    "GET",
+                    "/v1/actions",
+                    params={"service": connection.get("service")},
+                    tenant_id=tenant_id,
+                )
+            )
+            allowed_actions = []
+            reasons: list[dict[str, Any]] = []
+            for action in action_items:
+                result = _unwrap(
+                    await client.request(
+                        "POST",
+                        "/v1/access:preview",
+                        json={
+                            "subject": runtime_subject,
+                            "connectionId": connection.get("id"),
+                            "actionId": action.get("id"),
+                        },
+                        tenant_id=tenant_id,
+                    )
+                )
+                decision = result.get("decision", {}) if isinstance(result, dict) else {}
+                if decision.get("allowed"):
+                    allowed_actions.append(_action_view(action))
+                reasons.extend(_decision_reasons(decision))
+            preview_connections.append(
+                {
+                    "connection_id": str(connection.get("id") or ""),
+                    "connection_name": _connection_view(connection)["name"],
+                    "actions": allowed_actions,
+                    "reasons": reasons,
+                }
+            )
+        public_subject = _public_subject(subject_view)
+        return success_response(
+            data={"subject": public_subject, "connections": preview_connections},
+            message="Access preview calculated",
+        )
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -404,13 +689,21 @@ async def get_access_audit(
 ):
     client = get_openconnector_client()
     try:
-        data = await client.request(
-            "GET",
-            "/v1/access/audit",
-            params={"connection_id": connection_id, "limit": limit},
-            tenant_id=str(auth.tenant_id),
+        data = _items(
+            await client.request(
+                "GET",
+                "/v1/access/audit",
+                params={"limit": limit},
+                tenant_id=str(auth.tenant_id),
+            )
         )
-        return success_response(data=_unwrap(data))
+        events = []
+        for event in data:
+            event_connection_id = event.get("connectionId") or event.get("connection_id")
+            if connection_id and event_connection_id != connection_id:
+                continue
+            events.append(_audit_view(event))
+        return success_response(data=events)
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -421,12 +714,8 @@ async def get_connection_docs_config(
 ):
     client = get_openconnector_client()
     try:
-        config = _unwrap(
-            await client.request("GET", "/v1/mcp/config", tenant_id=str(auth.tenant_id))
-        )
-        identity = _unwrap(
-            await client.request("GET", "/v1/identity-provider", tenant_id=str(auth.tenant_id))
-        )
+        config = _unwrap(await client.request("GET", "/v1/mcp/config", tenant_id=str(auth.tenant_id)))
+        identity = _unwrap(await client.request("GET", "/v1/identity-provider", tenant_id=str(auth.tenant_id)))
         return success_response(data=_public_docs_config(config, identity))
     except OpenConnectorError as error:
         _raise_upstream(error)
