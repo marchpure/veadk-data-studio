@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 const baseUrl = process.env.DATA_WORKSHOP_PREVIEW_URL || 'http://127.0.0.1:4173'
+const mcpEndpoint = 'https://s4j054gh1e125mqsipi2e.apigateway-cn-beijing.volceapi.com/mcp'
 const outputDir = path.resolve('artifacts/data-workshop')
 await fs.mkdir(outputDir, { recursive: true })
 
@@ -83,7 +84,7 @@ await page.getByRole('button', { name: '运行测试' }).click()
 await page.getByText('测试完成').waitFor()
 
 await page.goto(`${baseUrl}/connections/docs`)
-await page.getByText('https://mcp.data-workshop.example.com/mcp', { exact: true }).waitFor()
+await page.getByText(mcpEndpoint, { exact: true }).waitFor()
 await page.getByText('服务正常', { exact: true }).waitFor()
 await page.screenshot({ path: path.join(outputDir, 'connection-docs-1440x900.png') })
 await page.setViewportSize({ width: 1280, height: 800 })

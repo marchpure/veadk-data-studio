@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 
 app = FastAPI(title="Data Workshop OpenConnector test upstream")
+PUBLIC_ORIGIN = "https://s4j054gh1e125mqsipi2e.apigateway-cn-beijing.volceapi.com"
 
 connection = {
     "id": "oracle-prod",
@@ -201,16 +202,16 @@ async def get_audit(request: Request):
 async def get_mcp_config(request: Request):
     check_auth(request)
     return {
-        "endpoint": "https://mcp.data-workshop.example.com/mcp",
+        "endpoint": f"{PUBLIC_ORIGIN}/mcp",
         "protocol": "MCP Streamable HTTP 2025-06-18",
         "workbuddy_config": {
             "name": "Data Workshop",
             "transport": "streamable-http",
-            "url": "https://mcp.data-workshop.example.com/mcp",
+            "url": f"{PUBLIC_ORIGIN}/mcp",
             "auth": "oauth",
         },
-        "api_reference_url": "https://mcp.data-workshop.example.com/docs",
-        "openapi_url": "https://mcp.data-workshop.example.com/openapi.json",
+        "api_reference_url": f"{PUBLIC_ORIGIN}/docs",
+        "openapi_url": f"{PUBLIC_ORIGIN}/openapi.json",
         "sdk_languages": ["Python", "TypeScript"],
     }
 
