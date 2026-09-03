@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -53,6 +54,10 @@ SENSITIVE_KEYS = {
     "secret",
     "token",
 }
+CONSOLE_TEXT_TYPES = ("text/", "application/javascript", "application/json")
+CONSOLE_ROOT_PATH = re.compile(
+    r"""(?P<prefix>["'(=:,\s])/(?P<path>api|assets|docs|oauth|openapi\.json|v1)(?P<suffix>[/?"'])"""
+)
 
 
 def get_openconnector_client() -> OpenConnectorClient:
@@ -315,6 +320,19 @@ def _audit_view(event: dict[str, Any]) -> dict[str, Any]:
         "created_at": event.get("createdAt"),
         "request_id": event.get("requestId"),
     }
+
+
+def _rewrite_console_content(content: bytes, content_type: str) -> bytes:
+    if not any(content_type.lower().startswith(prefix) for prefix in CONSOLE_TEXT_TYPES):
+        return content
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return content
+    return CONSOLE_ROOT_PATH.sub(
+        lambda match: f"{match.group('prefix')}/oc/{match.group('path')}{match.group('suffix')}",
+        text,
+    ).encode()
 
 
 class GrantPayload(BaseModel):
@@ -792,4 +810,6 @@ async def proxy_openconnector_console(
             headers["location"] = client.public_proxy_location(headers["location"])
         except OpenConnectorError as error:
             _raise_upstream(error)
-    return Response(content=upstream.content, status_code=upstream.status_code, headers=headers)
+    content_type = headers.get("content-type", "")
+    content = _rewrite_console_content(upstream.content, content_type)
+    return Response(content=content, status_code=upstream.status_code, headers=headers)

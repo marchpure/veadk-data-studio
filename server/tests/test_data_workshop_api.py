@@ -184,6 +184,22 @@ def test_console_proxy_rewrites_same_upstream_redirect_and_rejects_other_hosts()
         adapter.public_proxy_location("https://attacker.example/collect")
 
 
+def test_console_proxy_rewrites_root_relative_assets_and_api_paths() -> None:
+    source = (
+        b'<script src="/assets/app.js"></script><a href="/docs">Docs</a>'
+        b'<script>fetch("/api/providers");fetch("/v1/actions");location="/oauth/start"</script>'
+    )
+
+    rewritten = api._rewrite_console_content(source, "text/html; charset=utf-8").decode()
+
+    assert 'src="/oc/assets/app.js"' in rewritten
+    assert 'href="/oc/docs"' in rewritten
+    assert 'fetch("/oc/api/providers")' in rewritten
+    assert 'fetch("/oc/v1/actions")' in rewritten
+    assert 'location="/oc/oauth/start"' in rewritten
+    assert api._rewrite_console_content(b"\x89PNG", "image/png") == b"\x89PNG"
+
+
 def test_docs_aggregates_only_non_sensitive_v1_metadata(client: TestClient, fake_client: FakeOpenConnector) -> None:
     response = client.get("/api/v1/connection-docs/config")
 
