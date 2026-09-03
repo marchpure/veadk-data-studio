@@ -198,6 +198,9 @@ importers:
       globals:
         specifier: ^16.3.0
         version: 16.4.0
+      playwright:
+        specifier: 1.58.0-alpha-2026-01-07
+        version: 1.58.0-alpha-2026-01-07
       postcss:
         specifier: '>=8.5.18'
         version: 8.5.25
@@ -1788,6 +1791,7 @@ packages:
   eslint@9.37.0:
     resolution: {integrity: sha512-XyLmROnACWqSxiGYArdef1fItQd47weqB7iwtfr9JHwRrqIXZdcFMvvEcL9xHCmL0SNsOvF0c42lWyM1U5dgig==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -1880,6 +1884,11 @@ packages:
 
   fraction.js@4.3.7:
     resolution: {integrity: sha512-ZsDfxO51wGAXREY55a7la9LScWpwv9RxIrYABrlvOFBlH/ShPnrtsXeuUIfXKKOVicNxQ+o8JTbJvjS4M89yew==}
+
+  fsevents@2.3.2:
+    resolution: {integrity: sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==}
+    engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
+    os: [darwin]
 
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
@@ -2447,6 +2456,16 @@ packages:
   pirates@4.0.7:
     resolution: {integrity: sha512-TfySrs/5nm8fQJDcBDuUng3VOUKsd7S+zqvbOTiGXHfxX4wK31ard+hoNuvkicM/2YFzlpDgABOevKSsB4G/FA==}
     engines: {node: '>= 6'}
+
+  playwright-core@1.58.0-alpha-2026-01-07:
+    resolution: {integrity: sha512-BV81BlzDg+WWhMut60z+1huVsSZF0O/6OXkwD16NXA6Mul49/yLHLJl4qHODAxAtdG/jxeXvJ87oFr3ERUCK0A==}
+    engines: {node: '>=18'}
+    hasBin: true
+
+  playwright@1.58.0-alpha-2026-01-07:
+    resolution: {integrity: sha512-ToIdvA1wM46BFcVURbbX9HCPNbzY2ugrJe2MUv2h6phkrD+hDD+vxNFkOOo+LLj5sJkiqr+Nwccay21tJj1NGw==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   pngjs@5.0.0:
     resolution: {integrity: sha512-40QW5YalBNfQo5yRYmiw7Yz6TKKVr3h6970B2YE+3fQpsWcrbj1PzJgxeJ19DRQjhMbKPIuMY8rFaXc8moolVw==}
@@ -4589,6 +4608,9 @@ snapshots:
 
   fraction.js@4.3.7: {}
 
+  fsevents@2.3.2:
+    optional: true
+
   fsevents@2.3.3:
     optional: true
 
@@ -5302,6 +5324,14 @@ snapshots:
   pify@2.3.0: {}
 
   pirates@4.0.7: {}
+
+  playwright-core@1.58.0-alpha-2026-01-07: {}
+
+  playwright@1.58.0-alpha-2026-01-07:
+    dependencies:
+      playwright-core: 1.58.0-alpha-2026-01-07
+    optionalDependencies:
+      fsevents: 2.3.2
 
   pngjs@5.0.0: {}
 

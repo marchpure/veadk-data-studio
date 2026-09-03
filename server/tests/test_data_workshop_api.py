@@ -37,7 +37,17 @@ class FakeOpenConnector:
 
     async def proxy(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         self.calls.append((method, path, kwargs))
-        return httpx.Response(200, text="<html>console</html>", headers={"content-type": "text/html"})
+        return SimpleNamespace(
+            status_code=200,
+            content=b"<html>console</html>",
+            headers=httpx.Headers(
+                {
+                    "content-type": "text/html",
+                    "content-encoding": "gzip",
+                    "set-cookie": "upstream=forbidden",
+                }
+            ),
+        )
 
 
 @pytest.fixture
@@ -176,15 +186,31 @@ def test_upstream_error_details_are_not_forwarded(client: TestClient, fake_clien
     assert "sensitive" not in response.text
 
 
-def test_read_only_tester_maps_to_fixed_allowlist(client: TestClient, fake_client: FakeOpenConnector) -> None:
+@pytest.mark.parametrize(
+    ("operation", "method", "path"),
+    [
+        ("health", "GET", "/v1/mcp/status"),
+        ("identity", "GET", "/v1/identity-provider"),
+        ("tools_list", "POST", "/v1/mcp/tests/tools-list"),
+        ("list_connections", "POST", "/v1/mcp/tests/read-only"),
+    ],
+)
+def test_read_only_tester_maps_to_fixed_allowlist(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+    operation: str,
+    method: str,
+    path: str,
+) -> None:
     response = client.post(
         "/api/v1/connection-docs/read-only-tests",
-        json={"operation": "tools_list", "arguments": {"ignored_path": "/v1/access-grants"}},
+        json={"operation": operation, "arguments": {"ignored_path": "/v1/access-grants"}},
     )
 
     assert response.status_code == 200
-    assert fake_client.calls[-1][0:2] == ("POST", "/v1/mcp/tests/tools-list")
-    assert fake_client.calls[-1][2]["json"]["operation"] == "tools_list"
+    assert fake_client.calls[-1][0:2] == (method, path)
+    if method == "POST":
+        assert fake_client.calls[-1][2]["json"]["operation"] == operation
 
 
 def test_launch_session_cookie_is_short_lived_http_only_secure_and_strict(
@@ -229,6 +255,8 @@ def test_console_proxy_uses_secure_launch_cookie_without_exposing_admin_token(
     assert fake_client.calls[-1][0:2] == ("GET", "actions")
     assert fake_client.calls[-1][2]["query"] == b"embed=studio"
     assert "test-admin-token" not in response.text
+    assert "content-encoding" not in response.headers
+    assert "set-cookie" not in response.headers
 
 
 def test_launch_session_expires(monkeypatch: pytest.MonkeyPatch) -> None:

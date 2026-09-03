@@ -417,7 +417,19 @@ async def proxy_openconnector_console(
     except OpenConnectorError as error:
         _raise_upstream(error)
 
-    excluded = {"content-length", "transfer-encoding", "connection", "set-cookie"}
+    excluded = {
+        "connection",
+        "content-encoding",
+        "content-length",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "set-cookie",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+    }
     headers = {key: value for key, value in upstream.headers.items() if key.lower() not in excluded}
     if "location" in headers:
         try:

@@ -32,7 +32,16 @@ export function ProviderMarket() {
       </div>
       {state !== 'ready' ? <AsyncState state={state} message={state === 'error' ? '无法读取连接器目录，请检查 OpenConnector。' : undefined} onRetry={load} /> : visibleProviders.length === 0 ? <AsyncState state="empty" title="没有匹配的连接器" message="尝试搜索其他名称、类型或描述。" /> : <div className="dw-provider-grid">
         {visibleProviders.map(provider => (
-          <Link className="dw-provider-card" to={`/connections/providers/${provider.id}`} key={provider.id} aria-disabled={!provider.available}>
+          <Link
+            className={`dw-provider-card ${provider.available ? '' : 'disabled'}`}
+            to={`/connections/providers/${provider.id}`}
+            key={provider.id}
+            aria-disabled={!provider.available}
+            tabIndex={provider.available ? 0 : -1}
+            onClick={event => {
+              if (!provider.available) event.preventDefault()
+            }}
+          >
             <div className="dw-provider-logo" style={{ background: provider.color || '#2f6b52' }}>{provider.name.slice(0, 1)}</div>
             <div><span>{provider.category}</span><h2>{provider.name}</h2><p>{provider.description}</p></div>
             <ArrowRight size={18} />
