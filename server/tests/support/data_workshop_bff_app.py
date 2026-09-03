@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from fastapi import FastAPI
 
 from server.data_workshop import api
@@ -6,6 +8,15 @@ from server.schemas.standard_response import success_response
 app = FastAPI(title="Data Workshop browser verification BFF")
 app.include_router(api.router, prefix="/api")
 app.include_router(api.console_router)
+test_admin = SimpleNamespace(
+    tenant_id="00000000-0000-0000-0000-000000000001",
+    user_id="00000000-0000-0000-0000-000000000001",
+    is_admin=True,
+    has_scope=lambda _: True,
+)
+app.dependency_overrides[api.require_workshop_member] = lambda: test_admin
+app.dependency_overrides[api.require_workshop_admin] = lambda: test_admin
+api._tenant = lambda: str(test_admin.tenant_id)
 
 
 @app.get("/api/app/config")

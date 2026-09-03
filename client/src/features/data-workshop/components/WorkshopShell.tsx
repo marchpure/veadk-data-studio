@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
+import { useStore } from '../../../stores/useStore'
 
 const primaryNav = [
   { label: '首页', path: '/home', icon: Home },
@@ -32,7 +33,9 @@ const connectionNav = [
 export function WorkshopShell({ children }: { children: ReactNode }) {
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const user = useStore(state => state.user)
   const inConnections = location.pathname.startsWith('/connections')
+  const userName = user?.full_name || user?.email || '当前用户'
 
   return (
     <div className="dw-app">
@@ -59,8 +62,8 @@ export function WorkshopShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <div className="dw-sidebar-footer">
-          <div className="dw-avatar">林</div>
-          <div><strong>林默</strong><span>数据平台管理员</span></div>
+          <div className="dw-avatar">{userName.slice(0, 1).toUpperCase()}</div>
+          <div><strong>{userName}</strong><span>{user?.is_superuser ? '超级管理员' : '当前工作区'}</span></div>
           <ChevronDown size={16} />
         </div>
       </aside>

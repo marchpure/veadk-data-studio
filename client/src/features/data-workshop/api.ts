@@ -9,8 +9,9 @@ import type {
   Provider,
   Subject,
 } from './types'
+import { apiFetch } from '../../services/api'
 
-const API_ROOT = '/api/data-workshop/v1'
+const API_ROOT = '/api/v1'
 
 interface Envelope<T> {
   success: boolean
@@ -31,7 +32,7 @@ export class WorkshopApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_ROOT}${path}`, {
+  const response = await apiFetch(`${API_ROOT}${path}`, {
     credentials: 'include',
     ...init,
     headers: {

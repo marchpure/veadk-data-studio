@@ -92,7 +92,7 @@ function App() {
   }
 
   if (isDataWorkshopRoute) {
-    return <DataWorkshopApp />
+    return isEnterprise ? <AuthGuard><DataWorkshopApp /></AuthGuard> : <DataWorkshopApp />
   }
 
   // Sync runtime config with backend — community Docker behaves like Mac app

@@ -3,14 +3,34 @@ from __future__ import annotations
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Cookie, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
+from server.auth.dependencies import AuthContext, get_current_auth_context
+from server.auth.scopes import Scope
+from server.auth.tenant_context import get_tenant_id
 from server.data_workshop.adapters.openconnector import OpenConnectorClient, OpenConnectorError
 from server.data_workshop.launch_sessions import launch_sessions
 from server.schemas.standard_response import success_response
 
-router = APIRouter(prefix="/data-workshop/v1")
+
+async def require_workshop_member(
+    auth: AuthContext = Depends(get_current_auth_context()),
+) -> AuthContext:
+    if not auth.has_scope(Scope.CONNECTION_READ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Connection read permission required")
+    return auth
+
+
+async def require_workshop_admin(
+    auth: AuthContext = Depends(get_current_auth_context()),
+) -> AuthContext:
+    if not auth.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+    return auth
+
+
+router = APIRouter(prefix="/v1", dependencies=[Depends(require_workshop_member)])
 console_router = APIRouter(prefix="/oc")
 
 LAUNCH_COOKIE = "dw_oc_launch"
@@ -20,22 +40,55 @@ READ_ONLY_TESTS = {
     "tools_list": ("POST", "/v1/mcp/tests/tools-list"),
     "list_connections": ("POST", "/v1/mcp/tests/read-only"),
 }
+SENSITIVE_KEYS = {
+    "access_token",
+    "admin_token",
+    "api_key",
+    "authorization",
+    "client_secret",
+    "credential",
+    "credentials",
+    "password",
+    "private_key",
+    "refresh_token",
+    "secret",
+    "token",
+}
 
 
 def get_openconnector_client() -> OpenConnectorClient:
     return OpenConnectorClient()
 
 
+def _tenant() -> str:
+    tenant_id = get_tenant_id()
+    if tenant_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tenant context required")
+    return str(tenant_id)
+
+
 def _unwrap(data: Any) -> Any:
     if isinstance(data, dict) and "data" in data and ("success" in data or "ok" in data):
-        return data["data"]
-    return data
+        data = data["data"]
+    return _remove_sensitive_fields(data)
+
+
+def _remove_sensitive_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _remove_sensitive_fields(item)
+            for key, item in value.items()
+            if key.lower().replace("-", "_") not in SENSITIVE_KEYS
+        }
+    if isinstance(value, list):
+        return [_remove_sensitive_fields(item) for item in value]
+    return value
 
 
 def _raise_upstream(error: OpenConnectorError) -> None:
     raise HTTPException(
         status_code=error.status_code,
-        detail={"code": "OPENCONNECTOR_ERROR", "message": str(error), "upstream": error.detail},
+        detail={"code": "OPENCONNECTOR_ERROR", "message": str(error), "upstream_status": error.status_code},
     )
 
 
@@ -123,14 +176,17 @@ async def bootstrap():
 
 
 @router.post("/openconnector/launch-sessions")
-async def create_launch_session(response: Response):
+async def create_launch_session(
+    response: Response,
+    auth: AuthContext = Depends(require_workshop_admin),
+):
     client = get_openconnector_client()
     if not client.configured:
         raise HTTPException(
             status_code=503,
             detail={"code": "OPENCONNECTOR_NOT_CONFIGURED", "message": "OpenConnector is not configured"},
         )
-    session_id, session = launch_sessions.create()
+    session_id, session = launch_sessions.create(str(auth.tenant_id), str(auth.user_id))
     response.set_cookie(
         key=LAUNCH_COOKIE,
         value=session_id,
@@ -151,7 +207,9 @@ async def create_launch_session(response: Response):
 async def list_connections(search: str | None = Query(default=None)):
     client = get_openconnector_client()
     try:
-        return success_response(data=_unwrap(await client.request("GET", "/v1/connections", params={"search": search})))
+        return success_response(
+            data=_unwrap(await client.request("GET", "/v1/connections", params={"search": search}, tenant_id=_tenant()))
+        )
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -160,7 +218,7 @@ async def list_connections(search: str | None = Query(default=None)):
 async def list_providers():
     client = get_openconnector_client()
     try:
-        return success_response(data=_unwrap(await client.request("GET", "/v1/providers")))
+        return success_response(data=_unwrap(await client.request("GET", "/v1/providers", tenant_id=_tenant())))
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -169,7 +227,9 @@ async def list_providers():
 async def get_connection(connection_id: str):
     client = get_openconnector_client()
     try:
-        return success_response(data=_unwrap(await client.request("GET", f"/v1/connections/{connection_id}")))
+        return success_response(
+            data=_unwrap(await client.request("GET", f"/v1/connections/{connection_id}", tenant_id=_tenant()))
+        )
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -178,17 +238,24 @@ async def get_connection(connection_id: str):
 async def get_connection_actions(connection_id: str):
     client = get_openconnector_client()
     try:
-        data = await client.request("GET", "/v1/actions", params={"connection_id": connection_id})
+        data = await client.request(
+            "GET", "/v1/actions", params={"connection_id": connection_id}, tenant_id=_tenant()
+        )
         return success_response(data=_unwrap(data))
     except OpenConnectorError as error:
         _raise_upstream(error)
 
 
 @router.get("/connections/{connection_id}/access")
-async def get_connection_access(connection_id: str):
+async def get_connection_access(
+    connection_id: str,
+    _: AuthContext = Depends(require_workshop_admin),
+):
     client = get_openconnector_client()
     try:
-        grants = await client.request("GET", "/v1/access-grants", params={"connection_id": connection_id})
+        grants = await client.request(
+            "GET", "/v1/access-grants", params={"connection_id": connection_id}, tenant_id=_tenant()
+        )
         return success_response(data=_unwrap(grants))
     except OpenConnectorError as error:
         _raise_upstream(error)
@@ -198,6 +265,7 @@ async def get_connection_access(connection_id: str):
 async def search_subjects(
     query: str = Query(default=""),
     subject_type: Literal["user", "group", "all"] = Query(default="all"),
+    _: AuthContext = Depends(require_workshop_admin),
 ):
     client = get_openconnector_client()
     try:
@@ -205,6 +273,7 @@ async def search_subjects(
             "GET",
             "/v1/identity/subjects",
             params={"query": query, "subject_type": subject_type},
+            tenant_id=_tenant(),
         )
         return success_response(data=_unwrap(data))
     except OpenConnectorError as error:
@@ -212,23 +281,33 @@ async def search_subjects(
 
 
 @router.post("/access-grants")
-async def create_access_grant(payload: GrantPayload):
+async def create_access_grant(
+    payload: GrantPayload,
+    _: AuthContext = Depends(require_workshop_admin),
+):
     client = get_openconnector_client()
     try:
-        data = await client.request("POST", "/v1/access-grants", json=payload.model_dump(exclude_none=True))
+        data = await client.request(
+            "POST", "/v1/access-grants", json=payload.model_dump(exclude_none=True), tenant_id=_tenant()
+        )
         return success_response(data=_unwrap(data), message="Access grant created")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
 
 @router.patch("/access-grants/{grant_id}")
-async def update_access_grant(grant_id: str, payload: GrantPayload):
+async def update_access_grant(
+    grant_id: str,
+    payload: GrantPayload,
+    _: AuthContext = Depends(require_workshop_admin),
+):
     client = get_openconnector_client()
     try:
         data = await client.request(
             "PATCH",
             f"/v1/access-grants/{grant_id}",
             json=payload.model_dump(exclude_none=True),
+            tenant_id=_tenant(),
         )
         return success_response(data=_unwrap(data), message="Access grant updated")
     except OpenConnectorError as error:
@@ -236,33 +315,46 @@ async def update_access_grant(grant_id: str, payload: GrantPayload):
 
 
 @router.post("/access-grants/{grant_id}:revoke")
-async def revoke_access_grant(grant_id: str):
+async def revoke_access_grant(
+    grant_id: str,
+    _: AuthContext = Depends(require_workshop_admin),
+):
     client = get_openconnector_client()
     try:
-        data = await client.request("POST", f"/v1/access-grants/{grant_id}:revoke")
+        data = await client.request("POST", f"/v1/access-grants/{grant_id}:revoke", tenant_id=_tenant())
         return success_response(data=_unwrap(data), message="Access grant revoked")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
 
 @router.post("/access:preview")
-async def preview_access(payload: PreviewPayload):
+async def preview_access(
+    payload: PreviewPayload,
+    _: AuthContext = Depends(require_workshop_admin),
+):
     client = get_openconnector_client()
     try:
-        data = await client.request("POST", "/v1/access:preview", json=payload.model_dump(exclude_none=True))
+        data = await client.request(
+            "POST", "/v1/access:preview", json=payload.model_dump(exclude_none=True), tenant_id=_tenant()
+        )
         return success_response(data=_unwrap(data), message="Access preview calculated")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
 
 @router.get("/access/audit")
-async def get_access_audit(connection_id: str | None = Query(default=None), limit: int = Query(default=50, le=100)):
+async def get_access_audit(
+    connection_id: str | None = Query(default=None),
+    limit: int = Query(default=50, le=100),
+    _: AuthContext = Depends(require_workshop_admin),
+):
     client = get_openconnector_client()
     try:
         data = await client.request(
             "GET",
             "/v1/access/audit",
             params={"connection_id": connection_id, "limit": limit},
+            tenant_id=_tenant(),
         )
         return success_response(data=_unwrap(data))
     except OpenConnectorError as error:
@@ -273,8 +365,8 @@ async def get_access_audit(connection_id: str | None = Query(default=None), limi
 async def get_connection_docs_config():
     client = get_openconnector_client()
     try:
-        config = _unwrap(await client.request("GET", "/v1/mcp/config"))
-        identity = _unwrap(await client.request("GET", "/v1/identity-provider"))
+        config = _unwrap(await client.request("GET", "/v1/mcp/config", tenant_id=_tenant()))
+        identity = _unwrap(await client.request("GET", "/v1/identity-provider", tenant_id=_tenant()))
         return success_response(data=_public_docs_config(config, identity))
     except OpenConnectorError as error:
         _raise_upstream(error)
@@ -284,7 +376,7 @@ async def get_connection_docs_config():
 async def get_connection_docs_status():
     client = get_openconnector_client()
     try:
-        return success_response(data=_unwrap(await client.request("GET", "/v1/mcp/status")))
+        return success_response(data=_unwrap(await client.request("GET", "/v1/mcp/status", tenant_id=_tenant())))
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -297,7 +389,7 @@ async def run_read_only_test(payload: ReadOnlyTestPayload):
     if method == "POST":
         body = {"operation": payload.operation, "arguments": payload.arguments}
     try:
-        result = await client.request(method, path, json=body)
+        result = await client.request(method, path, json=body, tenant_id=_tenant())
         return success_response(data=_unwrap(result), message="Read-only test completed")
     except OpenConnectorError as error:
         _raise_upstream(error)
@@ -309,7 +401,8 @@ async def proxy_openconnector_console(
     path: str,
     launch_session: str | None = Cookie(default=None, alias=LAUNCH_COOKIE),
 ):
-    if not launch_sessions.valid(launch_session):
+    session = launch_sessions.get(launch_session)
+    if session is None:
         raise HTTPException(status_code=401, detail="A valid Data Workshop launch session is required")
     client = get_openconnector_client()
     try:
@@ -319,10 +412,16 @@ async def proxy_openconnector_console(
             query=request.scope.get("query_string", b""),
             body=await request.body(),
             content_type=request.headers.get("content-type"),
+            tenant_id=session.tenant_id,
         )
     except OpenConnectorError as error:
         _raise_upstream(error)
 
     excluded = {"content-length", "transfer-encoding", "connection", "set-cookie"}
     headers = {key: value for key, value in upstream.headers.items() if key.lower() not in excluded}
+    if "location" in headers:
+        try:
+            headers["location"] = client.public_proxy_location(headers["location"])
+        except OpenConnectorError as error:
+            _raise_upstream(error)
     return Response(content=upstream.content, status_code=upstream.status_code, headers=headers)

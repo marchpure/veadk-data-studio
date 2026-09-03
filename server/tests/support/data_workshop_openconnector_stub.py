@@ -51,6 +51,8 @@ providers = [
 def check_auth(request: Request) -> None:
     if request.headers.get("authorization") != "Bearer test-admin-token":
         raise HTTPException(status_code=401, detail="admin authentication required")
+    if request.headers.get("x-tenant-id") != "00000000-0000-0000-0000-000000000001":
+        raise HTTPException(status_code=403, detail="tenant context required")
 
 
 @app.get("/v1/connections")

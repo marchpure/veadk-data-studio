@@ -8,6 +8,8 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class LaunchSession:
     expires_at: int
+    tenant_id: str
+    user_id: str
 
 
 class LaunchSessionStore:
@@ -15,21 +17,25 @@ class LaunchSessionStore:
         self.ttl_seconds = ttl_seconds
         self._sessions: dict[str, LaunchSession] = {}
 
-    def create(self) -> tuple[str, LaunchSession]:
+    def create(self, tenant_id: str, user_id: str) -> tuple[str, LaunchSession]:
         self._prune()
         session_id = secrets.token_urlsafe(32)
-        session = LaunchSession(expires_at=int(time.time()) + self.ttl_seconds)
+        session = LaunchSession(
+            expires_at=int(time.time()) + self.ttl_seconds,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
         self._sessions[session_id] = session
         return session_id, session
 
-    def valid(self, session_id: str | None) -> bool:
+    def get(self, session_id: str | None) -> LaunchSession | None:
         if not session_id:
-            return False
+            return None
         session = self._sessions.get(session_id)
         if not session or session.expires_at <= int(time.time()):
             self._sessions.pop(session_id, None)
-            return False
-        return True
+            return None
+        return session
 
     def _prune(self) -> None:
         now = int(time.time())

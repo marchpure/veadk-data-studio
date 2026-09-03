@@ -14,6 +14,7 @@ page.on('console', message => {
 })
 
 await page.goto(`${baseUrl}/connections/providers/market`)
+await page.getByText('当前用户', { exact: true }).waitFor()
 await page.getByRole('link', { name: /Oracle/ }).click()
 await page.getByRole('link', { name: '访问权限' }).first().click()
 await page.getByRole('button', { name: '新增授权' }).click()
@@ -62,6 +63,9 @@ await page.goBack()
 await page.goForward()
 await page.reload()
 await page.getByRole('heading', { name: '使用连接能力' }).waitFor()
+await page.goto(`${baseUrl}/connections/providers/new/oracle`)
+await page.getByRole('heading', { name: '新建 Oracle 连接' }).waitFor()
+await page.frameLocator('iframe[title="OpenConnector 新建 Oracle 连接"]').getByText('"console":"connections/new"').waitFor()
 
 if (consoleErrors.length) {
   throw new Error(`Browser console errors:\n${consoleErrors.join('\n')}`)

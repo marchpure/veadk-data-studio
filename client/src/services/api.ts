@@ -1314,7 +1314,7 @@ async function handleTokenRefresh(): Promise<boolean> {
   return refreshPromise
 }
 
-const apiFetch = async (url: string, init?: RequestInit): Promise<Response> => {
+export const apiFetch = async (url: string, init?: RequestInit): Promise<Response> => {
   let finalUrl = url;
 
   if (isTauriApp() && finalUrl.startsWith('/')) {

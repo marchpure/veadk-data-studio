@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -51,7 +52,20 @@ def client() -> TestClient:
     app = FastAPI()
     app.include_router(api.router, prefix="/api")
     app.include_router(api.console_router)
-    return TestClient(app)
+    admin = SimpleNamespace(
+        tenant_id="tenant-a",
+        user_id="user-admin",
+        is_admin=True,
+        has_scope=lambda _: True,
+    )
+    app.dependency_overrides[api.require_workshop_member] = lambda: admin
+    app.dependency_overrides[api.require_workshop_admin] = lambda: admin
+    original_tenant = api._tenant
+    api._tenant = lambda: "tenant-a"
+    try:
+        yield TestClient(app)
+    finally:
+        api._tenant = original_tenant
 
 
 def test_adapter_only_accepts_versioned_control_plane_paths() -> None:
@@ -60,8 +74,32 @@ def test_adapter_only_accepts_versioned_control_plane_paths() -> None:
         adapter._url("/api/connections")
 
 
+@pytest.mark.asyncio
+async def test_console_proxy_rejects_absolute_url_path() -> None:
+    adapter = OpenConnectorClient(base_url="https://connector.example.com", admin_token="secret")
+
+    with pytest.raises(OpenConnectorError, match="Invalid"):
+        await adapter.proxy(
+            "GET",
+            "https://attacker.example/collect",
+            query=b"",
+            body=b"",
+            content_type=None,
+            tenant_id="tenant-a",
+        )
+
+
+def test_console_proxy_rewrites_same_upstream_redirect_and_rejects_other_hosts() -> None:
+    adapter = OpenConnectorClient(base_url="https://connector.example.com", admin_token="secret")
+
+    assert adapter.public_proxy_location("/login?next=%2Factions") == "/oc/login?next=%2Factions"
+    assert adapter.public_proxy_location("https://connector.example.com/login") == "/oc/login"
+    with pytest.raises(OpenConnectorError, match="unsafe redirect"):
+        adapter.public_proxy_location("https://attacker.example/collect")
+
+
 def test_docs_aggregates_only_non_sensitive_v1_metadata(client: TestClient, fake_client: FakeOpenConnector) -> None:
-    response = client.get("/api/data-workshop/v1/connection-docs/config")
+    response = client.get("/api/v1/connection-docs/config")
 
     assert response.status_code == 200
     assert response.json()["data"]["mcp"]["endpoint"] == "https://connector.example.com/mcp"
@@ -69,6 +107,7 @@ def test_docs_aggregates_only_non_sensitive_v1_metadata(client: TestClient, fake
     assert "secret" not in response.text.lower()
     assert "token" not in response.text.lower()
     assert response.json()["data"]["mcp"]["workbuddy_config"]["auth"] == "oauth"
+    assert all(call[2]["tenant_id"] == "tenant-a" for call in fake_client.calls)
 
 
 def test_docs_rejects_non_https_endpoint(client: TestClient, fake_client: FakeOpenConnector) -> None:
@@ -80,23 +119,66 @@ def test_docs_rejects_non_https_endpoint(client: TestClient, fake_client: FakeOp
         return await original_request(method, path, **kwargs)
 
     fake_client.request = insecure_request
-    response = client.get("/api/data-workshop/v1/connection-docs/config")
+    response = client.get("/api/v1/connection-docs/config")
 
     assert response.status_code == 502
     assert "HTTPS" in response.json()["detail"]["message"]
 
 
 def test_provider_catalog_uses_v1_upstream(client: TestClient, fake_client: FakeOpenConnector) -> None:
-    response = client.get("/api/data-workshop/v1/providers")
+    response = client.get("/api/v1/providers")
 
     assert response.status_code == 200
     assert response.json()["data"][0]["name"] == "Oracle"
     assert fake_client.calls[-1][1] == "/v1/providers"
 
 
+def test_connection_payload_recursively_removes_secret_fields(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+) -> None:
+    original_request = fake_client.request
+
+    async def response_with_secrets(method: str, path: str, **kwargs: Any) -> Any:
+        if path == "/v1/connections":
+            return {
+                "items": [
+                    {
+                        "id": "oracle-prod",
+                        "name": "Oracle",
+                        "credentials": {"password": "hidden"},
+                        "metadata": {"api_key": "hidden", "region": "cn-beijing"},
+                    }
+                ]
+            }
+        return await original_request(method, path, **kwargs)
+
+    fake_client.request = response_with_secrets
+    response = client.get("/api/v1/connections")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["items"][0]["metadata"] == {"region": "cn-beijing"}
+    assert "hidden" not in response.text
+
+
+def test_upstream_error_details_are_not_forwarded(client: TestClient, fake_client: FakeOpenConnector) -> None:
+    async def rejected(*_: Any, **__: Any) -> Any:
+        raise OpenConnectorError(
+            "OpenConnector rejected the request",
+            status_code=403,
+            detail={"authorization": "Bearer sensitive", "message": "token=sensitive"},
+        )
+
+    fake_client.request = rejected
+    response = client.get("/api/v1/connections")
+
+    assert response.status_code == 403
+    assert "sensitive" not in response.text
+
+
 def test_read_only_tester_maps_to_fixed_allowlist(client: TestClient, fake_client: FakeOpenConnector) -> None:
     response = client.post(
-        "/api/data-workshop/v1/connection-docs/read-only-tests",
+        "/api/v1/connection-docs/read-only-tests",
         json={"operation": "tools_list", "arguments": {"ignored_path": "/v1/access-grants"}},
     )
 
@@ -109,7 +191,7 @@ def test_launch_session_cookie_is_short_lived_http_only_secure_and_strict(
     client: TestClient,
     fake_client: FakeOpenConnector,
 ) -> None:
-    response = client.post("/api/data-workshop/v1/openconnector/launch-sessions")
+    response = client.post("/api/v1/openconnector/launch-sessions")
 
     assert response.status_code == 200
     cookie = response.headers["set-cookie"]
@@ -138,7 +220,7 @@ def test_console_proxy_uses_secure_launch_cookie_without_exposing_admin_token(
     app.include_router(api.console_router)
     secure_client = TestClient(app, base_url="https://testserver")
 
-    launch = secure_client.post("/api/data-workshop/v1/openconnector/launch-sessions")
+    launch = secure_client.post("/api/v1/openconnector/launch-sessions")
     response = secure_client.get("/oc/actions?embed=studio")
 
     assert launch.status_code == 200
@@ -153,11 +235,11 @@ def test_launch_session_expires(monkeypatch: pytest.MonkeyPatch) -> None:
     now = 1_000
     monkeypatch.setattr("server.data_workshop.launch_sessions.time.time", lambda: now)
     store = LaunchSessionStore(ttl_seconds=5)
-    session_id, _ = store.create()
-    assert store.valid(session_id)
+    session_id, session = store.create("tenant-a", "user-admin")
+    assert store.get(session_id) == session
 
     now = 1_006
-    assert not store.valid(session_id)
+    assert store.get(session_id) is None
 
 
 def test_unconfigured_upstream_returns_recoverable_503(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -168,7 +250,40 @@ def test_unconfigured_upstream_returns_recoverable_503(client: TestClient, monke
             raise OpenConnectorError("OpenConnector is not configured", status_code=503)
 
     monkeypatch.setattr(api, "get_openconnector_client", Unconfigured)
-    response = client.get("/api/data-workshop/v1/connections")
+    response = client.get("/api/v1/connections")
 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "OPENCONNECTOR_ERROR"
+
+
+def test_admin_operations_reject_non_admin(fake_client: FakeOpenConnector, monkeypatch: pytest.MonkeyPatch) -> None:
+    app = FastAPI()
+    app.include_router(api.router, prefix="/api")
+    member = SimpleNamespace(
+        tenant_id="tenant-a",
+        user_id="user-member",
+        is_admin=False,
+        has_scope=lambda _: True,
+    )
+    app.dependency_overrides[api.require_workshop_member] = lambda: member
+    app.dependency_overrides[api.get_current_auth_context()] = lambda: member
+    monkeypatch.setattr(api, "_tenant", lambda: "tenant-a")
+    member_client = TestClient(app)
+
+    launch = member_client.post("/api/v1/openconnector/launch-sessions")
+    create = member_client.post(
+        "/api/v1/access-grants",
+        json={
+            "connection_id": "oracle-prod",
+            "subject_type": "group",
+            "subject_id": "finance",
+            "subject_display_snapshot": "Finance",
+            "role_id": "reader",
+        },
+    )
+    access = member_client.get("/api/v1/connections/oracle-prod/access")
+
+    assert launch.status_code == 403
+    assert create.status_code == 403
+    assert access.status_code == 403
+    assert fake_client.calls == []

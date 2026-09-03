@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -36,6 +36,20 @@ class OpenConnectorClient:
             raise OpenConnectorError("OpenConnector is not configured", status_code=503)
         return urljoin(f"{self.base_url}/", path.lstrip("/"))
 
+    def public_proxy_location(self, location: str) -> str:
+        parsed_location = urlparse(location)
+        if parsed_location.netloc:
+            parsed_base = urlparse(self.base_url)
+            if (parsed_location.scheme, parsed_location.netloc) != (parsed_base.scheme, parsed_base.netloc):
+                raise OpenConnectorError("OpenConnector Console returned an unsafe redirect", status_code=502)
+            path = parsed_location.path
+            query = parsed_location.query
+        else:
+            path = parsed_location.path
+            query = parsed_location.query
+        public_location = f"/oc/{path.lstrip('/')}"
+        return f"{public_location}?{query}" if query else public_location
+
     async def request(
         self,
         method: str,
@@ -43,6 +57,7 @@ class OpenConnectorClient:
         *,
         params: dict[str, Any] | None = None,
         json: Any = None,
+        tenant_id: str,
     ) -> Any:
         if not self.admin_token:
             raise OpenConnectorError("OpenConnector is not configured", status_code=503)
@@ -51,6 +66,7 @@ class OpenConnectorClient:
             "Authorization": f"Bearer {self.admin_token}",
             "Accept": "application/json",
         }
+        headers["X-Tenant-ID"] = tenant_id
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 response = await client.request(method, self._url(path), params=params, json=json, headers=headers)
@@ -83,16 +99,21 @@ class OpenConnectorClient:
         query: bytes,
         body: bytes,
         content_type: str | None,
+        tenant_id: str,
     ) -> httpx.Response:
         if not self.configured:
             raise OpenConnectorError("OpenConnector is not configured", status_code=503)
 
-        url = urljoin(f"{self.base_url}/", path.lstrip("/"))
+        safe_path = path.lstrip("/")
+        if "://" in safe_path:
+            raise OpenConnectorError("Invalid OpenConnector Console path", status_code=400)
+        url = f"{self.base_url}/{safe_path}"
         if query:
             url = f"{url}?{query.decode('ascii')}"
         headers = {
             "Authorization": f"Bearer {self.admin_token}",
             "Accept": "text/html,application/xhtml+xml,application/json",
+            "X-Tenant-ID": tenant_id,
         }
         if content_type:
             headers["Content-Type"] = content_type
