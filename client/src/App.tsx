@@ -29,8 +29,10 @@ import { useAppConfig } from './hooks/useAppConfig'
 import { useStore } from './stores/useStore'
 import './App.css'
 import 'react-toastify/dist/ReactToastify.css'
+import { DataWorkshopApp } from './features/data-workshop/DataWorkshopApp'
 
 function App() {
+  const isDataWorkshopRoute = /^\/(home|connections|kb|skill|sessions|mcp)(?:\/|$)/.test(window.location.pathname)
   const { available, update, downloading, installUpdate, dismissUpdate } = useAppUpdater()
   const loadPreferencesFromBackend = useStore(state => state.loadPreferencesFromBackend)
   const initAuth = useStore(state => state.initAuth)
@@ -87,6 +89,10 @@ function App() {
 
   if (isConfigLoading) {
     return null
+  }
+
+  if (isDataWorkshopRoute) {
+    return <DataWorkshopApp />
   }
 
   // Sync runtime config with backend — community Docker behaves like Mac app

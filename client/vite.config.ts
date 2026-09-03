@@ -30,6 +30,11 @@ export default defineConfig(() => {
           target: apiTarget,
           changeOrigin: true,
           secure: false,
+        },
+        '/oc': {
+          target: apiTarget,
+          changeOrigin: true,
+          secure: false,
         }
       }
     }

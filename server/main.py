@@ -45,6 +45,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from server.auth.error_messages import AUTH_ERROR_MESSAGES, get_auth_error_message
 from server.auth.tenant_context import TenantContextMiddleware
 from server.collaboration.feishu.transport import feishu_ws_manager
+from server.data_workshop import api as data_workshop_api
 from server.db.session import ensure_database_encoding, ensure_database_schema
 from server.routers import analysis_artifacts as analysis_artifacts_router
 from server.routers import app_config as app_config_router
@@ -628,6 +629,11 @@ async def redirect_mcp_no_slash():
 
 app.mount("/api/mcp", mcp_app)
 
+
+@app.post("/mcp", include_in_schema=False)
+async def redirect_root_mcp():
+    return RedirectResponse(url="/api/mcp/", status_code=307)
+
 if not is_self_hosted():
     app.include_router(waitlist_router.router, prefix="/api", tags=["waitlist"])
 
@@ -653,6 +659,8 @@ app.include_router(scopes_router.router, prefix="/api", tags=["scopes"])
 app.include_router(cache_router.router, prefix="/api", tags=["cache"])
 
 app.include_router(schedules_router.router, prefix="/api", tags=["schedules"])
+app.include_router(data_workshop_api.router, prefix="/api", tags=["data-workshop"])
+app.include_router(data_workshop_api.console_router, tags=["openconnector-console"])
 
 
 @app.get("/health")
