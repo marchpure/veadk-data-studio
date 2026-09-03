@@ -9,11 +9,34 @@ await fs.mkdir(outputDir, { recursive: true })
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const consoleErrors = []
+const browserRequests = []
 page.on('console', message => {
   if (message.type() === 'error') consoleErrors.push(message.text())
 })
+page.on('request', request => {
+  browserRequests.push({ url: request.url(), authorization: request.headers().authorization || '' })
+})
 
+await page.goto(baseUrl)
+await page.waitForURL('**/home')
+for (const step of ['准备数据', '配置访问权限', '查看接入文档', '生成 Skill']) {
+  await page.getByText(step, { exact: true }).waitFor()
+}
+await page.getByRole('navigation', { name: '一级导航' }).getByRole('link').allTextContents().then(labels => {
+  const expected = ['首页', '连接', '知识库', 'Skill', '最近会话']
+  if (JSON.stringify(labels) !== JSON.stringify(expected)) {
+    throw new Error(`Unexpected primary navigation: ${JSON.stringify(labels)}`)
+  }
+})
 await page.goto(`${baseUrl}/connections/providers/market`)
+const connectionNavigation = page.getByRole('navigation', { name: '连接二级导航' })
+await connectionNavigation.waitFor()
+await connectionNavigation.getByRole('link').allTextContents().then(labels => {
+  const expected = ['总览', '连接器', 'Actions', 'Trace', '访问权限', '文档']
+  if (JSON.stringify(labels) !== JSON.stringify(expected)) {
+    throw new Error(`Unexpected connection navigation: ${JSON.stringify(labels)}`)
+  }
+})
 await page.getByText('当前用户', { exact: true }).waitFor()
 await page.getByRole('link', { name: /Oracle/ }).click()
 await page.getByRole('link', { name: '访问权限' }).first().click()
@@ -49,7 +72,9 @@ const consoleFrame = page.frameLocator('iframe[title="OpenConnector Actions"]')
 await consoleFrame.getByText('"console":"actions"').waitFor()
 await page.getByRole('link', { name: '文档', exact: true }).click()
 await page.getByRole('tab', { name: 'MCP' }).click()
-await page.getByText('list_connections', { exact: true }).first().waitFor()
+for (const tool of ['list_apps', 'list_connections', 'search_actions', 'get_action_guide', 'execute_action']) {
+  await page.getByText(tool, { exact: true }).first().waitFor()
+}
 await page.getByRole('tab', { name: 'HTTP API' }).click()
 await page.getByText('版本化 HTTP API').waitFor()
 await page.getByRole('tab', { name: 'SDK' }).click()
@@ -84,6 +109,14 @@ await page.frameLocator('iframe[title="OpenConnector 新建 Oracle 连接"]').ge
 
 if (consoleErrors.length) {
   throw new Error(`Browser console errors:\n${consoleErrors.join('\n')}`)
+}
+const storage = await page.evaluate(() => ({
+  local: { ...localStorage },
+  session: { ...sessionStorage },
+}))
+const browserEvidence = JSON.stringify({ browserRequests, storage })
+if (browserEvidence.includes('test-admin-token') || browserEvidence.includes('OPENCONNECTOR_ADMIN_TOKEN')) {
+  throw new Error('OpenConnector admin credential leaked into browser-visible state')
 }
 console.log(JSON.stringify({ ok: true, preview_url: baseUrl, screenshots: outputDir }, null, 2))
 await browser.close()

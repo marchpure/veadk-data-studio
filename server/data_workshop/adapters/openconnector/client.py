@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse
 
 import httpx
 
@@ -109,10 +109,19 @@ class OpenConnectorClient:
             raise OpenConnectorError("Invalid OpenConnector Console path", status_code=400)
         url = f"{self.base_url}/{safe_path}"
         if query:
-            url = f"{url}?{query.decode('ascii')}"
+            safe_query = urlencode(
+                [
+                    (key, value)
+                    for key, value in parse_qsl(query.decode("ascii"), keep_blank_values=True)
+                    if key.lower().replace("-", "_") not in {"access_token", "admin_token", "api_key", "token"}
+                ]
+            )
+            if safe_query:
+                url = f"{url}?{safe_query}"
         headers = {
             "Authorization": f"Bearer {self.admin_token}",
             "Accept": "text/html,application/xhtml+xml,application/json",
+            "X-Forwarded-Prefix": "/oc",
             "X-Tenant-ID": tenant_id,
         }
         if content_type:

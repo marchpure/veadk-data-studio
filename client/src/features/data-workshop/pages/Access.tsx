@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { WorkshopApiError, workshopApi } from '../api'
 import { AsyncState } from '../components/AsyncState'
-import type { AccessGrant, AccessPreview, Action, AuditEvent, Connection, LoadState, Subject } from '../types'
+import type { AccessGrant, AccessPreview, Action, AuditEvent, Connection, IdentityStatus, LoadState, Subject } from '../types'
 
 type Role = AccessGrant['role_id']
 
@@ -85,10 +85,6 @@ function GrantEditor({ connection, actions, editing, onClose, onSaved }: GrantEd
     if (!selected) return
     setSaving(true)
     setError('')
-    const actionScope =
-      role === 'custom'
-        ? selectedActions
-        : actions.filter(action => role === 'operator' || action.read_only).map(action => action.id)
     const payload = {
       connection_id: connection.id,
       subject_type: selected.type,
@@ -96,7 +92,7 @@ function GrantEditor({ connection, actions, editing, onClose, onSaved }: GrantEd
       subject_display_snapshot: selected.display_name,
       role_id: role,
       effect: 'allow' as const,
-      action_scope: actionScope,
+      action_scope: role === 'custom' ? selectedActions : [],
       version: editing?.version,
     }
     try {
@@ -182,10 +178,13 @@ function GrantEditor({ connection, actions, editing, onClose, onSaved }: GrantEd
 function PreviewPanel({ connectionId, onClose }: { connectionId: string; onClose: () => void }) {
   const [query, setQuery] = useState('')
   const [subjects, setSubjects] = useState<Subject[]>([])
+  const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null)
   const [preview, setPreview] = useState<AccessPreview | null>(null)
   const [state, setState] = useState<LoadState>('empty')
   const find = async () => {
     setState('loading')
+    setPreview(null)
+    setSelectedSubject(null)
     try {
       const result = await workshopApi.searchSubjects(query, 'user')
       setSubjects(result)
@@ -194,6 +193,7 @@ function PreviewPanel({ connectionId, onClose }: { connectionId: string; onClose
   }
   const run = async (subject: Subject) => {
     setState('loading')
+    setSelectedSubject(subject)
     try { setPreview(await workshopApi.previewAccess(subject.id, connectionId)); setState('ready') }
     catch { setState('error') }
   }
@@ -204,7 +204,7 @@ function PreviewPanel({ connectionId, onClose }: { connectionId: string; onClose
       {!preview && state === 'ready' && <div className="dw-subject-list">{subjects.map(subject => <button key={subject.id} onClick={() => void run(subject)}><span className="dw-avatar small">{subject.display_name.slice(0, 1)}</span><span><strong>{subject.display_name}</strong><small>{subject.secondary_text}</small></span><Eye size={16} /></button>)}</div>}
       {preview ? <div className="dw-preview-result"><div className="dw-preview-user"><span className="dw-avatar">{preview.subject.display_name.slice(0, 1)}</span><span><strong>{preview.subject.display_name}</strong><small>最终 Actions 由直接授权、用户组授权和显式拒绝共同计算</small></span></div>
         {preview.connections.map(item => <section key={item.connection_id}><h3>{item.connection_name}<span>{item.actions.length} Actions</span></h3><div className="dw-chip-list">{item.actions.map(action => <span key={action.id}>{action.name}</span>)}</div><div className="dw-reasons">{item.reasons.map(reason => <p key={`${reason.grant_id}-${reason.source}`}><Check size={14} />{reason.effect === 'allow' ? '允许' : '拒绝'} · {reason.source}</p>)}</div></section>)}
-      </div> : state !== 'ready' && <AsyncState state={state === 'loading' ? 'loading' : state === 'error' ? 'error' : 'empty'} message={state === 'empty' ? '搜索用户后查看其最终可执行 Actions。' : undefined} onRetry={find} />}
+      </div> : state !== 'ready' && <AsyncState state={state === 'loading' ? 'loading' : state === 'error' ? 'error' : 'empty'} message={state === 'empty' ? '搜索用户后查看其最终可执行 Actions。' : state === 'error' ? '权限计算失败，现有授权未改变。' : undefined} onRetry={state === 'error' && selectedSubject ? () => void run(selectedSubject) : find} />}
     </div>
   </aside></div>
 }
@@ -224,25 +224,35 @@ export function ConnectionAccess() {
   const [page, setPage] = useState(1)
   const [notice, setNotice] = useState('')
   const [audit, setAudit] = useState<AuditEvent[]>([])
+  const [identity, setIdentity] = useState<IdentityStatus | null>(null)
+  const [identityUnavailable, setIdentityUnavailable] = useState(false)
   const pageSize = 10
 
   const activeId = connectionId || connections[0]?.id
   const load = useCallback(async () => {
     setState('loading')
     setNotice('')
+    setIdentityUnavailable(false)
     try {
       const list = await workshopApi.listConnections()
       setConnections(list)
       const selectedConnection = activeId ? list.find(item => item.id === activeId) : list[0]
       if (!selectedConnection) { setState('empty'); return }
       setConnection(selectedConnection)
-      const [grantItems, actionItems] = await Promise.all([
+      const [grantItems, actionItems, auditItems] = await Promise.all([
         workshopApi.getGrants(selectedConnection.id),
         workshopApi.getActions(selectedConnection.id),
+        workshopApi.getAudit(selectedConnection.id),
       ])
       setGrants(grantItems)
       setActions(actionItems)
-      setAudit(await workshopApi.getAudit(selectedConnection.id))
+      setAudit(auditItems)
+      try {
+        setIdentity(await workshopApi.getIdentityStatus())
+      } catch {
+        setIdentity(null)
+        setIdentityUnavailable(true)
+      }
       setState('ready')
     } catch (error) {
       setState('error')
@@ -254,6 +264,7 @@ export function ConnectionAccess() {
   const filtered = useMemo(() => grants.filter(grant => grant.subject_display_snapshot.toLowerCase().includes(filter.toLowerCase())), [filter, grants])
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
   const visibleGrants = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const identityReady = identity?.status === 'ready' && !identityUnavailable
   useEffect(() => {
     setPage(1)
   }, [filter, activeId])
@@ -266,12 +277,13 @@ export function ConnectionAccess() {
   if (state !== 'ready' || !connection) return <div className="dw-page"><div className="dw-page-heading"><span className="dw-eyebrow">连接</span><h1>访问权限</h1></div><AsyncState state={state === 'ready' ? 'empty' : state} message={notice || '创建连接后即可配置用户和用户组权限。'} onRetry={load} /></div>
 
   return <div className="dw-page">
-    <div className="dw-page-heading dw-heading-row"><div><span className="dw-eyebrow">{connection.name}</span><h1>访问权限</h1><p>为用户或用户组授予连接角色，并预览最终 Actions。</p></div><div className="dw-button-row"><button className="dw-button dw-button-secondary" onClick={() => setPreviewOpen(true)}><Eye size={16} />权限预览</button><button className="dw-button dw-button-primary" onClick={() => setEditor('new')}><Plus size={16} />新增授权</button></div></div>
+    <div className="dw-page-heading dw-heading-row"><div><span className="dw-eyebrow">{connection.name}</span><h1>访问权限</h1><p>为用户或用户组授予连接角色，并预览最终 Actions。</p></div><div className="dw-button-row"><button className="dw-button dw-button-secondary" disabled={!identityReady} onClick={() => setPreviewOpen(true)}><Eye size={16} />权限预览</button><button className="dw-button dw-button-primary" disabled={!identityReady} onClick={() => setEditor('new')}><Plus size={16} />新增授权</button></div></div>
+    {!identityReady && <div className="dw-identity-warning" role="alert"><AlertTriangle size={18} /><div><strong>{identityUnavailable ? 'Identity 服务不可用' : 'Identity 尚未配置'}</strong><span>{identityUnavailable ? '现有授权仍可查看。恢复 UserPool 服务后重试。' : '请先在 OpenConnector 配置 Agent Identity UserPool，再新增或预览授权。'}</span></div><button className="dw-button dw-button-secondary" onClick={() => void load()}>重试</button></div>}
     <div className="dw-access-toolbar"><label className="dw-search"><Search size={17} /><input value={filter} onChange={event => setFilter(event.target.value)} placeholder="搜索已授权用户或用户组" /></label><span>{grants.filter(g => g.status === 'active').length} 条有效授权</span></div>
     {notice && <div className="dw-notice"><AlertTriangle size={16} />{notice}<button onClick={() => setNotice('')}><X size={14} /></button></div>}
     {!filtered.length ? <AsyncState state="empty" title="还没有访问授权" message="连接默认私有。新增授权后，用户才会在 discovery 中看到允许的 Actions。" /> :
-      <div className="dw-table-wrap"><table className="dw-table"><thead><tr><th>主体</th><th>类型</th><th>角色</th><th>Actions</th><th>状态</th><th>更新</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>
-        {visibleGrants.map(grant => <tr key={grant.id}><td><strong>{grant.subject_display_snapshot}</strong><small>{grant.subject_id}</small></td><td>{grant.subject_type === 'group' ? '用户组' : '用户'}</td><td>{roleLabels[grant.role_id]}</td><td>{grant.action_scope.length}</td><td><span className={`dw-status ${grant.status}`}>{grant.status === 'active' ? '有效' : grant.status === 'conflict' ? '冲突' : '已撤销'}</span></td><td>{grant.updated_at || '-'}<small>{grant.updated_by || ''}</small></td><td><div className="dw-row-actions"><button title="编辑授权" onClick={() => setEditor(grant)}><Pencil size={15} /></button><button title="撤销授权" onClick={() => void revoke(grant)}><Trash2 size={15} /></button></div></td></tr>)}
+      <div className="dw-table-wrap"><table className="dw-table"><thead><tr><th>主体</th><th>类型</th><th>角色</th><th>Actions</th><th>授权来源</th><th>状态</th><th>更新</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>
+        {visibleGrants.map(grant => <tr key={grant.id}><td><strong>{grant.subject_display_snapshot}</strong><small>{grant.subject_id}</small></td><td>{grant.subject_type === 'group' ? '用户组' : '用户'}</td><td>{roleLabels[grant.role_id]}</td><td>{grant.action_scope.length || (grant.role_id === 'reader' ? '只读集合' : grant.role_id === 'operator' ? '操作员集合' : 0)}</td><td>{grant.subject_type === 'group' ? '用户组授权' : '直接授权'}</td><td><span className={`dw-status ${grant.status}`}>{grant.status === 'active' ? '有效' : grant.status === 'conflict' ? '冲突' : '已撤销'}</span></td><td>{grant.updated_at || '-'}<small>{grant.updated_by || ''}</small></td><td><div className="dw-row-actions"><button title="编辑授权" onClick={() => setEditor(grant)}><Pencil size={15} /></button><button title="撤销授权" onClick={() => void revoke(grant)}><Trash2 size={15} /></button></div></td></tr>)}
       </tbody></table>{pageCount > 1 && <div className="dw-pagination"><span>第 {page} / {pageCount} 页</span><div><button className="dw-button dw-button-secondary" disabled={page === 1} onClick={() => setPage(current => current - 1)}>上一页</button><button className="dw-button dw-button-secondary" disabled={page === pageCount} onClick={() => setPage(current => current + 1)}>下一页</button></div></div>}</div>}
     <section className="dw-audit-section"><div className="dw-section-heading"><div><h2>访问与调用审计</h2><p>AccessGrant 变更与 MCP allow/deny 判定。</p></div><a href="/connections/trace">前往 Trace <ChevronRight size={16} /></a></div>
       {audit.length ? <div className="dw-audit-events">{audit.slice(0, 5).map(event => <div key={event.id}><Shield size={15} /><span><strong>{event.event_type}</strong><small>{event.subject_display || event.action_name || event.request_id}</small></span><span className={`dw-status ${event.decision === 'deny' ? 'error' : 'ready'}`}>{event.decision || 'changed'}</span><time>{event.created_at}</time></div>)}</div> : <p className="dw-audit-empty">此连接还没有审计事件。授权变更或真实调用后会显示在这里。</p>}

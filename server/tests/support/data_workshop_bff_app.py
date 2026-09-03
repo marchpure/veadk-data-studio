@@ -14,9 +14,10 @@ test_admin = SimpleNamespace(
     is_admin=True,
     has_scope=lambda _: True,
 )
+
+
 app.dependency_overrides[api.require_workshop_member] = lambda: test_admin
 app.dependency_overrides[api.require_workshop_admin] = lambda: test_admin
-api._tenant = lambda: str(test_admin.tenant_id)
 
 
 @app.get("/api/app/config")

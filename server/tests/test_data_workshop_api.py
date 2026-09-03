@@ -68,14 +68,10 @@ def client() -> TestClient:
         is_admin=True,
         has_scope=lambda _: True,
     )
+
     app.dependency_overrides[api.require_workshop_member] = lambda: admin
     app.dependency_overrides[api.require_workshop_admin] = lambda: admin
-    original_tenant = api._tenant
-    api._tenant = lambda: "tenant-a"
-    try:
-        yield TestClient(app)
-    finally:
-        api._tenant = original_tenant
+    yield TestClient(app)
 
 
 def test_adapter_only_accepts_versioned_control_plane_paths() -> None:
@@ -141,6 +137,17 @@ def test_provider_catalog_uses_v1_upstream(client: TestClient, fake_client: Fake
     assert response.status_code == 200
     assert response.json()["data"][0]["name"] == "Oracle"
     assert fake_client.calls[-1][1] == "/v1/providers"
+
+
+def test_identity_status_exposes_only_operational_metadata(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+) -> None:
+    response = client.get("/api/v1/identity-provider")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"status": "ready"}
+    assert fake_client.calls[-1][1] == "/v1/identity-provider"
 
 
 def test_connection_payload_recursively_removes_secret_fields(
@@ -211,6 +218,7 @@ def test_read_only_tester_maps_to_fixed_allowlist(
     assert fake_client.calls[-1][0:2] == (method, path)
     if method == "POST":
         assert fake_client.calls[-1][2]["json"]["operation"] == operation
+        assert fake_client.calls[-1][2]["json"]["arguments"] == {}
 
 
 def test_launch_session_cookie_is_short_lived_http_only_secure_and_strict(
@@ -244,6 +252,15 @@ def test_console_proxy_uses_secure_launch_cookie_without_exposing_admin_token(
     app = FastAPI()
     app.include_router(api.router, prefix="/api")
     app.include_router(api.console_router)
+    admin = SimpleNamespace(
+        tenant_id="tenant-a",
+        user_id="user-admin",
+        is_admin=True,
+        has_scope=lambda _: True,
+    )
+
+    app.dependency_overrides[api.require_workshop_member] = lambda: admin
+    app.dependency_overrides[api.require_workshop_admin] = lambda: admin
     secure_client = TestClient(app, base_url="https://testserver")
 
     launch = secure_client.post("/api/v1/openconnector/launch-sessions")
@@ -254,9 +271,52 @@ def test_console_proxy_uses_secure_launch_cookie_without_exposing_admin_token(
     assert response.text == "<html>console</html>"
     assert fake_client.calls[-1][0:2] == ("GET", "actions")
     assert fake_client.calls[-1][2]["query"] == b"embed=studio"
+    assert fake_client.calls[-1][2]["tenant_id"] == "tenant-a"
     assert "test-admin-token" not in response.text
     assert "content-encoding" not in response.headers
     assert "set-cookie" not in response.headers
+
+
+@pytest.mark.asyncio
+async def test_console_proxy_filters_sensitive_query_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class RecordingClient:
+        async def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+            captured.update(method=method, url=url, headers=kwargs["headers"])
+            return httpx.Response(200, text="ok")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_: Any):
+            return None
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **_: RecordingClient())
+    adapter = OpenConnectorClient(base_url="https://connector.example.com", admin_token="server-secret")
+
+    await adapter.proxy(
+        "GET",
+        "actions",
+        query=b"embed=studio&token=browser-secret&filter=recent",
+        body=b"",
+        content_type=None,
+        tenant_id="tenant-a",
+    )
+
+    assert captured["url"] == "https://connector.example.com/actions?embed=studio&filter=recent"
+    assert captured["headers"]["X-Forwarded-Prefix"] == "/oc"
+    assert captured["headers"]["X-Tenant-ID"] == "tenant-a"
+    assert captured["headers"]["Authorization"] == "Bearer server-secret"
+
+
+def test_read_only_tester_rejects_unknown_operation(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/connection-docs/read-only-tests",
+        json={"operation": "execute_action", "arguments": {}},
+    )
+
+    assert response.status_code == 422
 
 
 def test_launch_session_expires(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -295,7 +355,6 @@ def test_admin_operations_reject_non_admin(fake_client: FakeOpenConnector, monke
     )
     app.dependency_overrides[api.require_workshop_member] = lambda: member
     app.dependency_overrides[api.get_current_auth_context()] = lambda: member
-    monkeypatch.setattr(api, "_tenant", lambda: "tenant-a")
     member_client = TestClient(app)
 
     launch = member_client.post("/api/v1/openconnector/launch-sessions")

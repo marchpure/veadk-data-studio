@@ -2,7 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { WorkshopShell } from './components/WorkshopShell'
 import { ConnectionAccess } from './pages/Access'
 import { ConnectionDetail, ConnectionOverview, ProviderMarket } from './pages/Connections'
-import { ConsoleEmbed } from './pages/ConsoleEmbed'
+import { ConsoleEmbed, NewConnectionEmbed } from './pages/ConsoleEmbed'
 import { ConnectionDocs } from './pages/Docs'
 import { WorkshopHome } from './pages/Home'
 import './data-workshop.css'
@@ -13,11 +13,12 @@ function OwnedElsewhere({ title, owner }: { title: string; owner: string }) {
 
 export function DataWorkshopApp() {
   return <WorkshopShell><Routes>
+    <Route path="/" element={<Navigate to="/home" replace />} />
     <Route path="/home" element={<WorkshopHome />} />
     <Route path="/connections/overview" element={<ConnectionOverview />} />
     <Route path="/connections/providers" element={<Navigate to="/connections/providers/market" replace />} />
     <Route path="/connections/providers/market" element={<ProviderMarket />} />
-    <Route path="/connections/providers/new/oracle" element={<ConsoleEmbed title="新建 Oracle 连接" consolePath="connections/new?provider=oracle" />} />
+    <Route path="/connections/providers/new/:providerId" element={<NewConnectionEmbed />} />
     <Route path="/connections/providers/:id" element={<ConnectionDetail />} />
     <Route path="/connections/providers/:id/access" element={<ConnectionAccess />} />
     <Route path="/connections/actions" element={<ConsoleEmbed title="Actions" consolePath="actions" />} />

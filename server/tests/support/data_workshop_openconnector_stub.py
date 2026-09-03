@@ -104,6 +104,12 @@ async def list_subjects(request: Request, query: str = "", subject_type: str = "
 async def create_grant(request: Request):
     check_auth(request)
     payload = await request.json()
+    if payload["role_id"] in {"reader", "operator"} and payload["action_scope"]:
+        raise HTTPException(status_code=422, detail="predefined role scope must be resolved by OpenConnector")
+    if payload["role_id"] == "reader":
+        payload["action_scope"] = [action["id"] for action in actions if action["read_only"]]
+    elif payload["role_id"] == "operator":
+        payload["action_scope"] = [action["id"] for action in actions]
     grant = {
         **payload,
         "id": f"grant-{len(grants) + 1}",
@@ -120,6 +126,12 @@ async def create_grant(request: Request):
 async def update_grant(grant_id: str, request: Request):
     check_auth(request)
     payload = await request.json()
+    if payload["role_id"] in {"reader", "operator"} and payload["action_scope"]:
+        raise HTTPException(status_code=422, detail="predefined role scope must be resolved by OpenConnector")
+    if payload["role_id"] == "reader":
+        payload["action_scope"] = [action["id"] for action in actions if action["read_only"]]
+    elif payload["role_id"] == "operator":
+        payload["action_scope"] = [action["id"] for action in actions]
     for index, grant in enumerate(grants):
         if grant["id"] == grant_id:
             updated = {**grant, **payload, "version": grant["version"] + 1}

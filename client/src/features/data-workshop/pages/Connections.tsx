@@ -8,13 +8,18 @@ import type { Connection, LoadState, Provider } from '../types'
 export function ProviderMarket() {
   const [state, setState] = useState<LoadState>('loading')
   const [providers, setProviders] = useState<Provider[]>([])
+  const [connections, setConnections] = useState<Connection[]>([])
   const [query, setQuery] = useState('')
   const load = useCallback(async () => {
     setState('loading')
     try {
-      const result = await workshopApi.listProviders()
-      setProviders(result)
-      setState(result.length ? 'ready' : 'empty')
+      const [providerItems, connectionItems] = await Promise.all([
+        workshopApi.listProviders(),
+        workshopApi.listConnections().catch(() => []),
+      ])
+      setProviders(providerItems)
+      setConnections(connectionItems)
+      setState(providerItems.length ? 'ready' : 'empty')
     } catch {
       setState('error')
     }
@@ -31,22 +36,31 @@ export function ProviderMarket() {
         <label className="dw-search"><Search size={17} /><input aria-label="搜索连接器" placeholder="搜索连接器" value={query} onChange={event => setQuery(event.target.value)} /></label>
       </div>
       {state !== 'ready' ? <AsyncState state={state} message={state === 'error' ? '无法读取连接器目录，请检查 OpenConnector。' : undefined} onRetry={load} /> : visibleProviders.length === 0 ? <AsyncState state="empty" title="没有匹配的连接器" message="尝试搜索其他名称、类型或描述。" /> : <div className="dw-provider-grid">
-        {visibleProviders.map(provider => (
-          <Link
-            className={`dw-provider-card ${provider.available ? '' : 'disabled'}`}
-            to={`/connections/providers/${provider.id}`}
-            key={provider.id}
-            aria-disabled={!provider.available}
-            tabIndex={provider.available ? 0 : -1}
-            onClick={event => {
-              if (!provider.available) event.preventDefault()
-            }}
-          >
-            <div className="dw-provider-logo" style={{ background: provider.color || '#2f6b52' }}>{provider.name.slice(0, 1)}</div>
-            <div><span>{provider.category}</span><h2>{provider.name}</h2><p>{provider.description}</p></div>
-            <ArrowRight size={18} />
-          </Link>
-        ))}
+        {visibleProviders.map(provider => {
+          const connection = connections.find(item =>
+            item.provider.toLowerCase() === provider.name.toLowerCase() ||
+            item.provider.toLowerCase() === provider.id.toLowerCase(),
+          )
+          const destination = connection
+            ? `/connections/providers/${connection.id}`
+            : `/connections/providers/new/${encodeURIComponent(provider.id)}`
+          return (
+            <Link
+              className={`dw-provider-card ${provider.available ? '' : 'disabled'}`}
+              to={destination}
+              key={provider.id}
+              aria-disabled={!provider.available}
+              tabIndex={provider.available ? 0 : -1}
+              onClick={event => {
+                if (!provider.available) event.preventDefault()
+              }}
+            >
+              <div className="dw-provider-logo" style={{ background: provider.color || '#2f6b52' }}>{provider.name.slice(0, 1)}</div>
+              <div><span>{provider.category}</span><h2>{provider.name}</h2><p>{provider.description}</p></div>
+              <ArrowRight size={18} />
+            </Link>
+          )
+        })}
       </div>}
     </div>
   )

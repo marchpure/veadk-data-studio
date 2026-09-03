@@ -84,6 +84,13 @@ export interface DocsStatus {
   checked_at?: string
 }
 
+export interface IdentityStatus {
+  status: 'ready' | 'unconfigured' | 'error'
+  user_pool_ref?: string
+  jwks_status?: string
+  jwks_last_refresh_at?: string
+}
+
 export interface AuditEvent {
   id: string
   event_type: string

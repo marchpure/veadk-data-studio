@@ -1,5 +1,6 @@
 import { ExternalLink, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { useParams } from 'react-router-dom'
 import { workshopApi } from '../api'
 import { AsyncState } from '../components/AsyncState'
 import type { LoadState } from '../types'
@@ -26,4 +27,10 @@ export function ConsoleEmbed({ title, consolePath }: { title: string; consolePat
     {state === 'ready' ? <div className="dw-console-frame"><iframe title={`OpenConnector ${title}`} src={launchUrl} onError={() => setState('error')} /></div> : <AsyncState state={state === 'empty' ? 'error' : state} message="无法建立 OpenConnector Console 会话，请检查服务配置。" onRetry={load} />}
     {state === 'ready' && <button className="dw-icon-text dw-console-refresh" onClick={() => void load()}><RefreshCw size={15} />刷新会话</button>}
   </div>
+}
+
+export function NewConnectionEmbed() {
+  const { providerId = 'oracle' } = useParams()
+  const providerName = providerId === 'oracle' ? 'Oracle' : providerId
+  return <ConsoleEmbed title={`新建 ${providerName} 连接`} consolePath={`connections/new?provider=${encodeURIComponent(providerId)}`} />
 }

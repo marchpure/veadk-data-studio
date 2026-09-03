@@ -6,6 +6,7 @@ import type {
   Connection,
   DocsConfig,
   DocsStatus,
+  IdentityStatus,
   Provider,
   Subject,
 } from './types'
@@ -43,10 +44,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     const detail = payload?.detail
+    const data = payload?.data
     throw new WorkshopApiError(
-      detail?.message || detail || '请求失败，请稍后重试',
+      detail?.message || payload?.message || detail || '请求失败，请稍后重试',
       response.status,
-      detail?.code,
+      detail?.code || data?.code,
     )
   }
   return (payload as Envelope<T>).data
@@ -70,6 +72,7 @@ export const workshopApi = {
         `/identity/subjects?query=${encodeURIComponent(query)}&subject_type=${subjectType}`,
       ),
     ),
+  getIdentityStatus: () => request<IdentityStatus>('/identity-provider'),
   createGrant: (grant: Omit<AccessGrant, 'id' | 'status' | 'updated_at' | 'updated_by'>) =>
     request<AccessGrant>('/access-grants', { method: 'POST', body: JSON.stringify(grant) }),
   updateGrant: (grantId: string, grant: Omit<AccessGrant, 'id' | 'status' | 'updated_at' | 'updated_by'>) =>
