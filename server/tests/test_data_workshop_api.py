@@ -23,7 +23,11 @@ class FakeOpenConnector:
         responses = {
             "/v1/providers": [{"id": "oracle", "name": "Oracle"}],
             "/v1/connections": [{"id": "oracle-prod", "name": "Oracle Production"}],
-            "/v1/mcp/config": {"endpoint": "https://connector.example.com/mcp"},
+            "/v1/mcp/config": {
+                "endpoint": "https://connector.example.com/mcp",
+                "admin_token": "must-not-leak",
+                "client_secret": "must-not-leak",
+            },
             "/v1/identity-provider": {"status": "ready", "issuer": "https://identity.example.com"},
             "/v1/mcp/status": {"status": "healthy"},
             "/v1/mcp/tests/tools-list": {"tools": [{"name": "list_connections"}]},
@@ -64,6 +68,22 @@ def test_docs_aggregates_only_non_sensitive_v1_metadata(client: TestClient, fake
     assert [call[1] for call in fake_client.calls] == ["/v1/mcp/config", "/v1/identity-provider"]
     assert "secret" not in response.text.lower()
     assert "token" not in response.text.lower()
+    assert response.json()["data"]["mcp"]["workbuddy_config"]["auth"] == "oauth"
+
+
+def test_docs_rejects_non_https_endpoint(client: TestClient, fake_client: FakeOpenConnector) -> None:
+    original_request = fake_client.request
+
+    async def insecure_request(method: str, path: str, **kwargs: Any) -> Any:
+        if path == "/v1/mcp/config":
+            return {"endpoint": "http://connector.example.com/mcp"}
+        return await original_request(method, path, **kwargs)
+
+    fake_client.request = insecure_request
+    response = client.get("/api/data-workshop/v1/connection-docs/config")
+
+    assert response.status_code == 502
+    assert "HTTPS" in response.json()["detail"]["message"]
 
 
 def test_provider_catalog_uses_v1_upstream(client: TestClient, fake_client: FakeOpenConnector) -> None:

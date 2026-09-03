@@ -17,7 +17,7 @@ export function DataWorkshopApp() {
     <Route path="/connections/overview" element={<ConnectionOverview />} />
     <Route path="/connections/providers" element={<Navigate to="/connections/providers/market" replace />} />
     <Route path="/connections/providers/market" element={<ProviderMarket />} />
-    <Route path="/connections/providers/new/oracle" element={<ConnectionDetail />} />
+    <Route path="/connections/providers/new/oracle" element={<ConsoleEmbed title="新建 Oracle 连接" consolePath="connections/new?provider=oracle" />} />
     <Route path="/connections/providers/:id" element={<ConnectionDetail />} />
     <Route path="/connections/providers/:id/access" element={<ConnectionAccess />} />
     <Route path="/connections/actions" element={<ConsoleEmbed title="Actions" consolePath="actions" />} />

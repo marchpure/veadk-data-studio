@@ -12,7 +12,8 @@ export function ConsoleEmbed({ title, consolePath }: { title: string; consolePat
     try {
       const session = await workshopApi.createLaunchSession()
       const proxyRoot = session.launch_url.split('?')[0]
-      setLaunchUrl(`${proxyRoot}${consolePath}?embed=studio`)
+      const separator = consolePath.includes('?') ? '&' : '?'
+      setLaunchUrl(`${proxyRoot}${consolePath}${separator}embed=studio`)
       setState('ready')
     } catch {
       setState('error')

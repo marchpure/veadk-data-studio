@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Cookie, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
@@ -36,6 +37,56 @@ def _raise_upstream(error: OpenConnectorError) -> None:
         status_code=error.status_code,
         detail={"code": "OPENCONNECTOR_ERROR", "message": str(error), "upstream": error.detail},
     )
+
+
+def _https_url(value: Any, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise OpenConnectorError(f"OpenConnector {field_name} is missing", status_code=502)
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise OpenConnectorError(f"OpenConnector {field_name} must be an HTTPS URL", status_code=502)
+    return value
+
+
+def _public_docs_config(config: Any, identity: Any) -> dict[str, Any]:
+    if not isinstance(config, dict) or not isinstance(identity, dict):
+        raise OpenConnectorError("OpenConnector returned invalid connection documentation metadata")
+
+    endpoint = _https_url(config.get("endpoint"), "MCP endpoint")
+    public_mcp: dict[str, Any] = {
+        "endpoint": endpoint,
+        "protocol": str(config.get("protocol") or "MCP Streamable HTTP"),
+        "workbuddy_config": {
+            "name": "Data Workshop",
+            "transport": "streamable-http",
+            "url": endpoint,
+            "auth": "oauth",
+        },
+        "generic_config": {
+            "mcpServers": {
+                "data-workshop": {
+                    "url": endpoint,
+                    "transport": "streamable-http",
+                    "authentication": "oauth",
+                }
+            }
+        },
+        "sdk_languages": [
+            language
+            for language in config.get("sdk_languages", [])
+            if isinstance(language, str) and language in {"Python", "TypeScript"}
+        ],
+    }
+    for source_key in ("api_reference_url", "openapi_url"):
+        if config.get(source_key):
+            public_mcp[source_key] = _https_url(config[source_key], source_key)
+
+    public_identity = {
+        key: identity[key]
+        for key in ("status", "issuer", "audience", "user_pool_ref", "jwks_status", "jwks_last_refresh_at")
+        if key in identity
+    }
+    return {"mcp": public_mcp, "identity": public_identity}
 
 
 class GrantPayload(BaseModel):
@@ -224,7 +275,7 @@ async def get_connection_docs_config():
     try:
         config = _unwrap(await client.request("GET", "/v1/mcp/config"))
         identity = _unwrap(await client.request("GET", "/v1/identity-provider"))
-        return success_response(data={"mcp": config, "identity": identity})
+        return success_response(data=_public_docs_config(config, identity))
     except OpenConnectorError as error:
         _raise_upstream(error)
 

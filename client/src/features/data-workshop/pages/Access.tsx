@@ -221,8 +221,10 @@ export function ConnectionAccess() {
   const [editor, setEditor] = useState<'new' | AccessGrant | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [filter, setFilter] = useState('')
+  const [page, setPage] = useState(1)
   const [notice, setNotice] = useState('')
   const [audit, setAudit] = useState<AuditEvent[]>([])
+  const pageSize = 10
 
   const activeId = connectionId || connections[0]?.id
   const load = useCallback(async () => {
@@ -250,6 +252,11 @@ export function ConnectionAccess() {
   useEffect(() => { void load() }, [load])
 
   const filtered = useMemo(() => grants.filter(grant => grant.subject_display_snapshot.toLowerCase().includes(filter.toLowerCase())), [filter, grants])
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const visibleGrants = filtered.slice((page - 1) * pageSize, page * pageSize)
+  useEffect(() => {
+    setPage(1)
+  }, [filter, activeId])
   const revoke = async (grant: AccessGrant) => {
     if (!window.confirm(`确认撤销 ${grant.subject_display_snapshot} 的访问权限？新请求将立即失效。`)) return
     try { await workshopApi.revokeGrant(grant.id); setNotice('授权已撤销'); await load() }
@@ -264,8 +271,8 @@ export function ConnectionAccess() {
     {notice && <div className="dw-notice"><AlertTriangle size={16} />{notice}<button onClick={() => setNotice('')}><X size={14} /></button></div>}
     {!filtered.length ? <AsyncState state="empty" title="还没有访问授权" message="连接默认私有。新增授权后，用户才会在 discovery 中看到允许的 Actions。" /> :
       <div className="dw-table-wrap"><table className="dw-table"><thead><tr><th>主体</th><th>类型</th><th>角色</th><th>Actions</th><th>状态</th><th>更新</th><th><span className="sr-only">操作</span></th></tr></thead><tbody>
-        {filtered.map(grant => <tr key={grant.id}><td><strong>{grant.subject_display_snapshot}</strong><small>{grant.subject_id}</small></td><td>{grant.subject_type === 'group' ? '用户组' : '用户'}</td><td>{roleLabels[grant.role_id]}</td><td>{grant.action_scope.length}</td><td><span className={`dw-status ${grant.status}`}>{grant.status === 'active' ? '有效' : grant.status === 'conflict' ? '冲突' : '已撤销'}</span></td><td>{grant.updated_at || '-'}<small>{grant.updated_by || ''}</small></td><td><div className="dw-row-actions"><button title="编辑授权" onClick={() => setEditor(grant)}><Pencil size={15} /></button><button title="撤销授权" onClick={() => void revoke(grant)}><Trash2 size={15} /></button></div></td></tr>)}
-      </tbody></table></div>}
+        {visibleGrants.map(grant => <tr key={grant.id}><td><strong>{grant.subject_display_snapshot}</strong><small>{grant.subject_id}</small></td><td>{grant.subject_type === 'group' ? '用户组' : '用户'}</td><td>{roleLabels[grant.role_id]}</td><td>{grant.action_scope.length}</td><td><span className={`dw-status ${grant.status}`}>{grant.status === 'active' ? '有效' : grant.status === 'conflict' ? '冲突' : '已撤销'}</span></td><td>{grant.updated_at || '-'}<small>{grant.updated_by || ''}</small></td><td><div className="dw-row-actions"><button title="编辑授权" onClick={() => setEditor(grant)}><Pencil size={15} /></button><button title="撤销授权" onClick={() => void revoke(grant)}><Trash2 size={15} /></button></div></td></tr>)}
+      </tbody></table>{pageCount > 1 && <div className="dw-pagination"><span>第 {page} / {pageCount} 页</span><div><button className="dw-button dw-button-secondary" disabled={page === 1} onClick={() => setPage(current => current - 1)}>上一页</button><button className="dw-button dw-button-secondary" disabled={page === pageCount} onClick={() => setPage(current => current + 1)}>下一页</button></div></div>}</div>}
     <section className="dw-audit-section"><div className="dw-section-heading"><div><h2>访问与调用审计</h2><p>AccessGrant 变更与 MCP allow/deny 判定。</p></div><a href="/connections/trace">前往 Trace <ChevronRight size={16} /></a></div>
       {audit.length ? <div className="dw-audit-events">{audit.slice(0, 5).map(event => <div key={event.id}><Shield size={15} /><span><strong>{event.event_type}</strong><small>{event.subject_display || event.action_name || event.request_id}</small></span><span className={`dw-status ${event.decision === 'deny' ? 'error' : 'ready'}`}>{event.decision || 'changed'}</span><time>{event.created_at}</time></div>)}</div> : <p className="dw-audit-empty">此连接还没有审计事件。授权变更或真实调用后会显示在这里。</p>}
     </section>
