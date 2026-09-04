@@ -237,6 +237,7 @@ async def _run(sid: str, payload: SkillInvocationCreate) -> None:
                 item["events"].append(event)
                 _apply_w5_event(item, source_event)
                 _persist()
+            _apply_w5_result(item, raw_event)
             _apply_w5_event(item, raw_event)
             _persist()
         if item["status"] == "running":
@@ -281,6 +282,33 @@ def _apply_w5_event(item: dict[str, Any], event: dict[str, Any]) -> None:
     if event.get("revision") is not None:
         item["revision"] = str(event["revision"])
     artifact = event.get("artifact")
+    if isinstance(artifact, dict):
+        item["artifact"] = dict(artifact)
+        if artifact.get("revision") is not None:
+            item["revision"] = str(artifact["revision"])
+        download = artifact.get("download")
+        if isinstance(download, dict) and download.get("download_url"):
+            item["artifact_url"] = str(download["download_url"])
+
+
+def _apply_w5_result(item: dict[str, Any], result: dict[str, Any]) -> None:
+    """Map W5's final InvocationResult envelope without inventing artifact data."""
+    status = str(result.get("status", "")).upper()
+    validation = result.get("validation")
+    validation_code = str(validation.get("code", "")).upper() if isinstance(validation, dict) else ""
+    if status in {"BLOCKED_AUTH", "BLOCKED_CONFIG"} or validation_code == "BLOCKED_AUTH":
+        item["status"] = "blocked_auth"
+    elif status == "VALIDATION_FAILED" or validation_code in {"VALIDATION_FAILED", "BLOCKED_VALIDATION"}:
+        item["status"] = "validation_failed"
+    elif status == "CANCELLED":
+        item["status"] = "cancelled"
+    elif status in {"RETRYABLE", "ERROR"}:
+        item["status"] = "retryable" if status == "RETRYABLE" else "error"
+    elif status == "SUCCEEDED":
+        item["status"] = "ready"
+    if result.get("revision") is not None:
+        item["revision"] = str(result["revision"])
+    artifact = result.get("artifact")
     if isinstance(artifact, dict):
         item["artifact"] = dict(artifact)
         if artifact.get("revision") is not None:

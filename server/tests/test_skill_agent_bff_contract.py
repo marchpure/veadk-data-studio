@@ -72,6 +72,38 @@ async def test_adapter_forwards_runtime_request_and_parses_incremental_events(mo
     ]
 
 
+def test_bff_maps_w5_final_result_envelope():
+    item = {"status": "running", "revision": None, "artifact": None}
+    skill_agent_bff._apply_w5_result(
+        item,
+        {
+            "status": "SUCCEEDED",
+            "target_skill": "report-skill",
+            "revision": "rev-3",
+            "validation": {"ok": True, "code": "OK"},
+            "artifact": {
+                "skill_slug": "report-skill",
+                "revision": "rev-3",
+                "files": ["report-skill/SKILL.md"],
+                "download": {"download_url": "https://artifact.example/rev-3.zip"},
+            },
+            "events": [],
+        },
+    )
+    assert item["status"] == "ready"
+    assert item["revision"] == "rev-3"
+    assert item["artifact"]["files"] == ["report-skill/SKILL.md"]
+    assert item["artifact_url"].endswith("rev-3.zip")
+
+    failed = {"status": "running", "revision": None, "artifact": None}
+    skill_agent_bff._apply_w5_result(
+        failed,
+        {"status": "VALIDATION_FAILED", "validation": {"ok": False, "code": "INVALID_TARGET"}},
+    )
+    assert failed["status"] == "validation_failed"
+    assert failed["artifact"] is None
+
+
 @pytest.mark.asyncio
 async def test_adapter_fails_closed_without_auth_or_endpoint():
     with pytest.raises(W5AdapterError, match="OAuth"):
