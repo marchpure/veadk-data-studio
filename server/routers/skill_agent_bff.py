@@ -237,8 +237,22 @@ async def _run(sid: str, payload: SkillInvocationCreate) -> None:
             item["status"] = "ready" if item.get("artifact") else "error"
         item["messages"].append({"role": "assistant", "content": "W5 AgentKit invocation completed.", "at": _now()})
     except W5AdapterError as exc:
-        item["status"] = "blocked_auth" if exc.code == "BLOCKED_AUTH" else "retryable" if exc.retryable else "error"
-        item["events"].append({"id": str(uuid4()), "type": "blocked_auth" if exc.code == "BLOCKED_AUTH" else "error", "code": exc.code, "message": str(exc), "at": _now()})
+        item["status"] = (
+            "blocked_auth"
+            if exc.code == "BLOCKED_AUTH"
+            else "cancelled"
+            if exc.code == "CANCELLED"
+            else "retryable"
+            if exc.retryable
+            else "error"
+        )
+        item["events"].append({
+            "id": str(uuid4()),
+            "type": "blocked_auth" if exc.code == "BLOCKED_AUTH" else "cancelled" if exc.code == "CANCELLED" else "error",
+            "code": exc.code,
+            "message": str(exc),
+            "at": _now(),
+        })
     finally:
         _persist()
         _tasks.pop(sid, None)

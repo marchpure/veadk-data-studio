@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -64,6 +65,37 @@ async def test_adapter_fails_closed_without_auth_or_endpoint():
             W5Invocation("goal", [], [], None, None, "session", None)
         ):
             pass
+
+
+@pytest.mark.asyncio
+async def test_adapter_terminates_process_when_cancelled(monkeypatch):
+    terminated = []
+
+    class FakeProcess:
+        returncode = None
+
+        async def communicate(self):
+            await asyncio.sleep(60)
+            return b"", b""
+
+        def terminate(self):
+            terminated.append("terminate")
+            self.returncode = 0
+
+        async def wait(self):
+            return self.returncode
+
+    async def fake_exec(*command, **kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+    adapter = W5SkillAgentAdapter(runtime_id="runtime-1")
+    stream = adapter.invoke(W5Invocation("goal", [], [], None, None, "s", "auth"))
+    task = asyncio.create_task(stream.__anext__())
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(W5AdapterError, match="cancelled"):
+        await task
     with pytest.raises(W5AdapterError, match="RUNTIME_ID"):
         async for _ in W5SkillAgentAdapter().invoke(
             W5Invocation("goal", [], [], None, None, "session", "delegated-ref")

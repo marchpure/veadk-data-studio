@@ -39,7 +39,6 @@ class W5SkillAgentAdapter:
         runtime_id: str | None = None,
         region: str | None = None,
         cli_path: str | None = None,
-        transport: httpx.AsyncBaseTransport | None = None,
     ):
         self.base_url = (base_url or os.getenv("SKILL_AGENT_BASE_URL", "")).rstrip("/")
         self.timeout = timeout or float(os.getenv("SKILL_AGENT_TIMEOUT_SECONDS", "60"))
@@ -47,7 +46,6 @@ class W5SkillAgentAdapter:
         self.runtime_id = runtime_id or os.getenv("SKILL_AGENT_RUNTIME_ID", "")
         self.region = region or os.getenv("SKILL_AGENT_REGION", "cn-beijing")
         self.cli_path = cli_path or os.getenv("AGENTKIT_CLI_PATH", "agentkit")
-        self.transport = transport
 
     def delegated_auth_ref(self, auth: Any) -> str | None:
         if not self.auth_provider:
@@ -85,6 +83,7 @@ class W5SkillAgentAdapter:
                 "session_id": invocation.session_id,
             }),
         ]
+        process = None
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -93,7 +92,13 @@ class W5SkillAgentAdapter:
             )
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self.timeout)
         except TimeoutError as exc:
+            if process is not None:
+                await self._terminate(process)
             raise W5AdapterError("RETRYABLE", "W5 invocation timed out", retryable=True) from exc
+        except asyncio.CancelledError as exc:
+            if process is not None:
+                await self._terminate(process)
+            raise W5AdapterError("CANCELLED", "W5 invocation cancelled") from exc
         except OSError as exc:
             raise W5AdapterError("RETRYABLE", f"AgentKit invocation failed: {exc}", retryable=True) from exc
         if process.returncode != 0:
@@ -105,6 +110,17 @@ class W5SkillAgentAdapter:
             event = self.parse_event(line)
             if event is not None:
                 yield event
+
+    @staticmethod
+    async def _terminate(process: asyncio.subprocess.Process) -> None:
+        if process.returncode is not None:
+            return
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=2)
+        except TimeoutError:
+            process.kill()
+            await process.wait()
 
     @staticmethod
     def parse_event(line: str) -> dict[str, Any] | None:
