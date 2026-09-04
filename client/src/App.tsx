@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { ToastContainer } from 'react-toastify'
 import Layout from './components/Layout'
@@ -13,6 +13,8 @@ import SkillReviewPage from './pages/SkillReviewPage'
 import HomePage from './pages/HomePage'
 import FoldersPage from './pages/FoldersPage'
 import FolderDetailPage from './pages/FolderDetailPage'
+import './pages/openviking.css'
+const OpenVikingPage = lazy(() => import('./pages/OpenVikingPage'))
 import GitHubIntegrations from './pages/GitHubIntegrations'
 import IntegrationsPage from './pages/Integrations'
 import { Login, Register, ForgotPassword, ResetPassword, CheckEmail, AcceptInvitation, SetPassword } from './pages/auth'
@@ -265,6 +267,8 @@ function App() {
               </AuthGuard>
             }
           />
+          <Route path="/kb" element={<AuthGuard><Suspense fallback={<div className="ov-page">Loading OpenViking</div>}><OpenVikingPage /></Suspense></AuthGuard>} />
+          <Route path="/kb/connect" element={<AuthGuard><Suspense fallback={<div className="ov-page">Loading OpenViking</div>}><OpenVikingPage connectOnly /></Suspense></AuthGuard>} />
           <Route
             path="/folders"
             element={
@@ -348,6 +352,8 @@ function App() {
             <Route path="/data-models/:modelId" element={<DataModelBuilderPage />} />
             <Route path="/github" element={<GitHubIntegrations />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
+            <Route path="/kb" element={<Suspense fallback={<div className="ov-page">Loading OpenViking</div>}><OpenVikingPage /></Suspense>} />
+            <Route path="/kb/connect" element={<Suspense fallback={<div className="ov-page">Loading OpenViking</div>}><OpenVikingPage connectOnly /></Suspense>} />
             <Route path="/folders" element={<FoldersPage />} />
             <Route path="/folders/:id" element={<FolderDetailPage />} />
             <Route path="/dashboard/:dashboardId" element={<HomePage />} />
