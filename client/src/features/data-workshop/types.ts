@@ -78,7 +78,7 @@ export interface DocsConfig {
     sdk_languages?: string[]
   }
   identity: {
-    status: 'ready' | 'unconfigured' | 'error'
+    status: 'ready' | 'unverified' | 'unconfigured' | 'error'
     issuer?: string
     audience?: string[]
     user_pool_ref?: string
@@ -89,13 +89,13 @@ export interface DocsConfig {
 export interface DocsStatus {
   status: 'healthy' | 'degraded' | 'unavailable'
   backend_mode: 'REAL' | 'TEST'
-  identity_status: 'ready' | 'unconfigured'
+  identity_status: 'ready' | 'unverified' | 'unconfigured'
   protocol?: string
   checked_at?: string
 }
 
 export interface IdentityStatus {
-  status: 'ready' | 'unconfigured' | 'error'
+  status: 'ready' | 'unverified' | 'unconfigured' | 'error'
   user_pool_ref?: string
   jwks_status?: string
   jwks_last_refresh_at?: string

@@ -146,14 +146,16 @@ def _public_docs_config(config: Any, identity: Any) -> dict[str, Any]:
         if config.get(source_key):
             public_mcp[source_key] = _https_url(config[source_key], source_key)
 
-    identity_ready = bool(identity.get("issuer") and (identity.get("jwksUri") or identity.get("jwks_uri")))
+    jwks_status = identity.get("jwksStatus") or identity.get("jwks_status")
+    identity_configured = bool(identity.get("issuer") and (identity.get("jwksUri") or identity.get("jwks_uri")))
+    identity_ready = identity_configured and jwks_status in {"healthy", "ready"}
     public_identity = {
-        "status": "ready" if identity_ready else "unconfigured",
+        "status": "ready" if identity_ready else "unverified" if identity_configured else "unconfigured",
         "issuer": identity.get("issuer"),
         "audience": [identity["audience"]] if isinstance(identity.get("audience"), str) else identity.get("audience"),
         "user_pool_ref": identity.get("userPoolRef") or identity.get("user_pool_ref"),
-        "jwks_status": identity.get("jwksStatus") or identity.get("jwks_status") or (
-            "configured" if identity_ready else "unconfigured"
+        "jwks_status": jwks_status or (
+            "verification required" if identity.get("jwksUri") or identity.get("jwks_uri") else "unconfigured"
         ),
         "jwks_last_refresh_at": identity.get("jwksLastRefreshAt") or identity.get("jwks_last_refresh_at"),
     }
@@ -602,13 +604,17 @@ async def get_identity_provider(
             identity = {}
         if not isinstance(identity, dict):
             raise OpenConnectorError("OpenConnector returned invalid identity metadata")
-        identity_ready = bool(identity.get("issuer") and (identity.get("jwksUri") or identity.get("jwks_uri")))
+        jwks_status = identity.get("jwksStatus") or identity.get("jwks_status")
+        identity_configured = bool(identity.get("issuer") and (identity.get("jwksUri") or identity.get("jwks_uri")))
+        identity_ready = identity_configured and jwks_status in {"healthy", "ready"}
         return _scoped_success(
             data={
-                "status": "ready" if identity_ready else "unconfigured",
+                "status": "ready" if identity_ready else "unverified" if identity_configured else "unconfigured",
                 "user_pool_ref": identity.get("userPoolRef") or identity.get("user_pool_ref"),
-                "jwks_status": identity.get("jwksStatus") or identity.get("jwks_status") or (
-                    "configured" if identity_ready else "unconfigured"
+                "jwks_status": jwks_status or (
+                    "verification required"
+                    if identity.get("jwksUri") or identity.get("jwks_uri")
+                    else "unconfigured"
                 ),
                 "jwks_last_refresh_at": identity.get("jwksLastRefreshAt") or identity.get("jwks_last_refresh_at"),
             },
@@ -807,13 +813,17 @@ async def get_connection_docs_status(
             await client.request_admin("GET", "/api/identity-provider", tenant_id=str(auth.tenant_id))
         )
         process_healthy = isinstance(health, dict) and bool(health.get("ok"))
-        identity_ready = isinstance(identity, dict) and bool(identity.get("issuer") and identity.get("jwksUri"))
+        identity_configured = isinstance(identity, dict) and bool(
+            identity.get("issuer") and (identity.get("jwksUri") or identity.get("jwks_uri"))
+        )
+        jwks_status = identity.get("jwksStatus") or identity.get("jwks_status") if isinstance(identity, dict) else None
+        identity_ready = identity_configured and jwks_status in {"healthy", "ready"}
         return _scoped_success(
             data={
                 "status": "healthy" if process_healthy and identity_ready else "degraded" if process_healthy else "unavailable",
                 "protocol": "streamable-http",
                 "backend_mode": _backend_mode(),
-                "identity_status": "ready" if identity_ready else "unconfigured",
+                "identity_status": "ready" if identity_ready else "unverified" if identity_configured else "unconfigured",
             },
             upstream_scope="admin+public",
         )

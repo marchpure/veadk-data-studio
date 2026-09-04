@@ -78,6 +78,7 @@ class FakeOpenConnector:
                 "issuer": "https://identity.example.com",
                 "audience": "data-workshop",
                 "jwksUri": "https://identity.example.com/jwks",
+                "jwksStatus": "healthy",
                 "userPoolRef": "dw-users",
                 "subjectClaim": "sub",
                 "groupsClaim": "groups",
@@ -325,6 +326,33 @@ def test_docs_status_is_degraded_when_identity_is_unconfigured(
     assert response.json()["data"]["identity_status"] == "unconfigured"
 
 
+def test_identity_with_unverified_jwks_is_not_reported_ready(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+) -> None:
+    original_request = fake_client.request_admin
+
+    async def configured_identity(method: str, path: str, **kwargs: Any) -> Any:
+        if path == "/api/identity-provider":
+            return {
+                "issuer": "https://issuer.example.com",
+                "audience": "data-workshop",
+                "jwksUri": "https://issuer.example.com/jwks",
+                "userPoolRef": "enterprise-users",
+            }
+        return await original_request(method, path, **kwargs)
+
+    fake_client.request_admin = configured_identity
+
+    identity = client.get("/api/v1/identity-provider")
+    status_response = client.get("/api/v1/connection-docs/status")
+
+    assert identity.json()["data"]["status"] == "unverified"
+    assert identity.json()["data"]["jwks_status"] == "verification required"
+    assert status_response.json()["data"]["status"] == "degraded"
+    assert status_response.json()["data"]["identity_status"] == "unverified"
+
+
 def test_docs_rejects_non_https_endpoint(client: TestClient, fake_client: FakeOpenConnector) -> None:
     fake_client.public_url = "http://connector.example.com"
     response = client.get("/api/v1/connection-docs/config")
@@ -353,7 +381,7 @@ def test_identity_status_exposes_only_operational_metadata(
     assert response.json()["data"] == {
         "status": "ready",
         "user_pool_ref": "dw-users",
-        "jwks_status": "configured",
+        "jwks_status": "healthy",
         "jwks_last_refresh_at": None,
     }
     assert fake_client.calls[-1][1] == "/api/identity-provider"
