@@ -363,7 +363,13 @@ async def artifact(sid: str, kind: str, auth: AuthContext = Depends(require_scop
     try:
         with zipfile.ZipFile(io.BytesIO(remote.content)) as archive:
             names = [name for name in archive.namelist() if not name.endswith("/") and not name.startswith("/") and ".." not in name.split("/")]
-            preferred = next((name for name in names if name.lower().endswith(("index.html", "skill.md", ".md", ".html", ".txt"))), None)
+            preferred = next(
+                (name for name in names if name.lower().endswith((".html", ".htm"))),
+                None,
+            ) or next(
+                (name for name in names if name.lower().endswith(("skill.md", ".md", ".txt"))),
+                None,
+            )
             if not preferred:
                 raise HTTPException(status_code=409, detail="W5 artifact has no previewable HTML or text file")
             content = archive.read(preferred)

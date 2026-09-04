@@ -1,5 +1,7 @@
 import asyncio
+import io
 import json
+import zipfile
 
 import pytest
 
@@ -110,3 +112,148 @@ def test_bff_restart_marks_running_sessions_interrupted(tmp_path, monkeypatch):
     skill_agent_bff._load()
     assert skill_agent_bff._sessions["session-1"]["status"] == "interrupted"
     assert skill_agent_bff._sessions["session-1"]["events"][0]["code"] == "INVOCATION_INTERRUPTED"
+
+
+@pytest.fixture
+def isolated_bff(monkeypatch, tmp_path):
+    monkeypatch.setattr(skill_agent_bff, "_path", tmp_path / "sessions.json")
+    monkeypatch.setattr(skill_agent_bff, "_backend", "TEST BACKEND")
+    monkeypatch.setattr(
+        skill_agent_bff,
+        "_catalog",
+        lambda session, auth: _catalog_fixture(),
+    )
+    skill_agent_bff._sessions.clear()
+    skill_agent_bff._tasks.clear()
+    yield
+    for task in list(skill_agent_bff._tasks.values()):
+        task.cancel()
+    skill_agent_bff._tasks.clear()
+    skill_agent_bff._sessions.clear()
+
+
+async def _catalog_fixture():
+    return (
+        [
+            skill_agent_bff.SkillRef(
+                id="connection-1",
+                kind="connection",
+                name="Sales DB",
+                source="Connection",
+                metadata={"actions": ["query"]},
+            )
+        ],
+        [
+            skill_agent_bff.SkillRef(
+                id="resource-1",
+                kind="knowledge_resource",
+                name="Sales guide",
+                source="OpenViking ResourceRef",
+                metadata={"status": "ready"},
+            )
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_bff_test_backend_session_flow_is_incremental_and_artifact_gated(
+    test_client, isolated_bff
+):
+    created = await test_client.post(
+        "/api/skill-agent-bff/sessions",
+        json={
+            "target": "sales-skill",
+            "mcp_refs": [{"id": "connection-1", "kind": "connection", "name": "Sales DB", "source": "Connection"}],
+            "knowledge_refs": [{"id": "resource-1", "kind": "knowledge_resource", "name": "Sales guide", "source": "OpenViking ResourceRef"}],
+        },
+    )
+    assert created.status_code == 200
+    session = created.json()["data"]
+    session_id = session["id"]
+    assert session["backend"] == "TEST BACKEND"
+    assert session["mcp_refs"][0]["id"] == "connection-1"
+    assert session["knowledge_refs"][0]["id"] == "resource-1"
+    assert session["preview_url"].endswith(f"session={session_id}")
+
+    before = await test_client.get(f"/api/skill-agent-bff/sessions/{session_id}/artifact/preview")
+    assert before.status_code == 404
+
+    invoked = await test_client.post(
+        f"/api/skill-agent-bff/sessions/{session_id}/invocations",
+        json={"message": "Create the sales skill", "client_invocation_id": "invoke-1"},
+    )
+    assert invoked.status_code == 200
+    repeated = await test_client.post(
+        f"/api/skill-agent-bff/sessions/{session_id}/invocations",
+        json={"message": "Create the sales skill", "client_invocation_id": "invoke-1"},
+    )
+    assert repeated.json()["message"] == "Invocation already accepted"
+
+    await asyncio.sleep(0.05)
+    events = await test_client.get(f"/api/skill-agent-bff/sessions/{session_id}/events?after=1")
+    assert events.status_code == 200
+    event_payload = events.json()["data"]
+    assert event_payload["done"] is True
+    assert {event["type"] for event in event_payload["items"]} >= {"planning", "tool_call", "validate", "artifact"}
+
+    recovered = await test_client.get(f"/api/skill-agent-bff/sessions/{session_id}")
+    assert recovered.json()["data"]["status"] == "ready"
+    assert "download_url" not in recovered.json()["data"]["artifact"]
+    assert "preview_url" not in recovered.json()["data"]["artifact"]
+
+
+@pytest.mark.asyncio
+async def test_bff_validation_failure_is_not_success(test_client, isolated_bff):
+    created = await test_client.post("/api/skill-agent-bff/sessions", json={"target": "sales-skill"})
+    session_id = created.json()["data"]["id"]
+    await test_client.post(
+        f"/api/skill-agent-bff/sessions/{session_id}/invocations",
+        json={"message": "invalid request", "client_invocation_id": "invalid-1", "validate": True},
+    )
+    await asyncio.sleep(0.05)
+    recovered = await test_client.get(f"/api/skill-agent-bff/sessions/{session_id}")
+    assert recovered.json()["data"]["status"] == "validation_failed"
+    assert recovered.json()["data"]["artifact"] is None
+
+
+@pytest.mark.asyncio
+async def test_bff_artifact_download_and_preview_proxy_w5_zip(test_client, isolated_bff, monkeypatch):
+    created = await test_client.post("/api/skill-agent-bff/sessions", json={"target": "sales-skill"})
+    session_id = created.json()["data"]["id"]
+    archive_bytes = io.BytesIO()
+    with zipfile.ZipFile(archive_bytes, "w") as archive:
+        archive.writestr("sales-skill/SKILL.md", "# sales")
+        archive.writestr("sales-skill/index.html", "<!doctype html><p>sales</p>")
+    skill_agent_bff._sessions[session_id]["artifact"] = {
+        "revision": "rev-1",
+        "files": ["sales-skill/SKILL.md", "sales-skill/index.html"],
+        "download": {"download_url": "https://artifact.example/rev-1.zip"},
+    }
+    skill_agent_bff._sessions[session_id]["artifact_url"] = "https://artifact.example/rev-1.zip"
+    skill_agent_bff._persist()
+
+    class FakeResponse:
+        content = archive_bytes.getvalue()
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            assert url == "https://artifact.example/rev-1.zip"
+            return FakeResponse()
+
+    monkeypatch.setattr(skill_agent_bff.httpx, "AsyncClient", lambda **kwargs: FakeClient())
+    download = await test_client.get(f"/api/skill-agent-bff/sessions/{session_id}/artifact/download")
+    assert download.status_code == 200
+    assert download.headers["content-type"].startswith("application/zip")
+    preview = await test_client.get(f"/api/skill-agent-bff/sessions/{session_id}/artifact/preview")
+    assert preview.status_code == 200
+    assert preview.headers["content-type"].startswith("text/html")
+    assert "sales" in preview.text
