@@ -6,7 +6,8 @@ import { skillApi } from '../skill/api'
 import { Conversation } from '../skill/Conversation'
 import { NewSkill } from '../skill/NewSkill'
 import { SkillRail } from '../skill/SkillRail'
-import type { SkillCatalog, SkillRevision, SkillSession, WorkshopSkill } from '../skill/types'
+import type { SkillCatalog, SkillContextRef, SkillRevision, SkillSession, WorkshopSkill } from '../skill/types'
+import { openVikingApi } from '../../openviking/api'
 
 type MobilePane = 'skills' | 'conversation' | 'artifact'
 
@@ -28,6 +29,26 @@ function ContextSummary({ session }: { session: SkillSession }) {
   )
 }
 
+function ResourceRefList({
+  session,
+  onRemove,
+}: {
+  session: SkillSession
+  onRemove: (item: SkillContextRef) => void
+}) {
+  return (
+    <div className="dw-context-summary">
+      {session.context_refs.knowledge_refs.map(item => (
+        <span key={item.id} title={item.id}>
+          <BookOpen size={13} />
+          {item.name}
+          <button type="button" aria-label={`移除 ${item.name}`} onClick={() => onRemove(item)}>移除</button>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export function SkillMount() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -45,6 +66,8 @@ export function SkillMount() {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
   const [mobilePane, setMobilePane] = useState<MobilePane>('conversation')
+  const [importedKnowledge, setImportedKnowledge] = useState<SkillContextRef[]>([])
+  const [importError, setImportError] = useState('')
 
   const selectedSkill = skills.find(item => item.id === requestedSkillId) || null
   const visibleSkills = useMemo(() => {
@@ -54,6 +77,41 @@ export function SkillMount() {
       `${skill.title} ${skill.target_skill} ${skill.description}`.toLocaleLowerCase().includes(needle),
     )
   }, [search, skills])
+
+  useEffect(() => {
+    const resourceRef = query.get('resource_ref')
+    const profileRef = query.get('profile_ref')
+    if (!isNew || !resourceRef || !profileRef) {
+      setImportedKnowledge([])
+      setImportError('')
+      return
+    }
+    let cancelled = false
+    void openVikingApi.resolveResource(profileRef, resourceRef)
+      .then(value => {
+        if (cancelled) return
+        setImportedKnowledge([{
+          id: value.resource_ref,
+          kind: 'knowledge_resource',
+          name: value.display_name,
+          source: 'OpenViking ResourceRef',
+          metadata: {
+            profile_ref: profileRef,
+            profile_name: value.profile_name,
+            resource_type: value.resource_type,
+            summary: value.summary,
+          },
+        }])
+        setImportError('')
+      })
+      .catch(reason => {
+        if (!cancelled) {
+          setImportedKnowledge([])
+          setImportError(reason instanceof Error ? reason.message : '该 ResourceRef 已失效或无权访问')
+        }
+      })
+    return () => { cancelled = true }
+  }, [isNew, location.search, query])
 
   const loadSkills = useCallback(async () => {
     const response = await skillApi.listSkills()
@@ -198,6 +256,19 @@ export function SkillMount() {
     }
   }
 
+  const removeKnowledgeRef = async (item: SkillContextRef) => {
+    if (!session) return
+    try {
+      setSession(await skillApi.updateContext(session.id, {
+        mcp_refs: session.context_refs.mcp_refs,
+        knowledge_refs: session.context_refs.knowledge_refs.filter(ref => ref.id !== item.id),
+      }))
+      setError('')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '移除 ResourceRef 失败')
+    }
+  }
+
   const createSkill = async (value: Parameters<typeof skillApi.createSkill>[0]) => {
     setCreating(true)
     try {
@@ -234,9 +305,9 @@ export function SkillMount() {
           onSelect={selectSkill}
         />
         <main className="dw-skill-center">
-          {error && <div className="dw-inline-error dw-skill-global-error">{error}<button onClick={() => setError('')}>关闭</button></div>}
+          {(error || importError) && <div className="dw-inline-error dw-skill-global-error">{error || importError}<button onClick={() => { setError(''); setImportError('') }}>关闭</button></div>}
           {isNew ? (
-            <NewSkill catalog={catalog} creating={creating} onCreate={createSkill} />
+            <NewSkill catalog={catalog} initialKnowledge={importedKnowledge} creating={creating} onCreate={createSkill} />
           ) : selectedSkill && session ? (
             <>
               <header className="dw-skill-header">
@@ -264,6 +335,7 @@ export function SkillMount() {
                 </div>
               </header>
               <ContextSummary session={session} />
+              <ResourceRefList session={session} onRemove={item => void removeKnowledgeRef(item)} />
               <Conversation
                 session={session}
                 disabled={creating}

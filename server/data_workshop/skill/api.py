@@ -19,7 +19,13 @@ from sqlalchemy.orm.attributes import flag_modified
 from server.auth.dependencies import AuthContext, get_current_auth_context
 from server.auth.scopes import Scope
 from server.data_workshop.skill.repository import SkillWorkbenchRepository
-from server.data_workshop.skill.schemas import InvocationCreate, RetryRequest, SessionCreate, SkillCreate
+from server.data_workshop.skill.schemas import (
+    InvocationCreate,
+    RetryRequest,
+    SessionContextUpdate,
+    SessionCreate,
+    SkillCreate,
+)
 from server.data_workshop.skill.service import (
     ACTIVE_TASKS,
     append_json,
@@ -30,7 +36,7 @@ from server.data_workshop.skill.service import (
     run_invocation,
     session_payload,
     skill_payload,
-    validate_refs,
+    validate_requested_refs,
     visible_catalog,
 )
 from server.db.session import AsyncSessionFactory, get_async_session
@@ -123,7 +129,13 @@ async def create_skill(
     repo = repo_for(db, auth)
     catalog = await visible_catalog(db, auth.tenant_id, auth.user_id, auth.user.email)
     try:
-        context_refs = validate_refs(body.mcp_refs, body.knowledge_refs, catalog)
+        context_refs = await validate_requested_refs(
+            body.mcp_refs,
+            body.knowledge_refs,
+            catalog,
+            tenant_id=auth.tenant_id,
+            owner_id=auth.user_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     if await repo.get_skill_by_target(body.target_skill):
@@ -201,7 +213,13 @@ async def create_session(
     else:
         catalog = await visible_catalog(db, auth.tenant_id, auth.user_id, auth.user.email)
         try:
-            context_refs = validate_refs(body.mcp_refs or [], body.knowledge_refs or [], catalog)
+            context_refs = await validate_requested_refs(
+                body.mcp_refs or [],
+                body.knowledge_refs or [],
+                catalog,
+                tenant_id=auth.tenant_id,
+                owner_id=auth.user_id,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
     item = await repo.create_session(skill_id=skill.id, title=body.title, context_refs=context_refs)
@@ -214,6 +232,38 @@ async def create_session(
     await db.commit()
     await db.refresh(item)
     return success_response(data=session_payload(item, skill), message="Session created")
+
+
+@router.patch("/sessions/{session_id}/context")
+async def update_context(
+    session_id: str,
+    body: SessionContextUpdate,
+    auth: AuthContext = Depends(require_skill_write),
+    db: AsyncSession = Depends(get_async_session),
+):
+    repo = repo_for(db, auth)
+    item = await repo.get_session(parse_uuid(session_id, "Session"))
+    if item is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    skill = await repo.get_skill(item.skill_id)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    catalog = await visible_catalog(db, auth.tenant_id, auth.user_id, auth.user.email)
+    try:
+        item.context_refs_json = await validate_requested_refs(
+            body.mcp_refs,
+            body.knowledge_refs,
+            catalog,
+            tenant_id=auth.tenant_id,
+            owner_id=auth.user_id,
+        )
+        flag_modified(item, "context_refs_json")
+        await db.commit()
+        await db.refresh(item)
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return success_response(data=session_payload(item, skill), message="Session context updated")
 
 
 @router.get("/sessions/{session_id}")

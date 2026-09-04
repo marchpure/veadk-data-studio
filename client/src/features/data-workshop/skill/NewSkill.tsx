@@ -1,5 +1,5 @@
 import { ArrowRight, Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ContextPicker } from './ContextPicker'
 import type { SkillCatalog, SkillContextRef } from './types'
 
@@ -7,6 +7,7 @@ export function NewSkill({
   catalog,
   creating,
   onCreate,
+  initialKnowledge = [],
 }: {
   catalog: SkillCatalog | null
   creating: boolean
@@ -17,13 +18,27 @@ export function NewSkill({
     mcp_refs: SkillContextRef[]
     knowledge_refs: SkillContextRef[]
   }) => Promise<void>
+  initialKnowledge?: SkillContextRef[]
 }) {
   const [title, setTitle] = useState('')
   const [target, setTarget] = useState('')
   const [description, setDescription] = useState('')
   const [mcpRefs, setMcpRefs] = useState<SkillContextRef[]>([])
-  const [knowledgeRefs, setKnowledgeRefs] = useState<SkillContextRef[]>([])
+  const [knowledgeRefs, setKnowledgeRefs] = useState<SkillContextRef[]>(initialKnowledge)
   const normalizedTarget = target.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
+  const effectiveCatalog = catalog
+    ? {
+        ...catalog,
+        knowledge_refs: [
+          ...initialKnowledge,
+          ...catalog.knowledge_refs.filter(item => !initialKnowledge.some(ref => ref.id === item.id)),
+        ],
+      }
+    : catalog
+
+  useEffect(() => {
+    if (initialKnowledge.length) setKnowledgeRefs(initialKnowledge)
+  }, [initialKnowledge])
 
   return (
     <div className="dw-new-skill">
@@ -34,7 +49,7 @@ export function NewSkill({
         <label className="wide"><span>用途说明</span><textarea value={description} onChange={event => setDescription(event.target.value)} placeholder="这个 Skill 将帮助团队…" /></label>
       </div>
       <ContextPicker
-        catalog={catalog}
+        catalog={effectiveCatalog}
         selectedMcp={mcpRefs}
         selectedKnowledge={knowledgeRefs}
         onMcpChange={setMcpRefs}

@@ -74,6 +74,14 @@ export const skillApi = {
       method: 'POST',
       body: JSON.stringify({ title: '新会话' }),
     }),
+  updateContext: (sessionId: string, body: {
+    mcp_refs: SkillContextRef[]
+    knowledge_refs: SkillContextRef[]
+  }) =>
+    request<SkillSession>(`/sessions/${encodeURIComponent(sessionId)}/context`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
   invoke: (sessionId: string, message: string, clientInvocationId: string) =>
     request<SkillSession>(`/sessions/${encodeURIComponent(sessionId)}/invocations`, {
       method: 'POST',

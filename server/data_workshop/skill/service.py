@@ -11,8 +11,7 @@ from urllib.parse import quote, urlparse
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm.attributes import flag_modified
 
 from server.data_workshop.api import _action_view, _items, _list_apps, _subject_views, get_openconnector_client
@@ -330,6 +329,101 @@ def validate_refs(
     }
 
 
+async def resolve_requested_openviking_refs(
+    requested: list[ContextRef],
+    *,
+    tenant_id: UUID,
+    owner_id: UUID,
+) -> list[dict[str, Any]]:
+    """Validate opaque W6 refs before they enter the durable W7 context."""
+    opaque = [item for item in requested if item.id.startswith("ovr_")]
+    if not opaque:
+        return []
+    try:
+        from server.services.openviking_service import (
+            OpenVikingConfig,
+            OpenVikingError,
+            OpenVikingProfileRepository,
+            OpenVikingService,
+        )
+
+        database = os.getenv("OPENVIKING_PROFILE_DATABASE")
+        if not database:
+            database = str(__import__("pathlib").Path(os.getenv("DATA_DIR", ".data")) / "openviking-profiles.sqlite3")
+        service = OpenVikingService(
+            OpenVikingProfileRepository(database),
+            OpenVikingConfig.from_env(),
+        )
+        resolved: list[dict[str, Any]] = []
+        for item in opaque:
+            profile_ref = item.metadata.get("profile_ref")
+            if not isinstance(profile_ref, str) or not profile_ref:
+                raise ValueError("OpenViking ResourceRef 缺少 profile scope")
+            profile = service.repository.get(
+                profile_ref,
+                str(tenant_id),
+                f"tenant:{tenant_id}",
+                str(owner_id),
+            )
+            if profile is None or profile.status != "ready":
+                raise ValueError("OpenViking ResourceRef 已失效或无权访问")
+            try:
+                detail = await service.resolve_resource(profile, item.id)
+            except OpenVikingError as exc:
+                raise ValueError(f"OpenViking ResourceRef 不可用：{exc}") from exc
+            resolved.append(
+                ContextRef(
+                    id=item.id,
+                    kind="knowledge_resource",
+                    name=str(detail.get("display_name") or item.name),
+                    source="OpenViking ResourceRef",
+                    metadata={
+                        "profile_ref": profile.profile_id,
+                        "profile_name": profile.display_name,
+                        "resource_type": detail.get("resource_type", "file"),
+                        "summary": detail.get("summary", ""),
+                    },
+                ).model_dump()
+            )
+        return resolved
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("OpenViking ResourceRef 当前不可验证") from exc
+
+
+async def validate_requested_refs(
+    requested_mcp: list[ContextRef],
+    requested_knowledge: list[ContextRef],
+    catalog: dict[str, Any],
+    *,
+    tenant_id: UUID,
+    owner_id: UUID,
+) -> dict[str, Any]:
+    visible_knowledge = {item["id"]: item for item in catalog["knowledge_refs"]}
+    opaque = await resolve_requested_openviking_refs(
+        requested_knowledge,
+        tenant_id=tenant_id,
+        owner_id=owner_id,
+    )
+    for item in opaque:
+        visible_knowledge[item["id"]] = item
+    merged = dict(catalog)
+    merged["knowledge_refs"] = list(visible_knowledge.values())
+    return validate_refs(requested_mcp, requested_knowledge, merged)
+
+
+async def validate_persisted_openviking_refs(
+    refs: list[dict[str, Any]],
+    *,
+    tenant_id: UUID,
+    owner_id: UUID,
+) -> None:
+    requested = [ContextRef.model_validate(item) for item in refs if str(item.get("id", "")).startswith("ovr_")]
+    if requested:
+        await resolve_requested_openviking_refs(requested, tenant_id=tenant_id, owner_id=owner_id)
+
+
 def delegated_auth_ref(auth: Any) -> str | None:
     provider = os.getenv("W5_DELEGATED_AUTH_PROVIDER", "").strip()
     if not provider:
@@ -377,6 +471,11 @@ async def run_invocation(
         if skill is None:
             return
         try:
+            await validate_persisted_openviking_refs(
+                item.context_refs_json.get("knowledge_refs", []),
+                tenant_id=tenant_id,
+                owner_id=owner_id,
+            )
             invocation = W5Invocation(
                 business_goal=payload.message,
                 mcp_capability_refs=[ref["id"] for ref in item.context_refs_json.get("mcp_refs", [])],
@@ -429,6 +528,19 @@ async def run_invocation(
                     "id": str(uuid4()),
                     "type": item.status,
                     "code": exc.code,
+                    "message": str(exc),
+                    "at": now_iso(),
+                },
+            )
+        except ValueError as exc:
+            item.status = "blocked_auth"
+            append_json(
+                item,
+                "events_json",
+                {
+                    "id": str(uuid4()),
+                    "type": "blocked_auth",
+                    "code": "RESOURCE_OUT_OF_SCOPE",
                     "message": str(exc),
                     "at": now_iso(),
                 },

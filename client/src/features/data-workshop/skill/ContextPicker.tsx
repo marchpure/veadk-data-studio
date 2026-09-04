@@ -54,7 +54,12 @@ export function ContextPicker({
                 checked={selectedKnowledge.some(item => item.id === resource.id)}
                 onChange={() => toggle(selectedKnowledge, resource, onKnowledgeChange)}
               />
-              <span>{resource.name}<small>{resource.id}</small></span>
+              <span>
+                <strong>{resource.name}</strong>
+                <small>{String(resource.metadata.resource_type || 'Resource')} · {String(resource.metadata.profile_name || 'OpenViking')}</small>
+                {resource.metadata.summary ? <small>{String(resource.metadata.summary)}</small> : null}
+                <small className="dw-resource-ref">{resource.id}</small>
+              </span>
             </label>
           ))}
         </div>

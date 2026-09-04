@@ -34,6 +34,13 @@ class SessionCreate(BaseModel):
     knowledge_refs: list[ContextRef] | None = Field(default=None, max_length=100)
 
 
+class SessionContextUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mcp_refs: list[ContextRef] = Field(default_factory=list, max_length=100)
+    knowledge_refs: list[ContextRef] = Field(default_factory=list, max_length=100)
+
+
 class InvocationCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 

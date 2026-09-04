@@ -1,0 +1,62 @@
+{
+  "workstream": "DWV1 I4-A W6.1 + W7.1 Integration Owner",
+  "status": "INTEGRATED_CODE_READY",
+  "repository": "https://github.com/marchpure/veadk-data-studio.git",
+  "branch": "integration/dwv1-i4a-w61-w71-v3",
+  "worktree": "/Users/bytedance/worktrees/dwv1-i4a-w61-w71-v3",
+  "inputs": {
+    "w71_branch": "feat/dwv1-w71-skill-workbench",
+    "w71_sha": "b9072724605ee5549c8abb68a70e1b5777c6ea42",
+    "w61_branch": "verify/dwv1-w61-openviking-live-v3",
+    "w61_sha": "39d17e99d27249b3a9863083b2d45f1de2da7e9c",
+    "merge_base": "9766b3a5e810c12edcfbe3ba43d9a3e0419c2275"
+  },
+  "integration": {
+    "shell": "W7.1 DataWorkshopApp/WorkshopShell remains the single shell for /kb and /skill",
+    "kb": "W6.1 OpenVikingWorkspace is mounted under /kb*",
+    "skill": "W7.1 SkillMount remains the canonical /skill workbench",
+    "legacy_routes": [
+      "/skill/new",
+      "/skill/:id",
+      "/sessions",
+      "/sessions/:id",
+      "/mcp*"
+    ],
+    "server_router_registration": [
+      "openviking router once under /api",
+      "data-workshop router once under /api",
+      "skill workbench router once under /api"
+    ],
+    "migration_head": "add_dw_skill_workbench",
+    "w5_boundary": "W5 transport seam retained; no cloud generation integration added"
+  },
+  "cross_module_journey": {
+    "select": "W6 resource tree selection maps the current Viking URI to an opaque signed ovr_ ResourceRef",
+    "authorize": "W6 BFF resolves and authorizes the selected ref server-side",
+    "handoff": "browser navigates only to /skill?mode=new&profile_ref=...&resource_ref=...",
+    "display": "W7 new Skill form shows safe display name, type, profile, summary, and opaque ResourceRef",
+    "persist": "W7 create Skill/session BFF stores the ref in formal tenant/owner-scoped Session context",
+    "restore": "Session context is loaded from the database after refresh",
+    "remove": "PATCH /api/v1/sessions/{session_id}/context removes the ref in the same context store",
+    "fail_closed": "W5 invocation revalidates opaque refs against the current tenant/owner-scoped W6 profile and emits blocked_auth on revocation/deletion/cross-tenant scope"
+  },
+  "security": {
+    "browser_api_key": false,
+    "browser_upstream_uri": false,
+    "browser_full_content_in_url": false,
+    "w5_transport_changed": false,
+    "resource_reference": "opaque profile-scoped ovr_... signed capability"
+  },
+  "verification": {
+    "python_compile": "passed",
+    "backend_focused": "57 passed",
+    "openviking_frontend": "31 files, 131 tests passed",
+    "frontend_typecheck": "passed",
+    "frontend_production_build": "passed with existing donor CSS/chunk warnings",
+    "alembic_heads": [
+      "add_dw_skill_workbench"
+    ],
+    "git_diff_check": "passed",
+    "remote_inputs": "local SHA matched origin SHA for both W6.1 and W7.1; both source worktrees clean before integration"
+  }
+}

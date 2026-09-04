@@ -75,6 +75,7 @@ from server.routers import llm_connections, unified_agent
 from server.routers import local_repos as local_repos_router
 from server.routers import mcp_keys as mcp_keys_router
 from server.routers import notebooks as notebooks_router
+from server.routers import openviking as openviking_router
 from server.routers import queries as queries_router
 from server.routers import raw_query as raw_query_router
 from server.routers import schedules as schedules_router
@@ -648,6 +649,7 @@ app.include_router(github_router.router, prefix="/api", tags=["github"])
 app.include_router(databricks_oauth_router.router, prefix="/api", tags=["databricks-oauth"])
 
 app.include_router(local_repos_router.router, prefix="/api", tags=["local-repos"])
+app.include_router(openviking_router.router, prefix="/api", tags=["openviking"])
 
 app.include_router(auth_router.router, prefix="/api", tags=["auth"])
 

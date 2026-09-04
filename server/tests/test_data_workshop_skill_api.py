@@ -199,6 +199,28 @@ async def test_rejects_invisible_context_and_duplicate_target(skill_app) -> None
 
 
 @pytest.mark.asyncio
+async def test_session_context_update_persists_and_removes_knowledge_ref(skill_app) -> None:
+    client, factory, _, _ = skill_app
+    created = await client.post("/api/v1/skills", json=skill_body())
+    session = created.json()["data"]["session"]
+    session_id = session["id"]
+    reduced = {
+        "mcp_refs": [],
+        "knowledge_refs": [],
+    }
+    updated = await client.patch(f"/api/v1/sessions/{session_id}/context", json=reduced)
+    assert updated.status_code == 200
+    assert updated.json()["data"]["context_refs"] == reduced
+
+    async with factory() as db:
+        item = await db.get(DataWorkshopSkillSession, UUID(session_id))
+        assert item.context_refs_json == reduced
+
+    refreshed = await client.get(f"/api/v1/sessions/{session_id}")
+    assert refreshed.json()["data"]["context_refs"] == reduced
+
+
+@pytest.mark.asyncio
 async def test_w6_provider_accepts_only_openviking_resource_refs(skill_app, monkeypatch: pytest.MonkeyPatch) -> None:
     _, factory, _, identities = skill_app
     tenant_id, owner_id, _, _ = identities

@@ -6,6 +6,7 @@ import { ConsoleEmbed, NewConnectionEmbed } from './pages/ConsoleEmbed'
 import { ConnectionDocs } from './pages/Docs'
 import { WorkshopHome } from './pages/Home'
 import { SkillMount } from './pages/SkillMount'
+import OpenVikingPage from '../../pages/OpenVikingPage'
 import './data-workshop.css'
 
 function OwnedElsewhere({ title, owner }: { title: string; owner: string }) {
@@ -42,7 +43,8 @@ export function DataWorkshopApp() {
     <Route path="/connections/access/identity" element={<ConsoleEmbed title="Identity 配置" consolePath="access" />} />
     <Route path="/connections/access" element={<ConnectionAccess />} />
     <Route path="/connections/docs" element={<ConnectionDocs />} />
-    <Route path="/kb/*" element={<OwnedElsewhere title="知识库" owner="OpenViking" />} />
+    <Route path="/kb/connect" element={<OpenVikingPage connectOnly />} />
+    <Route path="/kb/*" element={<OpenVikingPage />} />
     <Route path="/skill" element={<SkillMount />} />
     <Route path="/skill/new" element={<SkillRedirect source="new" />} />
     <Route path="/skill/:skillId" element={<SkillRedirect source="skill" />} />
