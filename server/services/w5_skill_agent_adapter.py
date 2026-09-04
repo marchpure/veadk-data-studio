@@ -84,13 +84,30 @@ class W5SkillAgentAdapter:
             }),
         ]
         process = None
+        stderr_task = None
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=self.timeout)
+            stderr_task = asyncio.create_task(process.stderr.read()) if process.stderr else None
+            deadline = asyncio.get_running_loop().time() + self.timeout
+            while process.stdout:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise TimeoutError
+                line = await asyncio.wait_for(process.stdout.readline(), timeout=remaining)
+                if not line:
+                    break
+                event = self.parse_event(line.decode(errors="replace"))
+                if event is not None:
+                    yield event
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise TimeoutError
+            await asyncio.wait_for(process.wait(), timeout=remaining)
+            stderr = await stderr_task if stderr_task else b""
         except TimeoutError as exc:
             if process is not None:
                 await self._terminate(process)
@@ -106,10 +123,8 @@ class W5SkillAgentAdapter:
             if "401" in detail or "403" in detail or "BLOCKED_AUTH" in detail:
                 raise W5AdapterError("BLOCKED_AUTH", detail)
             raise W5AdapterError("RETRYABLE", detail, retryable=True)
-        for line in stdout.decode(errors="replace").splitlines():
-            event = self.parse_event(line)
-            if event is not None:
-                yield event
+        if stderr_task and not stderr_task.done():
+            stderr_task.cancel()
 
     @staticmethod
     async def _terminate(process: asyncio.subprocess.Process) -> None:

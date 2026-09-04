@@ -13,16 +13,28 @@ from server.services.w5_skill_agent_adapter import W5AdapterError, W5Invocation,
 async def test_adapter_forwards_runtime_request_and_parses_incremental_events(monkeypatch):
     calls = []
 
+    class FakeStream:
+        def __init__(self, lines):
+            self.lines = iter(lines)
+
+        async def readline(self):
+            await asyncio.sleep(0)
+            return next(self.lines, b"")
+
+        async def read(self):
+            return b""
+
     class FakeProcess:
         returncode = 0
+        stdout = FakeStream([
+            b'data: {"type":"planning"}\n',
+            b'data: {"type":"revision.created","revision":"rev-1"}\n',
+            b'data: {"type":"artifact.created","artifact":{"files":["SKILL.md"]}}\n',
+        ])
+        stderr = FakeStream([])
 
-        async def communicate(self):
-            return (
-                b'data: {"type":"planning"}\n'
-                b'data: {"type":"revision.created","revision":"rev-1"}\n'
-                b'data: {"type":"artifact.created","artifact":{"files":["SKILL.md"]}}\n',
-                b"",
-            )
+        async def wait(self):
+            return self.returncode
 
     async def fake_exec(*command, **kwargs):
         calls.append(command)
@@ -67,18 +79,29 @@ async def test_adapter_fails_closed_without_auth_or_endpoint():
             W5Invocation("goal", [], [], None, None, "session", None)
         ):
             pass
+    with pytest.raises(W5AdapterError, match="RUNTIME_ID"):
+        async for _ in W5SkillAgentAdapter().invoke(
+            W5Invocation("goal", [], [], None, None, "session", "delegated-ref")
+        ):
+            pass
 
 
 @pytest.mark.asyncio
 async def test_adapter_terminates_process_when_cancelled(monkeypatch):
     terminated = []
 
+    class FakeStream:
+        async def readline(self):
+            await asyncio.sleep(60)
+            return b""
+
+        async def read(self):
+            return b""
+
     class FakeProcess:
         returncode = None
-
-        async def communicate(self):
-            await asyncio.sleep(60)
-            return b"", b""
+        stdout = FakeStream()
+        stderr = FakeStream()
 
         def terminate(self):
             terminated.append("terminate")
@@ -98,11 +121,6 @@ async def test_adapter_terminates_process_when_cancelled(monkeypatch):
     task.cancel()
     with pytest.raises(W5AdapterError, match="cancelled"):
         await task
-    with pytest.raises(W5AdapterError, match="RUNTIME_ID"):
-        async for _ in W5SkillAgentAdapter().invoke(
-            W5Invocation("goal", [], [], None, None, "session", "delegated-ref")
-        ):
-            pass
 
 
 def test_bff_restart_marks_running_sessions_interrupted(tmp_path, monkeypatch):
