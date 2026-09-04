@@ -13,7 +13,6 @@ import SkillReviewPage from './pages/SkillReviewPage'
 import HomePage from './pages/HomePage'
 import FoldersPage from './pages/FoldersPage'
 import FolderDetailPage from './pages/FolderDetailPage'
-import './pages/openviking.css'
 const OpenVikingPage = lazy(() => import('./pages/OpenVikingPage'))
 import GitHubIntegrations from './pages/GitHubIntegrations'
 import IntegrationsPage from './pages/Integrations'

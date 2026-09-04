@@ -18,6 +18,8 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
+        "#": path.resolve(__dirname, "./src/features/openviking"),
+        "@ov-server": path.resolve(__dirname, "./src/features/openviking/types/ov-server"),
       },
     },
     build: {

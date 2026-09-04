@@ -4,12 +4,15 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.auth.dependencies import AuthContext, require_scope
 from server.auth.scopes import Scope
+from server.db.session import get_async_session
 from server.schemas.standard_response import success_response
+from server.services.source_resources import SourceResourceService
 from server.services.openviking_service import (
     OpenVikingConfig,
     OpenVikingError,
@@ -20,6 +23,7 @@ from server.services.openviking_service import (
 )
 
 router = APIRouter(prefix="/knowledge/openviking", tags=["openviking"])
+source_resource_service = SourceResourceService()
 
 
 def _service() -> OpenVikingService:
@@ -30,7 +34,7 @@ def _service() -> OpenVikingService:
     try:
         config = OpenVikingConfig.from_env()
     except OpenVikingError as exc:
-        raise HTTPException(status_code=503, detail={"code": "BLOCKED_UPSTREAM", "message": str(exc)}) from exc
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)}) from exc
     return OpenVikingService(OpenVikingProfileRepository(database), config)
 
 
@@ -71,22 +75,16 @@ class ConnectionResourceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     parent_ref: str = Field(min_length=1, max_length=4096)
     filename: str = Field(min_length=1, max_length=128)
-    document: dict[str, Any]
+    resource_id: str = Field(min_length=1, max_length=128)
 
 
-class ReadRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    offset: int = Field(default=0, ge=0, le=1_000_000)
-    limit: int = Field(default=1_000_000, ge=1, le=1_000_000)
-
-
-def _scope(auth: AuthContext) -> tuple[str, str]:
-    return str(auth.tenant_id), f"tenant:{auth.tenant_id}"
+def _scope(auth: AuthContext) -> tuple[str, str, str]:
+    return str(auth.tenant_id), f"tenant:{auth.tenant_id}", str(auth.user_id)
 
 
 def _get_profile(service: OpenVikingService, profile_id: str, auth: AuthContext) -> OpenVikingProfile:
-    tenant_id, workspace_id = _scope(auth)
-    profile = service.repository.get(profile_id, tenant_id, workspace_id)
+    tenant_id, workspace_id, principal_id = _scope(auth)
+    profile = service.repository.get(profile_id, tenant_id, workspace_id, principal_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="OpenViking profile not found")
     return profile
@@ -106,16 +104,16 @@ def _error(exc: OpenVikingError) -> HTTPException:
 @router.get("/profiles")
 async def list_profiles(auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))):
     service = _service()
-    tenant_id, workspace_id = _scope(auth)
-    return success_response(data=[service.public(item) for item in service.repository.list(tenant_id, workspace_id)], message="Profiles retrieved")
+    tenant_id, workspace_id, principal_id = _scope(auth)
+    return success_response(data=[service.public(item) for item in service.repository.list(tenant_id, workspace_id, principal_id)], message="Profiles retrieved")
 
 
 @router.post("/profiles", status_code=201)
 async def create_profile(body: ProfileCreate, auth: AuthContext = Depends(require_scope(Scope.DATASET_CREATE))):
     try:
         service = _service()
-        tenant_id, workspace_id = _scope(auth)
-        profile = service.create(tenant_id, workspace_id, **body.model_dump())
+        tenant_id, workspace_id, principal_id = _scope(auth)
+        profile = service.create(tenant_id, workspace_id, principal_id, **body.model_dump())
         return success_response(data=service.public(profile), message="Profile created")
     except OpenVikingError as exc:
         raise _error(exc)
@@ -145,13 +143,21 @@ async def validate_profile(profile_id: str, auth: AuthContext = Depends(require_
 async def delete_profile(profile_id: str, auth: AuthContext = Depends(require_scope(Scope.DATASET_DELETE))):
     service = _service()
     profile = _get_profile(service, profile_id, auth)
-    service.repository.delete(profile.profile_id, profile.tenant_id, profile.workspace_id)
+    service.repository.delete(profile.profile_id, profile.tenant_id, profile.workspace_id, profile.principal_id)
 
 
 @router.post("/profiles/{profile_id}/operations/{operation}")
 async def operation(profile_id: str, operation: str, body: OperationRequest, auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))):
     try:
         service = _service()
+        write_operations = {
+            "content_write", "content_reindex", "resource_import",
+            "watch_create", "watch_update", "watch_delete", "watch_trigger",
+        }
+        if operation in write_operations and not (
+            auth.has_scope(Scope.DATASET_CREATE) or auth.has_scope(Scope.DATASET_UPDATE)
+        ):
+            raise HTTPException(status_code=403, detail="OpenViking write permission required")
         result = await service.request(
             _ready(service, profile_id, auth),
             operation,
@@ -173,6 +179,8 @@ async def item_operation(
 ):
     try:
         service = _service()
+        if operation in {"watch_update", "watch_delete", "watch_trigger", "session_commit"} and not auth.has_scope(Scope.DATASET_UPDATE):
+            raise HTTPException(status_code=403, detail="OpenViking update permission required")
         result = await service.item_request(_ready(service, profile_id, auth), operation, item_id, body.payload)
         return success_response(data=result, message="OpenViking item operation completed")
     except OpenVikingError as exc:
@@ -194,17 +202,21 @@ async def delete_resource(profile_id: str, body: OperationRequest, auth: AuthCon
 
 @router.post("/profiles/{profile_id}/skill-context")
 async def skill_context(profile_id: str, body: ContextRequest, auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))):
-    service = _service()
-    profile = _ready(service, profile_id, auth)
-    return success_response(
-        data={
-            "provider": "openviking",
-            "profile_ref": profile.profile_id,
-            "resource_ref": body.resource_ref,
-            "version": "v1",
-        },
-        message="Resource context authorized",
-    )
+    try:
+        service = _service()
+        profile = _ready(service, profile_id, auth)
+        service.resolve_ref(profile, body.resource_ref)
+        return success_response(
+            data={
+                "provider": "openviking",
+                "profile_ref": profile.profile_id,
+                "resource_ref": body.resource_ref,
+                "version": "v1",
+            },
+            message="Resource context authorized",
+        )
+    except OpenVikingError as exc:
+        raise _error(exc)
 
 
 @router.post("/profiles/{profile_id}/resource/resolve")
@@ -217,12 +229,20 @@ async def resolve_resource(profile_id: str, body: ContextRequest, auth: AuthCont
 
 
 @router.post("/profiles/{profile_id}/resource/read")
-async def read_resource(profile_id: str, body: ContextRequest, options: ReadRequest | None = None, auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))):
+async def read_resource(
+    profile_id: str,
+    body: ContextRequest,
+    offset: int = Query(default=0, ge=0, le=1_000_000),
+    limit: int = Query(default=1_000_000, ge=1, le=1_000_000),
+    auth: AuthContext = Depends(require_scope(Scope.DATASET_READ)),
+):
     try:
         service = _service()
         profile = _ready(service, profile_id, auth)
-        request = options or ReadRequest()
-        return success_response(data=await service.read_resource(profile, body.resource_ref, request.offset, request.limit), message="Resource content read")
+        return success_response(
+            data=await service.read_resource(profile, body.resource_ref, offset, limit),
+            message="Resource content read",
+        )
     except OpenVikingError as exc:
         raise _error(exc)
 
@@ -242,14 +262,32 @@ async def import_connection_resource(
     profile_id: str,
     body: ConnectionResourceRequest,
     auth: AuthContext = Depends(require_scope(Scope.DATASET_CREATE)),
+    session: AsyncSession = Depends(get_async_session),
 ):
     try:
         service = _service()
+        resource = await source_resource_service.get_resource(
+            session=session,
+            tenant_id=auth.tenant_id,
+            resource_id=body.resource_id,
+        )
+        if resource is None:
+            raise HTTPException(status_code=404, detail="Connection resource not found")
+        if resource.status != "ready":
+            raise HTTPException(status_code=409, detail="Connection resource is not ready")
+        document = {
+            "kind": resource.resource_type,
+            "display_name": resource.name,
+            "description": {
+                "external_id": resource.external_id,
+                "selection": resource.selection_config_json or {},
+            },
+        }
         result = await service.import_connection_resource(
             _ready(service, profile_id, auth),
             filename=body.filename,
             parent_ref=body.parent_ref,
-            document=body.document,
+            document=document,
         )
         return success_response(data=result, message="Connection resource import started")
     except OpenVikingError as exc:
@@ -259,13 +297,19 @@ async def import_connection_resource(
 @router.post("/profiles/{profile_id}/upload")
 async def upload(
     profile_id: str,
-    parent_ref: str = Form(...),
+    parent_ref: str | None = Form(default=None),
     file: UploadFile = File(...),
     auth: AuthContext = Depends(require_scope(Scope.DATASET_CREATE)),
 ):
     try:
         service = _service()
-        result = await service.import_uploaded(_ready(service, profile_id, auth), file.filename or "upload", file.content_type or "application/octet-stream", await file.read(50 * 1024 * 1024 + 1), parent_ref)
-        return success_response(data=result, message="File import started")
+        result = await service.upload(
+            _ready(service, profile_id, auth),
+            file.filename or "upload",
+            file.content_type or "application/octet-stream",
+            await file.read(50 * 1024 * 1024 + 1),
+            parent_ref,
+        )
+        return success_response(data=result, message="Temporary file uploaded")
     except OpenVikingError as exc:
         raise _error(exc)

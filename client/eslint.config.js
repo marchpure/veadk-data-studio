@@ -6,7 +6,12 @@ import tseslint from 'typescript-eslint'
 import { globalIgnores } from 'eslint/config'
 
 export default tseslint.config([
-  globalIgnores(['dist', 'src-tauri/target', 'src-tauri/gen']),
+  globalIgnores([
+    'dist',
+    'src-tauri/target',
+    'src-tauri/gen',
+    'src/features/openviking/gen',
+  ]),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
