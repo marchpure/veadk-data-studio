@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import ipaddress
 import json
 import os
@@ -41,6 +42,7 @@ class OpenVikingConfig:
     encryption_key: bytes
     timeout_seconds: float = 30.0
     allow_loopback: bool = False
+    ref_signing_key: bytes = b""
 
     @classmethod
     def from_env(cls) -> "OpenVikingConfig":
@@ -53,7 +55,12 @@ class OpenVikingConfig:
             raise OpenVikingError("OPENVIKING_UNAVAILABLE", "OpenViking encryption key is invalid", 503) from exc
         if len(key) != 32:
             raise OpenVikingError("OPENVIKING_UNAVAILABLE", "OpenViking encryption key must be 32 bytes", 503)
-        return cls(key, float(os.getenv("OPENVIKING_TIMEOUT_SECONDS", "30")), os.getenv("OPENVIKING_ALLOW_LOOPBACK") == "1")
+        return cls(
+            encryption_key=key,
+            timeout_seconds=float(os.getenv("OPENVIKING_TIMEOUT_SECONDS", "30")),
+            allow_loopback=os.getenv("OPENVIKING_ALLOW_LOOPBACK") == "1",
+            ref_signing_key=hmac.new(key, b"openviking-resource-ref-v1", hashlib.sha256).digest(),
+        )
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,7 @@ class OpenVikingProfile:
     profile_id: str
     tenant_id: str
     workspace_id: str
+    principal_id: str
     display_name: str
     encrypted_base_url: bytes
     encrypted_api_key: bytes
@@ -79,7 +87,8 @@ class OpenVikingProfileRepository:
             """
             CREATE TABLE IF NOT EXISTS openviking_profiles (
               profile_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
-              workspace_id TEXT NOT NULL, display_name TEXT NOT NULL,
+              workspace_id TEXT NOT NULL, principal_id TEXT NOT NULL,
+              display_name TEXT NOT NULL,
               encrypted_base_url BLOB NOT NULL, encrypted_api_key BLOB NOT NULL,
               workspace_uri TEXT NOT NULL, status TEXT NOT NULL,
               created_at REAL NOT NULL, updated_at REAL NOT NULL
@@ -98,25 +107,42 @@ class OpenVikingProfileRepository:
             );
             """
         )
+        columns = {
+            str(row["name"])
+            for row in self._db.execute("PRAGMA table_info(openviking_profiles)").fetchall()
+        }
+        if "principal_id" not in columns:
+            self._db.execute(
+                "ALTER TABLE openviking_profiles ADD COLUMN principal_id TEXT NOT NULL DEFAULT ''"
+            )
         self._db.commit()
 
-    def list(self, tenant_id: str, workspace_id: str) -> list[OpenVikingProfile]:
+    def list(self, tenant_id: str, workspace_id: str, principal_id: str) -> list[OpenVikingProfile]:
         rows = self._db.execute(
-            "SELECT * FROM openviking_profiles WHERE tenant_id=? AND workspace_id=? ORDER BY created_at",
-            (tenant_id, workspace_id),
+            """SELECT profile_id,tenant_id,workspace_id,principal_id,display_name,
+            encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at
+            FROM openviking_profiles
+            WHERE tenant_id=? AND workspace_id=? AND principal_id=? ORDER BY created_at""",
+            (tenant_id, workspace_id, principal_id),
         ).fetchall()
         return [OpenVikingProfile(**dict(row)) for row in rows]
 
-    def get(self, profile_id: str, tenant_id: str, workspace_id: str) -> OpenVikingProfile | None:
+    def get(self, profile_id: str, tenant_id: str, workspace_id: str, principal_id: str) -> OpenVikingProfile | None:
         row = self._db.execute(
-            "SELECT * FROM openviking_profiles WHERE profile_id=? AND tenant_id=? AND workspace_id=?",
-            (profile_id, tenant_id, workspace_id),
+            """SELECT profile_id,tenant_id,workspace_id,principal_id,display_name,
+            encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at
+            FROM openviking_profiles
+            WHERE profile_id=? AND tenant_id=? AND workspace_id=? AND principal_id=?""",
+            (profile_id, tenant_id, workspace_id, principal_id),
         ).fetchone()
         return OpenVikingProfile(**dict(row)) if row else None
 
     def save(self, profile: OpenVikingProfile) -> OpenVikingProfile:
         self._db.execute(
-            """INSERT INTO openviking_profiles VALUES(?,?,?,?,?,?,?,?,?,?)
+            """INSERT INTO openviking_profiles
+            (profile_id,tenant_id,workspace_id,principal_id,display_name,
+             encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(profile_id) DO UPDATE SET display_name=excluded.display_name,
             encrypted_base_url=excluded.encrypted_base_url, encrypted_api_key=excluded.encrypted_api_key,
             workspace_uri=excluded.workspace_uri, status=excluded.status, updated_at=excluded.updated_at""",
@@ -125,10 +151,10 @@ class OpenVikingProfileRepository:
         self._db.commit()
         return profile
 
-    def delete(self, profile_id: str, tenant_id: str, workspace_id: str) -> None:
+    def delete(self, profile_id: str, tenant_id: str, workspace_id: str, principal_id: str) -> None:
         self._db.execute(
-            "DELETE FROM openviking_profiles WHERE profile_id=? AND tenant_id=? AND workspace_id=?",
-            (profile_id, tenant_id, workspace_id),
+            "DELETE FROM openviking_profiles WHERE profile_id=? AND tenant_id=? AND workspace_id=? AND principal_id=?",
+            (profile_id, tenant_id, workspace_id, principal_id),
         )
         self._db.commit()
 
@@ -199,7 +225,7 @@ OPERATION_FIELDS: dict[str, set[str]] = {
     "content_overview": {"resource_ref"},
     "content_write": {"resource_ref", "content", "mode", "wait", "timeout"},
     "content_reindex": {"resource_ref", "mode", "wait", "recursive"},
-    "resource_import": {"path", "parent_ref", "destination_ref", "source_name", "wait", "watch_interval"},
+    "resource_import": {"path", "temp_file_id", "parent_ref", "destination_ref", "source_name", "wait", "watch_interval"},
     "find": {"query", "target_ref", "limit", "score_threshold", "read_content", "tags"},
     "search": {"query", "target_ref", "limit", "score_threshold", "read_content", "tags", "mode"},
     "grep": {"resource_ref", "pattern", "case_insensitive", "node_limit", "level_limit"},
@@ -215,7 +241,7 @@ OPERATION_FIELDS: dict[str, set[str]] = {
 
 FORBIDDEN_FIELDS = {
     "account", "account_id", "api_key", "authorization", "credential", "credentials",
-    "password", "principal_id", "secret", "token", "user", "user_id",
+    "owner", "owner_id", "password", "principal_id", "secret", "token", "user", "user_id",
 }
 
 def _sanitize(value: Any) -> Any:
@@ -234,7 +260,7 @@ def _resource_ref(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip()
-    if not normalized.startswith("viking://") or "\x00" in normalized:
+    if not re.fullmatch(r"ovr_[A-Za-z0-9_-]+\.[0-9a-f]{64}", normalized):
         return None
     return normalized
 
@@ -250,6 +276,9 @@ class OpenVikingService:
         self.repository = repository
         self.config = config
         self._cipher = AESGCM(config.encryption_key)
+        self._ref_signing_key = config.ref_signing_key or hmac.new(
+            config.encryption_key, b"openviking-resource-ref-v1", hashlib.sha256
+        ).digest()
 
     def _crypt(self, value: str, scope: str) -> bytes:
         nonce = secrets.token_bytes(12)
@@ -264,23 +293,121 @@ class OpenVikingService:
     def _credentials(self, profile: OpenVikingProfile) -> tuple[str, str]:
         return self._decrypt(profile.encrypted_base_url, f"url:{profile.profile_id}"), self._decrypt(profile.encrypted_api_key, f"key:{profile.profile_id}")
 
+    def resource_ref(self, profile: OpenVikingProfile, uri: str) -> str:
+        root = profile.workspace_uri.rstrip("/") + "/"
+        normalized = uri.rstrip("/") + "/" if uri.endswith("/") else uri
+        if normalized.rstrip("/") == profile.workspace_uri.rstrip("/"):
+            normalized = profile.workspace_uri
+        if not normalized.startswith(root) and normalized.rstrip("/") != profile.workspace_uri.rstrip("/"):
+            raise OpenVikingError("RESOURCE_OUT_OF_SCOPE", "Resource is outside workspace", 403)
+        payload = base64.urlsafe_b64encode(
+            json.dumps({"p": profile.profile_id, "u": normalized}, separators=(",", ":")).encode()
+        ).decode().rstrip("=")
+        signature = hmac.new(self._ref_signing_key, payload.encode(), hashlib.sha256).hexdigest()
+        return f"ovr_{payload}.{signature}"
+
+    def resolve_ref(self, profile: OpenVikingProfile, value: str) -> str:
+        try:
+            prefix, signature = value.rsplit(".", 1)
+            if not prefix.startswith("ovr_"):
+                raise ValueError
+            payload = prefix[4:]
+            expected = hmac.new(self._ref_signing_key, payload.encode(), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(signature, expected):
+                raise ValueError
+            data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+            if data["p"] != profile.profile_id:
+                raise ValueError
+            uri = str(data["u"])
+        except (ValueError, KeyError, json.JSONDecodeError, UnicodeError) as exc:
+            raise OpenVikingError("INVALID_RESOURCE_REF", "Resource reference is invalid", 422) from exc
+        root = profile.workspace_uri.rstrip("/") + "/"
+        if not uri.startswith(root) and uri.rstrip("/") != profile.workspace_uri.rstrip("/"):
+            raise OpenVikingError("RESOURCE_OUT_OF_SCOPE", "Resource is outside workspace", 403)
+        return uri
+
+    def _replace_refs(self, profile: OpenVikingProfile, value: Any) -> Any:
+        names = {
+            "resource_ref": "uri", "target_ref": "target_uri", "parent_ref": "parent",
+            "destination_ref": "to", "to_ref": "to_uri", "resource_id_ref": "resource_id_ref",
+        }
+        if isinstance(value, dict):
+            result: dict[str, Any] = {}
+            for key, item in value.items():
+                if key in names and isinstance(item, str):
+                    result[names[key]] = self.resolve_ref(profile, item)
+                else:
+                    result[key] = self._replace_refs(profile, item)
+            return result
+        if isinstance(value, list):
+            return [self._replace_refs(profile, item) for item in value]
+        return value
+
     @staticmethod
-    def public(profile: OpenVikingProfile) -> dict[str, Any]:
+    def validate_import_url(value: str) -> None:
+        parsed = urlsplit(value)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            raise OpenVikingError("INVALID_IMPORT_URL", "Imported URLs must use HTTPS", 422)
+        try:
+            addresses = {
+                item[4][0] for item in socket.getaddrinfo(
+                    parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM
+                )
+            }
+        except socket.gaierror as exc:
+            raise OpenVikingError("INVALID_IMPORT_URL", "Import URL host cannot be resolved", 422) from exc
+        if any(
+            (ip := ipaddress.ip_address(address)).is_private
+            or ip.is_loopback or ip.is_link_local or ip.is_multicast
+            or ip.is_reserved or ip.is_unspecified
+            for address in addresses
+        ):
+            raise OpenVikingError("SSRF_BLOCKED", "Import URL resolves to a restricted network", 422)
+
+    def _sanitize_upstream(self, profile: OpenVikingProfile, value: Any) -> Any:
+        ref_fields = {
+            "uri": "resource_ref", "target_uri": "target_ref", "parent": "parent_ref",
+            "to_uri": "to_ref", "root_uri": "root_ref", "resource_id": "resource_id_ref",
+        }
+        if isinstance(value, dict):
+            result: dict[str, Any] = {}
+            for key, item in value.items():
+                if str(key).casefold() in FORBIDDEN_FIELDS:
+                    continue
+                if key in ref_fields and isinstance(item, str) and item.startswith("viking://"):
+                    display_uri = item.replace(profile.workspace_uri, "viking://workspace/", 1)
+                    result[ref_fields[key]] = self.resource_ref(profile, item)
+                    result["uri"] = display_uri
+                    result["display_uri"] = display_uri
+                elif isinstance(item, str) and item.startswith("viking://"):
+                    continue
+                elif key in {"path", "source_path"} and isinstance(item, str) and item.startswith("/"):
+                    result[key] = Path(item).name
+                else:
+                    result[key] = self._sanitize_upstream(profile, item)
+            return result
+        if isinstance(value, list):
+            return [self._sanitize_upstream(profile, item) for item in value]
+        if isinstance(value, str):
+            return value.replace(profile.workspace_uri, "viking://workspace/", 1)
+        return value
+
+    def public(self, profile: OpenVikingProfile) -> dict[str, Any]:
         return {
             "profile_id": profile.profile_id, "display_name": profile.display_name,
-            "workspace_uri": profile.workspace_uri, "status": profile.status,
-            "root_resource_ref": profile.workspace_uri,
+            "workspace_uri": "viking://workspace/", "status": profile.status,
+            "root_resource_ref": self.resource_ref(profile, profile.workspace_uri),
             "base_url_configured": True, "api_key_configured": True,
             "created_at": profile.created_at, "updated_at": profile.updated_at,
             "api_key_masked": "••••••••" if profile.encrypted_api_key else "",
         }
 
-    def create(self, tenant_id: str, workspace_id: str, display_name: str, base_url: str, api_key: str, workspace_uri: str) -> OpenVikingProfile:
+    def create(self, tenant_id: str, workspace_id: str, principal_id: str, display_name: str, base_url: str, api_key: str, workspace_uri: str) -> OpenVikingProfile:
         self._validate_url(base_url)
         profile_id = "ov_" + secrets.token_hex(12)
         now = time.time()
         return self.repository.save(OpenVikingProfile(
-            profile_id, tenant_id, workspace_id, display_name.strip(),
+            profile_id, tenant_id, workspace_id, principal_id, display_name.strip(),
             self._crypt(base_url.rstrip("/"), f"url:{profile_id}"),
             self._crypt(api_key, f"key:{profile_id}"), workspace_uri or "viking://resources/",
             "pending", now, now,
@@ -290,9 +417,8 @@ class OpenVikingService:
         base_url = values.get("base_url")
         if base_url:
             self._validate_url(base_url)
-        current_url, current_key = self._credentials(profile)
         profile = OpenVikingProfile(
-            profile.profile_id, profile.tenant_id, profile.workspace_id,
+            profile.profile_id, profile.tenant_id, profile.workspace_id, profile.principal_id,
             values.get("display_name", profile.display_name),
             self._crypt(base_url.rstrip("/"), f"url:{profile.profile_id}") if base_url else profile.encrypted_base_url,
             self._crypt(values["api_key"], f"key:{profile.profile_id}") if values.get("api_key") else profile.encrypted_api_key,
@@ -314,11 +440,9 @@ class OpenVikingService:
             raise OpenVikingError("UPSTREAM_NOT_ALLOWED", "OpenViking host cannot be resolved", 422) from exc
 
     async def validate(self, profile: OpenVikingProfile) -> OpenVikingProfile:
-        base_url, api_key = self._credentials(profile)
         try:
-            async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
-                response = await client.get(f"{base_url}/api/v1/fs/stat", params={"resource_ref": profile.workspace_uri}, headers={"X-API-Key": api_key, "Accept": "application/json"})
-            if response.status_code >= 400:
+            value = await self.request(profile, "fs_stat", {"resource_ref": self.resource_ref(profile, profile.workspace_uri)})
+            if value is None:
                 raise OpenVikingError("UPSTREAM_REJECTED", "OpenViking validation failed", 502)
         except OpenVikingError:
             self.repository.save(OpenVikingProfile(**{**profile.__dict__, "status": "error", "updated_at": time.time()}))
@@ -341,12 +465,15 @@ class OpenVikingService:
             unknown = set(clean) - allowed_fields
             if unknown:
                 raise OpenVikingError("INVALID_OPERATION_PAYLOAD", "Unsupported OpenViking operation field", 422)
+        if operation == "resource_import" and isinstance(clean.get("path"), str) and clean["path"].startswith(("http://", "https://")):
+            self.validate_import_url(clean["path"])
         ref_keys = ("resource_ref", "target_ref", "parent_ref", "destination_ref")
         if item_id is None:
             ref_keys += ("to_ref",)
         for key in ref_keys:
             if key in clean and clean[key] is not None and _resource_ref(clean[key]) is None:
                 raise OpenVikingError("INVALID_RESOURCE_REF", f"{key} must be a signed Viking resource reference", 422)
+        upstream_payload = self._replace_refs(profile, clean)
         method, path = operations[operation]
         if item_id:
             path = f"{path}/{item_id}"
@@ -363,23 +490,35 @@ class OpenVikingService:
         base_url, api_key = self._credentials(profile)
         kwargs: dict[str, Any] = {"headers": {"X-API-Key": api_key, "Accept": "application/json"}}
         if method in {"GET", "DELETE"}:
-            kwargs["params"] = clean
+            kwargs["params"] = upstream_payload
         else:
-            kwargs["json"] = clean
+            kwargs["json"] = upstream_payload
         try:
             async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
                 response = await client.request(method, f"{base_url}{path}", **kwargs)
         except httpx.HTTPError as exc:
-            raise OpenVikingError("UPSTREAM_UNREACHABLE", "OpenViking endpoint is unreachable", 502) from exc
+            raise OpenVikingError("OPENVIKING_TIMEOUT" if isinstance(exc, httpx.TimeoutException) else "OPENVIKING_UNAVAILABLE", "OpenViking endpoint is unavailable", 504 if isinstance(exc, httpx.TimeoutException) else 502) from exc
         if response.status_code >= 400:
-            raise OpenVikingError("UPSTREAM_REJECTED", "OpenViking request failed", 502)
+            if response.status_code in {401, 403}:
+                raise OpenVikingError("OPENVIKING_AUTH_FAILED", "OpenViking credentials were rejected", 401)
+            if response.status_code == 404:
+                raise OpenVikingError("OPENVIKING_NOT_FOUND", "OpenViking resource was not found", 404)
+            if response.status_code == 429:
+                raise OpenVikingError("OPENVIKING_RATE_LIMITED", "OpenViking rate limit exceeded", 429)
+            raise OpenVikingError("OPENVIKING_UPSTREAM_ERROR", "OpenViking request failed", 502)
         try:
             value = response.json()
         except ValueError:
             value = {"raw": response.text}
-        value = _sanitize(value)
-        if operation in {"tasks", "task_get"} and isinstance(value, list):
-            self.repository.save_tasks(profile, value)
+        value = self._sanitize_upstream(profile, value)
+        if operation in {"tasks", "task_get"}:
+            task_items = value
+            if isinstance(value, dict):
+                task_items = value.get("result", value.get("items"))
+            if isinstance(task_items, list):
+                self.repository.save_tasks(
+                    profile, [item for item in task_items if isinstance(item, dict)]
+                )
         if operation in {"content_write", "resource_import", "watch_update", "watch_delete", "watch_trigger"}:
             self.repository.save_idempotent(cache_key, value)
         return value
@@ -391,30 +530,57 @@ class OpenVikingService:
         item_id: str,
         payload: dict[str, Any],
     ) -> Any:
-        clean = dict(payload)
-        clean.setdefault("to_ref", item_id)
-        return await self.request(profile, operation, clean, item_id=item_id)
+        return await self.request(profile, operation, dict(payload), item_id=item_id)
 
     async def upload(self, profile: OpenVikingProfile, filename: str, content_type: str, content: bytes, parent_ref: str) -> Any:
         suffix = Path(filename).suffix.lower()
+        safe_name = Path(filename).name
+        if safe_name != filename or not SAFE_RESOURCE_NAME.fullmatch(safe_name):
+            raise OpenVikingError("INVALID_ARGUMENT", "Upload filename is invalid", 422)
         if suffix not in ALLOWED_UPLOAD_EXTENSIONS:
-            raise OpenVikingError("UNSUPPORTED_FILE_TYPE", "This file type cannot be imported", 422)
-        if len(content) > MAX_UPLOAD_BYTES:
+            raise OpenVikingError("UNSUPPORTED_FILE_TYPE", "This file type cannot be imported", 415)
+        if not content or len(content) > MAX_UPLOAD_BYTES:
             raise OpenVikingError("PAYLOAD_TOO_LARGE", "Upload is too large", 413)
+        if suffix == ".json":
+            try:
+                json.loads(content)
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise OpenVikingError("INVALID_FILE_CONTENT", "JSON file is malformed", 422) from exc
+        self.resolve_ref(profile, parent_ref)
         base_url, api_key = self._credentials(profile)
         try:
             async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
                 response = await client.post(
-                    f"{base_url}/api/v1/resources",
-                    files={"file": (filename, content, content_type)},
-                    data={"parent_ref": parent_ref, "wait": "false"},
+                    f"{base_url}/api/v1/resources/temp_upload",
+                    files={"file": (safe_name, content, content_type)},
+                    data={"telemetry": "false"},
                     headers={"X-API-Key": api_key, "Accept": "application/json"},
                 )
         except httpx.HTTPError as exc:
-            raise OpenVikingError("UPSTREAM_UNREACHABLE", "OpenViking endpoint is unreachable", 502) from exc
+            raise OpenVikingError("OPENVIKING_TIMEOUT" if isinstance(exc, httpx.TimeoutException) else "OPENVIKING_UNAVAILABLE", "OpenViking upload failed", 504 if isinstance(exc, httpx.TimeoutException) else 502) from exc
         if response.status_code >= 400:
-            raise OpenVikingError("UPSTREAM_REJECTED", "OpenViking import failed", 502)
-        return response.json()
+            if response.status_code in {401, 403}:
+                raise OpenVikingError("OPENVIKING_AUTH_FAILED", "OpenViking credentials were rejected", 401)
+            if response.status_code == 429:
+                raise OpenVikingError("OPENVIKING_RATE_LIMITED", "OpenViking rate limit exceeded", 429)
+            raise OpenVikingError("OPENVIKING_UPLOAD_FAILED", "OpenViking import failed", 502)
+        try:
+            result = response.json()
+        except ValueError as exc:
+            raise OpenVikingError("OPENVIKING_INVALID_RESPONSE", "OpenViking upload returned invalid JSON", 502) from exc
+        temp = result.get("result", {}).get("temp_file_id") if isinstance(result, dict) else None
+        if not isinstance(temp, str) or not temp:
+            raise OpenVikingError("OPENVIKING_INVALID_RESPONSE", "OpenViking upload did not return a temporary file id", 502)
+        return result
+
+    async def resolve_resource(self, profile: OpenVikingProfile, resource_ref: str) -> dict[str, Any]:
+        uri = self.resolve_ref(profile, resource_ref)
+        value = await self.request(profile, "fs_stat", {"resource_ref": resource_ref})
+        return {"resource_ref": resource_ref, "display_uri": uri.replace(profile.workspace_uri, "viking://workspace/", 1), "detail": value}
+
+    async def read_resource(self, profile: OpenVikingProfile, resource_ref: str, offset: int = 0, limit: int = 1_000_000) -> Any:
+        self.resolve_ref(profile, resource_ref)
+        return await self.request(profile, "content_read", {"resource_ref": resource_ref, "offset": offset, "limit": limit, "raw": True})
 
     async def import_connection_resource(
         self,
@@ -426,13 +592,24 @@ class OpenVikingService:
         if not SAFE_RESOURCE_NAME.fullmatch(filename) or not filename.lower().endswith(".json"):
             raise OpenVikingError("INVALID_ARGUMENT", "Connection resource filename must use .json", 422)
         content = json.dumps(_sanitize(document), ensure_ascii=False, indent=2)
+        return await self.import_uploaded(profile, filename, "application/json", content.encode(), parent_ref)
+
+    async def import_uploaded(
+        self, profile: OpenVikingProfile, filename: str, content_type: str,
+        content: bytes, parent_ref: str,
+    ) -> Any:
+        uploaded = await self.upload(profile, filename, content_type, content, parent_ref)
+        temp = uploaded["result"]["temp_file_id"]
         return await self.request(
-            profile,
-            "content_write",
-            {
-                "resource_ref": parent_ref.rstrip("/") + "/" + filename,
-                "content": content,
-                "mode": "overwrite",
-                "wait": False,
-            },
+            profile, "resource_import",
+            {"temp_file_id": temp, "parent_ref": parent_ref, "wait": False},
         )
+
+    async def import_text(
+        self, profile: OpenVikingProfile, filename: str, content: str, parent_ref: str
+    ) -> Any:
+        if not SAFE_RESOURCE_NAME.fullmatch(filename) or not filename.lower().endswith((".md", ".txt")):
+            raise OpenVikingError("UNSUPPORTED_FILE_TYPE", "Manual text must use .md or .txt", 415)
+        if not content.strip():
+            raise OpenVikingError("INVALID_ARGUMENT", "Text content is required", 422)
+        return await self.import_uploaded(profile, filename, "text/plain", content.encode(), parent_ref)

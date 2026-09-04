@@ -6,17 +6,35 @@ import {
 } from 'lucide-react'
 import { openVikingApi, type OpenVikingProfile } from '../services/openviking'
 
-type Entry = { uri: string; name: string; is_dir?: boolean; isDir?: boolean; size?: number | string; abstract?: string; overview?: string }
+type Entry = { uri: string; resource_ref?: string; name: string; is_dir?: boolean; isDir?: boolean; size?: number | string; abstract?: string; overview?: string }
 type Mode = 'resources' | 'retrieval' | 'tasks' | 'watches' | 'connection'
 type Retrieval = 'search' | 'find' | 'grep' | 'glob'
 
+const resultOf = (value: unknown): unknown => {
+  if (value && typeof value === 'object' && 'result' in value) {
+    return (value as { result?: unknown }).result
+  }
+  return value
+}
+
 const asEntries = (value: unknown): Entry[] => {
-  const raw = value as { entries?: Entry[]; items?: Entry[]; nodes?: Entry[] } | Entry[] | null
+  const raw = resultOf(value) as { entries?: Entry[]; items?: Entry[]; nodes?: Entry[] } | Entry[] | null
   if (Array.isArray(raw)) return raw
   return raw?.entries ?? raw?.items ?? raw?.nodes ?? []
 }
 
 const isDir = (entry: Entry) => Boolean(entry.is_dir ?? entry.isDir ?? entry.uri.endsWith('/'))
+const refOf = (entry: Entry) => entry.resource_ref ?? entry.uri
+const previewText = (value: unknown): string => {
+  const resolved = resultOf(value)
+  if (typeof resolved === 'string') return resolved
+  if (!resolved || typeof resolved !== 'object') return String(resolved ?? '')
+  const record = resolved as Record<string, unknown>
+  for (const key of ['content', 'text', 'abstract', 'overview', 'message']) {
+    if (typeof record[key] === 'string') return record[key] as string
+  }
+  return 'The hosted service returned metadata without previewable text.'
+}
 
 function ProfilePanel({ profiles, onRefresh, onValidated }: { profiles: OpenVikingProfile[]; onRefresh: () => void; onValidated: (profile: OpenVikingProfile) => void }) {
   const [form, setForm] = useState({ display_name: 'OpenViking', base_url: '', api_key: '', workspace_uri: 'viking://resources/' })
@@ -94,13 +112,13 @@ function ResourceTree({ profileId, root, selected, onSelect }: { profileId: stri
   }, [profileId])
   useEffect(() => { void load(root) }, [load, root])
   const render = (uri: string, depth: number): ReactNode[] => (data[uri] ?? []).map((entry) => {
-    const directory = isDir(entry); const expanded = Boolean(open[entry.uri])
-    return <div key={entry.uri}>
-      <button className={`ov-tree-row ${selected === entry.uri ? 'is-selected' : ''}`} style={{ paddingLeft: 10 + depth * 16 }} onClick={() => { onSelect(entry); if (directory) { setOpen({ ...open, [entry.uri]: !expanded }); if (!data[entry.uri]) void load(entry.uri) } }}>
+    const entryRef = refOf(entry); const directory = isDir(entry); const expanded = Boolean(open[entryRef])
+    return <div key={entryRef}>
+      <button className={`ov-tree-row ${selected === entryRef ? 'is-selected' : ''}`} style={{ paddingLeft: 10 + depth * 16 }} onClick={() => { onSelect(entry); if (directory) { setOpen({ ...open, [entryRef]: !expanded }); if (!data[entryRef]) void load(entryRef) } }}>
         {directory ? (expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : <span className="ov-tree-indent" />}
         {directory ? <Folder size={15} /> : <File size={15} />}<span>{entry.name || entry.uri}</span>
       </button>
-      {directory && expanded ? render(entry.uri, depth + 1) : null}
+      {directory && expanded ? render(entryRef, depth + 1) : null}
     </div>
   })
   return <div className="ov-tree">{error && <p className="ov-form-message">{error}</p>}{render(root, 0)}</div>
@@ -125,16 +143,17 @@ function ImportPanel({ profileId, root, onDone }: { profileId: string; root: str
 function RetrievalPanel({ profileId, root }: { profileId: string; root: string }) {
   const [mode, setMode] = useState<Retrieval>('search'); const [query, setQuery] = useState(''); const [result, setResult] = useState<unknown>(null); const [busy, setBusy] = useState(false)
   const submit = async (nextMode = mode) => { setBusy(true); try { setResult(await openVikingApi.operation(profileId, nextMode, nextMode === 'grep' || nextMode === 'glob' ? { resource_ref: root, pattern: query } : { query, target_ref: root })) } catch (e) { setResult({ error: e instanceof Error ? e.message : 'Retrieval failed' }) } finally { setBusy(false) } }
-  const rows = Array.isArray(result) ? result : ((result as { items?: unknown[]; result?: unknown[] } | null)?.items ?? (result as { result?: unknown[] } | null)?.result ?? [])
+  const resolved = resultOf(result)
+  const rows = Array.isArray(resolved) ? resolved : ((resolved as { items?: unknown[] } | null)?.items ?? [])
   return <section className="ov-retrieval"><div className="ov-section-title"><Search size={18} /><h2>Retrieval</h2></div><div className="ov-segmented">{(['search', 'find', 'grep', 'glob'] as const).map((value) => <button className={mode === value ? 'active' : ''} key={value} onClick={() => setMode(value)}>{value}</button>)}</div><div className="ov-retrieval-bar"><input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void submit() }} placeholder="Search OpenViking context" /><button className="ov-primary" disabled={busy} onClick={() => void submit()}><Play size={14} /> Run</button></div>{result !== null && <div className="ov-result-list">{rows.length ? rows.map((item, index) => { const row = item as Record<string, unknown>; return <article key={index}><strong>{String(row.title ?? row.name ?? row.uri ?? 'Result')}</strong><small>{String(row.uri ?? row.resource_ref ?? '')}</small><p>{String(row.content ?? row.text ?? row.abstract ?? row.overview ?? 'No preview content returned')}</p></article> }) : <div className="ov-empty">No matching resources returned.</div>}</div>}</section>
 }
 
 export default function OpenVikingPage({ connectOnly = false }: { connectOnly?: boolean }) {
   const navigate = useNavigate(); const [profiles, setProfiles] = useState<OpenVikingProfile[]>([]); const [activeId, setActiveId] = useState(''); const [mode, setMode] = useState<Mode>(connectOnly ? 'connection' : 'resources'); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [selected, setSelected] = useState<Entry | null>(null); const [preview, setPreview] = useState<unknown>(null); const [refresh, setRefresh] = useState(0)
-  const active = useMemo(() => profiles.find((profile) => profile.profile_id === activeId && profile.status === 'ready'), [activeId, profiles]); const root = active?.workspace_uri ?? 'viking://resources/'
+  const active = useMemo(() => profiles.find((profile) => profile.profile_id === activeId && profile.status === 'ready'), [activeId, profiles]); const root = active?.root_resource_ref ?? ''
   const load = useCallback(async () => { setLoading(true); try { const values = await openVikingApi.listProfiles(); setProfiles(values); const ready = values.find((item) => item.profile_id === activeId && item.status === 'ready') ?? values.find((item) => item.status === 'ready'); setActiveId(ready?.profile_id ?? ''); if (!ready && !connectOnly) navigate('/kb/connect', { replace: true }) } catch (value) { setError(value instanceof Error ? value.message : 'Unable to load profiles') } finally { setLoading(false) } }, [activeId, connectOnly, navigate, refresh])
   useEffect(() => { void load() }, [load])
-  const select = async (entry: Entry) => { setSelected(entry); if (isDir(entry)) { setPreview(await openVikingApi.operation(active!.profile_id, 'content_overview', { resource_ref: entry.uri })) } else { setPreview(await openVikingApi.operation(active!.profile_id, 'content_read', { resource_ref: entry.uri, raw: true })) } }
+  const select = async (entry: Entry) => { setSelected(entry); const ref = refOf(entry); if (isDir(entry)) { setPreview(await openVikingApi.operation(active!.profile_id, 'content_overview', { resource_ref: ref })) } else { setPreview(await openVikingApi.operation(active!.profile_id, 'content_read', { resource_ref: ref, raw: true })) } }
   if (loading) return <main className="ov-page"><Loader2 className="ov-spin" /> Loading OpenViking</main>
   if (!connectOnly && !active) return <Navigate to="/kb/connect" replace />
   return <main className="ov-page">
@@ -142,14 +161,14 @@ export default function OpenVikingPage({ connectOnly = false }: { connectOnly?: 
     {error && <div className="ov-error">{error}</div>}
     <nav className="ov-nav">{(['resources', 'retrieval', 'tasks', 'watches', 'connection'] as const).map((item) => <button className={mode === item ? 'active' : ''} key={item} onClick={() => setMode(item)}>{item}</button>)}</nav>
     {mode === 'connection' || !active ? <ProfilePanel profiles={profiles} onRefresh={() => setRefresh((value) => value + 1)} onValidated={(profile) => { setProfiles((current) => current.map((item) => item.profile_id === profile.profile_id ? profile : item)); setActiveId(profile.profile_id); navigate('/kb') }} /> :
-      mode === 'resources' ? <div className="ov-resource-layout"><aside className="ov-panel ov-tree-panel"><div className="ov-section-title"><Folder size={17} /><h2>Resource context tree</h2></div><ResourceTree profileId={active.profile_id} root={root} selected={selected?.uri ?? ''} onSelect={(entry) => void select(entry)} /><ImportPanel profileId={active.profile_id} root={root} onDone={() => setRefresh((value) => value + 1)} /></aside><section className="ov-panel ov-preview"><div className="ov-preview-header"><div><span className="ov-muted">Preview</span><h2>{selected?.name ?? 'Select a resource'}</h2></div>{selected && <button className="ov-icon-button" title="Close preview" onClick={() => { setSelected(null); setPreview(null) }}><X size={15} /></button>}</div>{preview ? <pre>{typeof preview === 'string' ? preview : JSON.stringify(preview, null, 2)}</pre> : <div className="ov-empty">Select a file or directory in the context tree.</div>}<div className="ov-preview-actions"><button className="ov-secondary" onClick={() => active && void openVikingApi.authorizeSkillContext(active.profile_id, selected?.uri ?? root).then(setPreview)}><FilePlus2 size={14} /> Add to Skill Context</button>{selected && <button className="ov-secondary ov-danger" onClick={() => active && window.confirm('Delete this resource?') && void openVikingApi.deleteResource(active.profile_id, selected.uri).then(() => { setSelected(null); setPreview(null); setRefresh((value) => value + 1) })}><Trash2 size={14} /> Delete</button>}</div></section></div> :
+      mode === 'resources' ? <div className="ov-resource-layout"><aside className="ov-panel ov-tree-panel"><div className="ov-section-title"><Folder size={17} /><h2>Resource context tree</h2></div><ResourceTree profileId={active.profile_id} root={root} selected={selected ? refOf(selected) : ''} onSelect={(entry) => void select(entry)} /><ImportPanel profileId={active.profile_id} root={root} onDone={() => setRefresh((value) => value + 1)} /></aside><section className="ov-panel ov-preview"><div className="ov-preview-header"><div><span className="ov-muted">Preview</span><h2>{selected?.name ?? 'Select a resource'}</h2></div>{selected && <button className="ov-icon-button" title="Close preview" onClick={() => { setSelected(null); setPreview(null) }}><X size={15} /></button>}</div>{preview ? <div className="ov-preview-content">{previewText(preview)}</div> : <div className="ov-empty">Select a file or directory in the context tree.</div>}<div className="ov-preview-actions"><button className="ov-secondary" onClick={() => active && void openVikingApi.authorizeSkillContext(active.profile_id, selected ? refOf(selected) : root).then(() => setPreview('Resource added to Skill Context.'))}><FilePlus2 size={14} /> Add to Skill Context</button>{selected && <button className="ov-secondary ov-danger" onClick={() => active && window.confirm('Delete this resource?') && void openVikingApi.deleteResource(active.profile_id, refOf(selected)).then(() => { setSelected(null); setPreview(null); setRefresh((value) => value + 1) })}><Trash2 size={14} /> Delete</button>}</div></section></div> :
       mode === 'retrieval' ? <RetrievalPanel profileId={active.profile_id} root={root} /> : <OperationsPanel profileId={active.profile_id} mode={mode} root={root} />}
   </main>
 }
 
 function OperationsPanel({ profileId, mode, root }: { profileId: string; mode: 'tasks' | 'watches'; root: string }) {
   const [items, setItems] = useState<unknown[]>([]); const [message, setMessage] = useState('')
-  const load = async () => { try { const value = await openVikingApi.operation(profileId, mode, mode === 'tasks' ? { limit: 50 } : { active_only: false }); setItems(Array.isArray(value) ? value : ((value as { items?: unknown[] })?.items ?? [])) } catch (e) { setMessage(e instanceof Error ? e.message : 'Unable to load') } }
+  const load = async () => { try { const value = resultOf(await openVikingApi.operation(profileId, mode, mode === 'tasks' ? { limit: 50 } : { active_only: false })); setItems(Array.isArray(value) ? value : ((value as { items?: unknown[] })?.items ?? [])) } catch (e) { setMessage(e instanceof Error ? e.message : 'Unable to load') } }
   useEffect(() => { void load() }, [profileId, mode])
   const createWatch = async () => {
     try { await openVikingApi.operation(profileId, 'resource_import', { path: root, parent_ref: root, wait: false, watch_interval: 1440 }); setMessage('Watch creation submitted'); await load() }
@@ -158,7 +177,7 @@ function OperationsPanel({ profileId, mode, root }: { profileId: string; mode: '
   const updateWatch = async (item: Record<string, unknown>) => {
     const id = String(item.task_id ?? item.watch_id ?? item.to_ref ?? '')
     if (!id) return
-    try { await openVikingApi.itemOperation(profileId, 'watch_update', id, { is_active: !Boolean(item.is_active), watch_interval: 1440 }); await load() }
+    try { await openVikingApi.itemOperation(profileId, 'watch_update', id, { is_active: !item.is_active, watch_interval: 1440 }); await load() }
     catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to update watch') }
   }
   const deleteWatch = async (item: Record<string, unknown>) => {
