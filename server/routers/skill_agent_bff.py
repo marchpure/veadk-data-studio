@@ -247,6 +247,8 @@ async def _run(sid: str, payload: SkillInvocationCreate) -> None:
         item["status"] = (
             "blocked_auth"
             if exc.code == "BLOCKED_AUTH"
+            else "blocked_config"
+            if exc.code == "BLOCKED_CONFIG"
             else "cancelled"
             if exc.code == "CANCELLED"
             else "retryable"
@@ -255,7 +257,15 @@ async def _run(sid: str, payload: SkillInvocationCreate) -> None:
         )
         item["events"].append({
             "id": str(uuid4()),
-            "type": "blocked_auth" if exc.code == "BLOCKED_AUTH" else "cancelled" if exc.code == "CANCELLED" else "error",
+            "type": (
+                "blocked_auth"
+                if exc.code == "BLOCKED_AUTH"
+                else "blocked_config"
+                if exc.code == "BLOCKED_CONFIG"
+                else "cancelled"
+                if exc.code == "CANCELLED"
+                else "error"
+            ),
             "code": exc.code,
             "message": str(exc),
             "at": _now(),

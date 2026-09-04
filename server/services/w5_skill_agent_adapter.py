@@ -29,6 +29,17 @@ class W5Invocation:
     delegated_auth_ref: str | None
 
 
+class W5RuntimeTransport:
+    """Production transport seam; implementation is supplied by the runtime platform."""
+
+    async def invoke(self, invocation: W5Invocation) -> AsyncIterator[dict[str, Any]]:
+        raise W5AdapterError(
+            "BLOCKED_CONFIG",
+            "Production W5 runtime transport is not configured; complete I4 secret injection.",
+        )
+        yield  # pragma: no cover
+
+
 class W5SkillAgentAdapter:
     def __init__(
         self,
@@ -39,6 +50,8 @@ class W5SkillAgentAdapter:
         runtime_id: str | None = None,
         region: str | None = None,
         cli_path: str | None = None,
+        transport_mode: str | None = None,
+        runtime_transport: W5RuntimeTransport | None = None,
     ):
         self.base_url = (base_url or os.getenv("SKILL_AGENT_BASE_URL", "")).rstrip("/")
         self.timeout = timeout or float(os.getenv("SKILL_AGENT_TIMEOUT_SECONDS", "60"))
@@ -46,6 +59,8 @@ class W5SkillAgentAdapter:
         self.runtime_id = runtime_id or os.getenv("SKILL_AGENT_RUNTIME_ID", "")
         self.region = region or os.getenv("SKILL_AGENT_REGION", "cn-beijing")
         self.cli_path = cli_path or os.getenv("AGENTKIT_CLI_PATH", "agentkit")
+        self.transport_mode = (transport_mode or os.getenv("SKILL_AGENT_TRANSPORT", "PRODUCTION")).upper()
+        self.runtime_transport = runtime_transport or W5RuntimeTransport()
 
     def delegated_auth_ref(self, auth: Any) -> str | None:
         if not self.auth_provider:
@@ -59,8 +74,12 @@ class W5SkillAgentAdapter:
     async def invoke(self, invocation: W5Invocation) -> AsyncIterator[dict[str, Any]]:
         if not invocation.delegated_auth_ref:
             raise W5AdapterError("BLOCKED_AUTH", "Complete OAuth or re-authorize to continue.")
+        if self.transport_mode != "LOCAL_DEBUG":
+            async for event in self.runtime_transport.invoke(invocation):
+                yield event
+            return
         if self.base_url and not self.runtime_id:
-            raise W5AdapterError("CONFIG_ERROR", "REST endpoint transport is not an approved W5 contract")
+            raise W5AdapterError("BLOCKED_CONFIG", "LOCAL_DEBUG runtime requires a runtime id")
         if not self.runtime_id:
             raise W5AdapterError("CONFIG_ERROR", "SKILL_AGENT_RUNTIME_ID is not configured")
         request = {

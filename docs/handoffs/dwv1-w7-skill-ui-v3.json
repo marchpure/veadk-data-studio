@@ -1,0 +1,36 @@
+{
+  "schema_version": "1",
+  "workstream": "DWV1 V3 W7 Skill Creator UI",
+  "w7": {
+    "local_sha": "1e4cd486abb636e455483fd77fcc8004c0520347",
+    "remote_sha": "1e4cd486abb636e455483fd77fcc8004c0520347",
+    "branch": "feat/dwv1-rerun-20260904-w7-skill-ui",
+    "remote": "origin"
+  },
+  "w5": {
+    "source_sha": "0ad120c",
+    "runtime_id": "r-yeub2fo0lcq2swebzkt6",
+    "endpoint": "https://sgse9coq2sc5g91pu4prm.apigateway-cn-beijing.volceapi.com",
+    "deployed_status": "Ready",
+    "deployed_image_digest": "not recorded in W7"
+  },
+  "security": {
+    "runtime_service_auth": "PENDING_I4_SECRET_INJECTION",
+    "delegated_user_auth_provider": "PENDING_I4_APPROVED_PROVIDER",
+    "secrets_recorded": false,
+    "runtime_api_key_used_as_user_auth": false,
+    "cli_transport_scope": "LOCAL_DEBUG only"
+  },
+  "i4_acceptance": [
+    "create session with current user-visible MCP capability refs and OpenViking ResourceRefs",
+    "invoke W5 through the approved production runtime transport",
+    "consume planning/action/tool/observation/validation events incrementally",
+    "resolve target and complete validate",
+    "receive real revision and artifact metadata",
+    "preview HTML/text through BFF and download the W5 ZIP",
+    "continue the same target to a subsequent revision",
+    "reload and recover session, messages, context, target, and revision",
+    "verify cancellation, retry, expired auth, and revoked access fail closed"
+  ],
+  "live_w5_e2e_status": "PENDING_I4_DELEGATED_AUTH_AND_RUNTIME_SECRET"
+}

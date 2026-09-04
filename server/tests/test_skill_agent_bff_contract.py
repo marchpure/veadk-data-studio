@@ -41,7 +41,7 @@ async def test_adapter_forwards_runtime_request_and_parses_incremental_events(mo
         return FakeProcess()
 
     monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
-    adapter = W5SkillAgentAdapter(runtime_id="runtime-1", region="cn-beijing", cli_path="agentkit")
+    adapter = W5SkillAgentAdapter(runtime_id="runtime-1", region="cn-beijing", cli_path="agentkit", transport_mode="LOCAL_DEBUG")
     events = [
         event
         async for event in adapter.invoke(
@@ -111,11 +111,22 @@ async def test_adapter_fails_closed_without_auth_or_endpoint():
             W5Invocation("goal", [], [], None, None, "session", None)
         ):
             pass
-    with pytest.raises(W5AdapterError, match="RUNTIME_ID"):
+    with pytest.raises(W5AdapterError) as exc_info:
         async for _ in W5SkillAgentAdapter().invoke(
             W5Invocation("goal", [], [], None, None, "session", "delegated-ref")
         ):
             pass
+    assert exc_info.value.code == "BLOCKED_CONFIG"
+
+
+@pytest.mark.asyncio
+async def test_production_transport_fails_closed_without_i4_runtime():
+    with pytest.raises(W5AdapterError) as exc_info:
+        async for _ in W5SkillAgentAdapter(transport_mode="PRODUCTION").invoke(
+            W5Invocation("goal", [], [], None, None, "session", "delegated-ref")
+        ):
+            pass
+    assert exc_info.value.code == "BLOCKED_CONFIG"
 
 
 @pytest.mark.asyncio
@@ -146,7 +157,7 @@ async def test_adapter_terminates_process_when_cancelled(monkeypatch):
         return FakeProcess()
 
     monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
-    adapter = W5SkillAgentAdapter(runtime_id="runtime-1")
+    adapter = W5SkillAgentAdapter(runtime_id="runtime-1", transport_mode="LOCAL_DEBUG")
     stream = adapter.invoke(W5Invocation("goal", [], [], None, None, "s", "auth"))
     task = asyncio.create_task(stream.__anext__())
     await asyncio.sleep(0)
