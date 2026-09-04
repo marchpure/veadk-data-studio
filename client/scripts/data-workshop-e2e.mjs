@@ -7,6 +7,35 @@ const mcpEndpoint = 'https://s4j054gh1e125mqsipi2e.apigateway-cn-beijing.volceap
 const outputDir = path.resolve('artifacts/data-workshop')
 await fs.mkdir(outputDir, { recursive: true })
 
+async function assertViewportGeometry(page, viewport) {
+  const geometry = await page.evaluate(() => {
+    const main = document.querySelector('.dw-main')
+    const controls = [...document.querySelectorAll('button,a,input,select')].filter(element => {
+      const style = getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        !element.closest('.dw-sidebar:not(.is-open)')
+    })
+    const clippedControls = controls.filter(element => {
+      const rect = element.getBoundingClientRect()
+      return rect.left < -0.5 || rect.right > window.innerWidth + 0.5
+    })
+    return {
+      documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      mainOverflow: main ? main.scrollWidth - main.clientWidth : 0,
+      clippedControls: clippedControls.map(element =>
+        (element.textContent || element.getAttribute('aria-label') || element.tagName).trim(),
+      ),
+    }
+  })
+  if (geometry.documentOverflow || geometry.mainOverflow || geometry.clippedControls.length) {
+    throw new Error(`Invalid ${viewport} geometry: ${JSON.stringify(geometry)}`)
+  }
+}
+
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const consoleErrors = []
@@ -87,12 +116,15 @@ await page.getByText('测试完成').waitFor()
 await page.goto(`${baseUrl}/connections/docs`)
 await page.getByText(mcpEndpoint, { exact: true }).waitFor()
 await page.getByText('服务正常', { exact: true }).waitFor()
+await assertViewportGeometry(page, '1440x900')
 await page.screenshot({ path: path.join(outputDir, 'connection-docs-1440x900.png') })
 await page.setViewportSize({ width: 1280, height: 800 })
 await page.getByText('服务正常', { exact: true }).waitFor()
+await assertViewportGeometry(page, '1280x800')
 await page.screenshot({ path: path.join(outputDir, 'connection-docs-1280x800.png') })
 await page.setViewportSize({ width: 390, height: 844 })
 await page.getByText('服务正常', { exact: true }).waitFor()
+await assertViewportGeometry(page, '390x844')
 await page.screenshot({ path: path.join(outputDir, 'connection-docs-390x844.png') })
 
 for (const route of ['/mcp', '/mcp/new', '/mcp/example', '/mcp/not-found']) {
