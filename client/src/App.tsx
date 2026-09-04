@@ -15,6 +15,9 @@ import FoldersPage from './pages/FoldersPage'
 import FolderDetailPage from './pages/FolderDetailPage'
 import GitHubIntegrations from './pages/GitHubIntegrations'
 import IntegrationsPage from './pages/Integrations'
+import SkillListPage from './features/skill-creator/SkillListPage'
+import SessionsPage from './features/skill-creator/SessionsPage'
+import SkillWorkspacePage from './features/skill-creator/SkillWorkspacePage'
 import { Login, Register, ForgotPassword, ResetPassword, CheckEmail, AcceptInvitation, SetPassword } from './pages/auth'
 import SetupWorkspace from './pages/auth/SetupWorkspace'
 import { AuthGuard } from './components/AuthGuard'
@@ -193,6 +196,10 @@ function App() {
               </AuthGuard>
             }
           />
+          <Route path="/skill" element={<AuthGuard><ViewerRedirect><Layout><SkillListPage /></Layout></ViewerRedirect></AuthGuard>} />
+          <Route path="/skill/new" element={<AuthGuard><ViewerRedirect><Layout><SkillWorkspacePage /></Layout></ViewerRedirect></AuthGuard>} />
+          <Route path="/skill/:id" element={<AuthGuard><ViewerRedirect><Layout><SkillWorkspacePage /></Layout></ViewerRedirect></AuthGuard>} />
+          <Route path="/sessions" element={<AuthGuard><ViewerRedirect><Layout><SessionsPage /></Layout></ViewerRedirect></AuthGuard>} />
           <Route
             path="/llm-connections"
             element={
@@ -342,6 +349,10 @@ function App() {
             <Route path="/notebook/:id/preview" element={<ChatPreview />} />
             <Route path="/notebooks" element={<NotebooksPage />} />
             <Route path="/skill-review" element={<SkillReviewPage />} />
+            <Route path="/skill" element={<SkillListPage />} />
+            <Route path="/skill/new" element={<SkillWorkspacePage />} />
+            <Route path="/skill/:id" element={<SkillWorkspacePage />} />
+            <Route path="/sessions" element={<SessionsPage />} />
             <Route path="/llm-connections" element={<LLMConnectionsPage />} />
             <Route path="/databases" element={<DatabasesPage />} />
             <Route path="/data-models" element={<DataModelsHomePage />} />
@@ -386,6 +397,10 @@ function App() {
             <Route path="/notebook/:id/preview" element={<ChatPreview />} />
             <Route path="/notebooks" element={<NotebooksPage />} />
             <Route path="/skill-review" element={<SkillReviewPage />} />
+            <Route path="/skill" element={<SkillListPage />} />
+            <Route path="/skill/new" element={<SkillWorkspacePage />} />
+            <Route path="/skill/:id" element={<SkillWorkspacePage />} />
+            <Route path="/sessions" element={<SessionsPage />} />
             <Route path="/llm-connections" element={<LLMConnectionsPage />} />
             <Route path="/databases" element={<DatabasesPage />} />
             <Route path="/data-models" element={<DataModelsHomePage />} />

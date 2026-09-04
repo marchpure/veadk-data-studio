@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Database, SquarePen, PanelLeftClose, PanelLeft, Sparkles, Download, Home, Search, Boxes } from 'lucide-react'
+import { Database, SquarePen, PanelLeftClose, PanelLeft, Sparkles, Download, Home, Search, Boxes, History } from 'lucide-react'
 import NotebookHistory from './NotebookHistory'
 import CreateNotebook from './CreateNotebook'
 import ImportNotebookModal from './ImportNotebookModal'
@@ -193,6 +193,38 @@ export default function CollapsibleSidebar() {
                   </div>
                 </button>
               )}
+
+              <Link to="/skill" onClick={(e) => !isExpanded && e.stopPropagation()}>
+                <div
+                  className={`flex items-center rounded-lg transition-all duration-300 cursor-pointer ${
+                    isExpanded ? 'gap-3 px-3 py-1.5' : 'p-2 justify-center'
+                  } ${
+                    location.pathname.startsWith('/skill')
+                      ? 'bg-brand-orange/10 text-brand-orange border-l-3 border-brand-orange'
+                      : 'text-gray-300 hover:text-white hover:bg-[#2a2a2a]'
+                  }`}
+                  title={!isExpanded ? "Skills" : undefined}
+                >
+                  <Sparkles className="h-4 w-4 flex-shrink-0" />
+                  {isExpanded && <span className="text-sm whitespace-nowrap transition-opacity duration-300">Skills</span>}
+                </div>
+              </Link>
+
+              <Link to="/sessions" onClick={(e) => !isExpanded && e.stopPropagation()}>
+                <div
+                  className={`flex items-center rounded-lg transition-all duration-300 cursor-pointer ${
+                    isExpanded ? 'gap-3 px-3 py-1.5' : 'p-2 justify-center'
+                  } ${
+                    location.pathname === '/sessions'
+                      ? 'bg-brand-orange/10 text-brand-orange border-l-3 border-brand-orange'
+                      : 'text-gray-300 hover:text-white hover:bg-[#2a2a2a]'
+                  }`}
+                  title={!isExpanded ? "Sessions" : undefined}
+                >
+                  <History className="h-4 w-4 flex-shrink-0" />
+                  {isExpanded && <span className="text-sm whitespace-nowrap transition-opacity duration-300">Sessions</span>}
+                </div>
+              </Link>
 
               <Link to="/databases" onClick={(e) => !isExpanded && e.stopPropagation()}>
                 <div

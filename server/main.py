@@ -81,6 +81,7 @@ from server.routers import semantic_models as semantic_models_router
 from server.routers import settings as settings_router
 from server.routers import skill_loop as skill_loop_router
 from server.routers import skill_suggestions as skill_suggestions_router
+from server.routers import skill_agent_bff as skill_agent_bff_router
 from server.routers import skills as skills_router
 from server.routers import slack as slack_router
 from server.routers import source_connections as source_connections_router
@@ -610,6 +611,7 @@ app.include_router(skills_router.router, prefix="/api", tags=["skills"])
 app.include_router(custom_skills_router.router, prefix="/api", tags=["custom-skills"])
 
 app.include_router(skill_suggestions_router.router, prefix="/api", tags=["skill-suggestions"])
+app.include_router(skill_agent_bff_router.router, prefix="/api", tags=["skill-agent-bff"])
 
 app.include_router(skill_loop_router.router, prefix="/api", tags=["skill-loop"])
 
