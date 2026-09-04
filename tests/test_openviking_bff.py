@@ -63,6 +63,32 @@ def test_operation_payload_allowlist_and_idempotency_store(tmp_path, monkeypatch
     assert value.repository.get_idempotent("k") == {"status": "submitted"}
 
 
+def test_donor_retrieval_fields_are_forwarded(tmp_path, monkeypatch):
+    value = service(tmp_path, monkeypatch)
+    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    calls = []
+
+    def handler(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={"status": "ok", "result": []})
+
+    _mock_client(monkeypatch, handler)
+    common = {
+        "query": "needle",
+        "include_provenance": False,
+        "time_field": "updated_at",
+        "context_type": ["resource"],
+        "level": [0, 1],
+        "filter": {"category": "docs"},
+        "telemetry": False,
+    }
+    asyncio.run(value.request(profile, "find", common))
+    asyncio.run(value.request(profile, "search", {**common, "session_id": "session-1"}))
+
+    assert calls[0] == common
+    assert calls[1] == {**common, "session_id": "session-1"}
+
+
 def test_profile_repository_is_tenant_and_owner_scoped(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
     profile = value.create("tenant", "workspace", "owner-a", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
@@ -98,6 +124,33 @@ def test_upstream_refs_and_sensitive_fields_are_recursively_sanitized(tmp_path, 
     assert safe["result"][0]["uri"] == "viking://workspace/docs/readme.md"
     assert safe["nested"]["path"] == "file.txt"
     assert all(word not in serialized for word in ("hidden", "/tmp/upstream-secret"))
+
+
+def test_upstream_global_context_is_an_opaque_profile_capability(tmp_path, monkeypatch):
+    value = service(tmp_path, monkeypatch)
+    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    safe = value._sanitize_upstream(profile, {
+        "uri": "viking://user/memories/preference-1",
+        "abstract": "Preferred output format",
+    })
+
+    assert safe["resource_ref"].startswith("ovr_")
+    assert value.resolve_ref(profile, safe["resource_ref"]) == "viking://user/memories/preference-1"
+    with pytest.raises(OpenVikingError, match="outside workspace"):
+        value.resource_ref(profile, "viking://user/memories/preference-1")
+
+
+def test_watch_and_task_display_uris_keep_their_original_field(tmp_path, monkeypatch):
+    value = service(tmp_path, monkeypatch)
+    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    safe = value._sanitize_upstream(profile, {
+        "to_uri": "viking://resources/watch",
+        "resource_id": "viking://resources/task.md",
+    })
+    assert safe["to_uri"] == "viking://workspace/watch"
+    assert safe["to_ref"].startswith("ovr_")
+    assert safe["resource_id"] == "viking://workspace/task.md"
+    assert safe["resource_id_ref"].startswith("ovr_")
 
 
 def test_file_and_url_validation_fail_closed(tmp_path, monkeypatch):

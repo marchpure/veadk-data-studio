@@ -1,0 +1,37 @@
+{
+  "preview_url": "http://127.0.0.1:5184/kb",
+  "profile_ready_visible": true,
+  "resource_tree_visible": true,
+  "file_preview_marker_visible": true,
+  "retrieval_result_visible": true,
+  "tasks_rendered": true,
+  "watches_rendered": true,
+  "skill_context_http_status": 200,
+  "refresh_recovery": true,
+  "observed_operations": [
+    "content_abstract",
+    "content_overview",
+    "content_read",
+    "find",
+    "fs_list",
+    "tasks",
+    "watches"
+  ],
+  "failed_responses": [],
+  "browser_storage_keys": {
+    "local": [
+      "byaan_active_tenant",
+      "i18nextLng",
+      "openviking.activeProfileId"
+    ],
+    "session": [
+      "openviking.playground.retrieval.lastSearch"
+    ]
+  },
+  "browser_storage_contains_api_key_pattern": false,
+  "horizontal_overflow": {
+    "1440x900": 0,
+    "1280x800": 0,
+    "390x844": 0
+  }
+}

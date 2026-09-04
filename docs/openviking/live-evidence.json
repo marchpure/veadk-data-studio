@@ -1,0 +1,76 @@
+{
+  "provider": "hosted_openviking",
+  "base_url": "https://api.vikingdb.cn-beijing.volces.com/openviking",
+  "api_key_source": "OPENVIKING_E2E_API_KEY",
+  "api_key_exposed_to_browser": false,
+  "bff_port": 18435,
+  "preview_url": "http://127.0.0.1:5183/kb",
+  "profile": {
+    "create_pending": true,
+    "edit_returns_pending": true,
+    "health_ready": true,
+    "restart_ready": true,
+    "masked": true,
+    "wrong_credential_http_status": 401,
+    "wrong_credential_code": "OPENVIKING_AUTH_FAILED",
+    "revoke_verified": true
+  },
+  "imports": {
+    "text": "completed",
+    "url": "completed",
+    "txt": "completed",
+    "markdown": "completed",
+    "pdf": "completed",
+    "csv": "completed",
+    "json": "completed",
+    "xlsx": "completed",
+    "connection_source": "completed"
+  },
+  "resources": {
+    "tree_after_backend_restart_nodes": 48,
+    "stat": true,
+    "abstract": true,
+    "overview": true,
+    "read": true,
+    "browser_file_preview": true,
+    "delete_postcondition_http_status": 404,
+    "delete_postcondition_code": "OPENVIKING_NOT_FOUND"
+  },
+  "retrieval_browser_http_status": {
+    "find": 200,
+    "search": 200,
+    "grep": 200,
+    "glob": 200
+  },
+  "tasks": {
+    "completed_imports": 8,
+    "real_failed_tasks_observed": 2,
+    "retry_path_exercised": true,
+    "hosted_reindex_result": 502
+  },
+  "watch": {
+    "create": true,
+    "list": true,
+    "pause": true,
+    "resume": true,
+    "trigger": true,
+    "delete": true
+  },
+  "skill_context_http_status": 200,
+  "browser_refresh_recovery": true,
+  "browser_failed_responses_after_fixes": 0,
+  "production_chunks": [
+    "client/dist/assets/OpenVikingPage-CrEsKhVt.js",
+    "client/dist/assets/OpenVikingPage-0mDA1AqO.css"
+  ],
+  "screenshots": [
+    "docs/openviking/screenshots/openviking-1440x900.png",
+    "docs/openviking/screenshots/openviking-1280x800.png",
+    "docs/openviking/screenshots/openviking-390x844.png"
+  ],
+  "viewport_horizontal_overflow": {
+    "1440x900": 0,
+    "1280x800": 0,
+    "390x844": 0
+  }
+}

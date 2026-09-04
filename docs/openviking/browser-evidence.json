@@ -1,0 +1,32 @@
+{
+  "preview_url": "http://127.0.0.1:5183/kb",
+  "route_preserved": true,
+  "profile_ready": true,
+  "skill_context_http_status": 200,
+  "file_preview_http_status": 200,
+  "file_preview_marker_visible": true,
+  "retrieval_http_status": {
+    "find": 200,
+    "search": 200,
+    "grep": 200,
+    "glob": 200
+  },
+  "tasks_rendered": true,
+  "watches_rendered": true,
+  "refresh_recovery": true,
+  "failed_responses_after_fixes": [],
+  "browser_storage_keys": {
+    "local": [
+      "i18nextLng",
+      "openviking.activeProfileId",
+      "byaan_active_tenant"
+    ],
+    "session": []
+  },
+  "secret_values_in_browser_storage": false,
+  "viewport_horizontal_overflow": {
+    "1440x900": [],
+    "1280x800": [],
+    "390x844": []
+  }
+}

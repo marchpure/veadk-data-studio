@@ -1,0 +1,141 @@
+{
+  "run": "DWV1 W6.1 hosted OpenViking live validation",
+  "frozen_input_sha": "db3b1f9da5ef045d1d19901e187e5a07535737c3",
+  "integrated_w6_sha": "1ae0abf6a9455d6419dd875bd276b0737fa64f42",
+  "provider": "hosted_openviking",
+  "base_url": "https://api.vikingdb.cn-beijing.volces.com/openviking",
+  "secret_sources": [
+    "OPENVIKING_E2E_API_KEY",
+    "OPENVIKING_PROFILE_ENCRYPTION_KEY"
+  ],
+  "profile": {
+    "profile_id": "ov_390e70a35beca11eb4eb7d5f",
+    "create_status": "pending",
+    "validated_status": "ready",
+    "update_status": "pending",
+    "revalidated_status": "ready",
+    "restart_status": "ready",
+    "api_key_masked": true,
+    "wrong_credential_http_status": 401,
+    "wrong_credential_code": "OPENVIKING_AUTH_FAILED",
+    "wrong_credential_profile_revoked": true
+  },
+  "imports": [
+    {
+      "type": "text",
+      "task_id": "4153f482-a10d-454a-b99d-c48289869e86",
+      "status": "completed",
+      "parent": "viking://workspace/",
+      "resource_ref_prefix": "ovr_",
+      "display_uri": "viking://workspace/w61-live-note"
+    },
+    {
+      "type": "url",
+      "task_id": "eb8fc559-39ef-4201-a751-7b6cee77ba2b",
+      "status": "completed",
+      "parent": "viking://workspace/",
+      "resource_ref_prefix": "ovr_",
+      "display_uri": "viking://workspace/W6.1_Example"
+    },
+    {
+      "type": "markdown_file",
+      "task_id": "4e2db45c-4d3b-4c23-baf7-297a7a9e1937",
+      "status": "completed",
+      "parent": "viking://workspace/",
+      "resource_ref_prefix": "ovr_",
+      "display_uri": "viking://workspace/skill_prompt"
+    },
+    {
+      "type": "connection_resource",
+      "source_resource_id": "e5286ca8-9f04-4136-87d4-2b89e16fd6f3",
+      "task_id": "4e355de8-3d76-4b55-b324-6bcc83115bb1",
+      "status": "completed",
+      "parent": "viking://workspace/",
+      "resource_ref_prefix": "ovr_",
+      "display_uri": "viking://workspace/w61-connection-source"
+    }
+  ],
+  "workspace": {
+    "tree_nodes_after_restart": 26,
+    "stat_http_status": 200,
+    "abstract_http_status": 200,
+    "overview_http_status": 200,
+    "leaf_read_http_status": 200,
+    "resolve_http_status": 200,
+    "skill_context_http_status": 200,
+    "delete_http_status": 200,
+    "deleted_resource_http_status": 404,
+    "deleted_resource_code": "OPENVIKING_NOT_FOUND"
+  },
+  "retrieval": {
+    "find": {
+      "http_status": 200,
+      "results": 10
+    },
+    "search": {
+      "http_status": 200,
+      "results": 10
+    },
+    "grep": {
+      "http_status": 200,
+      "matches": 5,
+      "files_scanned": 3
+    },
+    "glob": {
+      "http_status": 200,
+      "matches": 32
+    }
+  },
+  "watch": {
+    "source": "https://example.org",
+    "create": true,
+    "list": true,
+    "pause": true,
+    "resume": true,
+    "trigger": true,
+    "delete": true,
+    "absent_after_delete": true
+  },
+  "task_retry": {
+    "path_covered_by_tests": true,
+    "historical_live_retry_attempted_in_w6": true,
+    "successful_live_recovery": false,
+    "reason": "The hosted service returned 502 because the historical task resource no longer existed."
+  },
+  "w6_file_type_baseline": {
+    "txt": "completed",
+    "markdown": "completed",
+    "pdf": "completed",
+    "csv": "completed",
+    "json": "completed",
+    "xlsx": "completed",
+    "evidence": "docs/openviking/live-evidence.json"
+  },
+  "secrets": {
+    "api_key_in_browser": false,
+    "api_key_in_repository_evidence": false,
+    "api_key_in_plaintext_database_columns": false,
+    "recursive_response_redaction": true
+  },
+  "verification": {
+    "backend_tests": "23 passed",
+    "frontend_tests": "30 files, 130 tests passed",
+    "typecheck": "passed",
+    "production_build": "passed",
+    "lint": "0 errors, 9 retained donor warnings",
+    "python_compile": "passed",
+    "git_diff_check": "passed",
+    "approved_secret_value_hits": 0,
+    "production_chunks": [
+      "client/dist/assets/OpenVikingPage-CopRr6at.js",
+      "client/dist/assets/OpenVikingPage-0mDA1AqO.css"
+    ],
+    "screenshots": [
+      "docs/openviking/screenshots/w61/openviking-w61-resource-1440x900.png",
+      "docs/openviking/screenshots/w61/openviking-w61-retrieval-1280x800.png",
+      "docs/openviking/screenshots/w61/openviking-w61-profile-390x844.png"
+    ]
+  },
+  "preview_url": "http://127.0.0.1:5184/kb",
+  "browser_evidence": "docs/openviking/w61-browser-evidence.json"
+}
