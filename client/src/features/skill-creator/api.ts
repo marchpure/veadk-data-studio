@@ -14,6 +14,7 @@ export type SkillArtifact = {
   files?: string[]
   revision?: string
   content?: string
+  diff?: string
   download?: { download_url?: string }
   download_url?: string
   preview_url?: string
