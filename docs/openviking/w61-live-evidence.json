@@ -23,35 +23,39 @@
   "imports": [
     {
       "type": "text",
+      "profile_id": "ov_390e70a35beca11eb4eb7d5f",
       "task_id": "4153f482-a10d-454a-b99d-c48289869e86",
       "status": "completed",
       "parent": "viking://workspace/",
-      "resource_ref_prefix": "ovr_",
+      "resource_ref": "ovr_eyJwIjoib3ZfMzkwZTcwYTM1YmVjYTExZWI0ZWI3ZDVmIiwidSI6InZpa2luZzovL3Jlc291cmNlcy93NjEtbGl2ZS1ub3RlIn0.e8a8a7010aca18c82fdcfc40cf260c30d53d46edd68d1d21eea09318d8010c47",
       "display_uri": "viking://workspace/w61-live-note"
     },
     {
       "type": "url",
+      "profile_id": "ov_390e70a35beca11eb4eb7d5f",
       "task_id": "eb8fc559-39ef-4201-a751-7b6cee77ba2b",
       "status": "completed",
       "parent": "viking://workspace/",
-      "resource_ref_prefix": "ovr_",
+      "resource_ref": "ovr_eyJwIjoib3ZfMzkwZTcwYTM1YmVjYTExZWI0ZWI3ZDVmIiwidSI6InZpa2luZzovL3Jlc291cmNlcy9XNi4xX0V4YW1wbGUifQ.e3ea3c30a8a152b1834a5546f2d1e16116e96cfbfcdf9f7c446f55021a5cfa0a",
       "display_uri": "viking://workspace/W6.1_Example"
     },
     {
       "type": "markdown_file",
+      "profile_id": "ov_390e70a35beca11eb4eb7d5f",
       "task_id": "4e2db45c-4d3b-4c23-baf7-297a7a9e1937",
       "status": "completed",
       "parent": "viking://workspace/",
-      "resource_ref_prefix": "ovr_",
+      "resource_ref": "ovr_eyJwIjoib3ZfMzkwZTcwYTM1YmVjYTExZWI0ZWI3ZDVmIiwidSI6InZpa2luZzovL3Jlc291cmNlcy9za2lsbF9wcm9tcHQifQ.5cf3d8e328a334dcd4d14b45acaaa2cfefb9f26a31fb399231833b5f8c720e71",
       "display_uri": "viking://workspace/skill_prompt"
     },
     {
       "type": "connection_resource",
+      "profile_id": "ov_390e70a35beca11eb4eb7d5f",
       "source_resource_id": "e5286ca8-9f04-4136-87d4-2b89e16fd6f3",
       "task_id": "4e355de8-3d76-4b55-b324-6bcc83115bb1",
       "status": "completed",
       "parent": "viking://workspace/",
-      "resource_ref_prefix": "ovr_",
+      "resource_ref": "ovr_eyJwIjoib3ZfMzkwZTcwYTM1YmVjYTExZWI0ZWI3ZDVmIiwidSI6InZpa2luZzovL3Jlc291cmNlcy93NjEtY29ubmVjdGlvbi1zb3VyY2UifQ.d79c705b8dfe8ccfec08afe41a4ba4d004ec61a68a0adbad4e07c99ed4c4c417",
       "display_uri": "viking://workspace/w61-connection-source"
     }
   ],
@@ -99,8 +103,15 @@
   "task_retry": {
     "path_covered_by_tests": true,
     "historical_live_retry_attempted_in_w6": true,
-    "successful_live_recovery": false,
-    "reason": "The hosted service returned 502 because the historical task resource no longer existed."
+    "historical_failed_task_id": "660de695-de4a-4c4f-9ef8-4268af5202fb",
+    "restore_task_id": "71f26799-40a5-47db-9134-3cbd5b16c7dc",
+    "restore_status": "completed",
+    "retry_task_id": "a4939232-46fe-46ee-a4b6-09d7755b4ce6",
+    "retry_status": "completed",
+    "successful_live_recovery": true,
+    "scanned_records": 3,
+    "rebuilt_records": 5,
+    "failed_records": 0
   },
   "w6_file_type_baseline": {
     "txt": "completed",
@@ -118,8 +129,8 @@
     "recursive_response_redaction": true
   },
   "verification": {
-    "backend_tests": "23 passed",
-    "frontend_tests": "30 files, 130 tests passed",
+    "backend_tests": "26 passed",
+    "frontend_tests": "31 files, 131 tests passed",
     "typecheck": "passed",
     "production_build": "passed",
     "lint": "0 errors, 9 retained donor warnings",

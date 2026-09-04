@@ -167,6 +167,40 @@ def test_file_and_url_validation_fail_closed(tmp_path, monkeypatch):
         asyncio.run(value.import_text(profile, "note.pdf", "value", root))
 
 
+def test_import_url_rejects_private_network_resolution(tmp_path, monkeypatch):
+    value = service(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        openviking_module.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (openviking_module.socket.AF_INET, openviking_module.socket.SOCK_STREAM, 6, "", ("10.0.0.8", 443)),
+        ],
+    )
+
+    with pytest.raises(OpenVikingError) as raised:
+        value.validate_import_url("https://internal.example/resource")
+
+    assert raised.value.code == "SSRF_BLOCKED"
+    assert raised.value.status_code == 422
+
+
+def test_upload_rejects_unsupported_and_oversized_files(tmp_path, monkeypatch):
+    value = service(tmp_path, monkeypatch)
+    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    root = value.resource_ref(profile, profile.workspace_uri)
+
+    with pytest.raises(OpenVikingError) as unsupported:
+        asyncio.run(value.upload(profile, "payload.exe", "application/octet-stream", b"value", root))
+    assert unsupported.value.code == "UNSUPPORTED_FILE_TYPE"
+    assert unsupported.value.status_code == 415
+
+    monkeypatch.setattr(openviking_module, "MAX_UPLOAD_BYTES", 4)
+    with pytest.raises(OpenVikingError) as oversized:
+        asyncio.run(value.upload(profile, "payload.txt", "text/plain", b"value", root))
+    assert oversized.value.code == "PAYLOAD_TOO_LARGE"
+    assert oversized.value.status_code == 413
+
+
 def _mock_client(monkeypatch, handler):
     transport = httpx.MockTransport(handler)
     monkeypatch.setattr(

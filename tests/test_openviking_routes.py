@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 import server.routers.openviking as routes
 from server.routers.openviking import ContextRequest, OperationRequest, ProfileCreate
@@ -153,3 +154,13 @@ def test_missing_encryption_key_is_stable_configuration_error(monkeypatch, tmp_p
     assert unavailable.value.status_code == 503
     assert unavailable.value.detail["code"] == "OPENVIKING_UNAVAILABLE"
     assert "BLOCKED_UPSTREAM" not in str(unavailable.value.detail)
+
+
+def test_profile_create_rejects_missing_api_key():
+    with pytest.raises(ValidationError):
+        ProfileCreate(
+            display_name="Hosted",
+            base_url="https://api.vikingdb.cn-beijing.volces.com/openviking",
+            api_key="",
+            workspace_uri="viking://resources/",
+        )

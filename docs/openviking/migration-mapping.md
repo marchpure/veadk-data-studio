@@ -14,7 +14,7 @@ modifying that repository:
 | `LazyFilePreview` and file preview | `routes/resources/-components/lazy-file-preview.tsx`, `file-preview.tsx` | Read through the BFF reference endpoint; no browser upload path dependency. | Live `resource/read` 200 and browser marker preview |
 | `AddResourceForm` and import hooks | `routes/resources/-components/add-resource-page.tsx`, `resource-upload.ts`, BFF upload/text/connection routes | Keep donor import UX while adapting multipart upload and target Source Resource lookup. | Live text, URL, TXT, Markdown, PDF, CSV, JSON, XLSX, and Connection imports |
 | `RetrievalPage` and retrieval library | `routes/retrieval/**`, `lib/retrieval.ts` | Keep find/search/grep/glob UX; map `target_uri` to signed refs and allow all donor request fields. | Browser live find/search/grep/glob all HTTP 200 |
-| `TasksRoute` and task normalization | `routes/tasks/**` | Preserve hosted task status, detail, failure, and retry UI. | 26 hosted tasks rendered; completed and failed states; retry request reached hosted service |
+| `TasksRoute` and task normalization | `routes/tasks/**` | Preserve hosted task status, detail, failure, and retry UI. | Hosted tasks rendered; historical failure restored; live retry completed with 5 records rebuilt and 0 failed |
 | `WatchesRoute` and watch API | `routes/watches/**` | Preserve create, list, pause/resume, trigger, history, and delete operations through BFF item routes. | Live create/list/update/trigger/delete |
 | `KnowledgeSourceRef` / `ResourceRef` | `contracts.ts`, `lib/ov-client/client.ts`, `openviking_service.py` | Profile-bound HMAC capabilities replace raw URIs. Global hosted search results can only obtain refs from trusted BFF responses. | Ref tamper, cross-profile, unsigned-ref, and global-context tests |
 | Donor profile selection | `profile-selection.ts`, `OpenVikingWorkspace.tsx`, `api.ts` | Adapt profile CRUD to target standard envelopes; keep Pending/Ready/Error and never prefill credentials. | Live create/edit/validate/restart/revoke and wrong-key 401 |
@@ -38,11 +38,12 @@ modifying that repository:
 
 ## Verification
 
-- Backend: 23 tests passed.
-- Frontend: 30 files, 130 tests passed.
+- Backend: 26 tests passed.
+- Frontend: 31 files, 131 tests passed, including the no-profile connection state.
 - TypeScript, production build, Python compile, diff check, and secret scan passed.
 - OpenViking lint: 0 errors and 9 retained donor hook/refresh warnings.
-- Hosted task retry was exercised against a real failed historical task. The
-  approved hosted service rejected reindex with HTTP 502 because the original
-  resource no longer exists; the UI and BFF retry path were exercised without
-  fabricating a successful task.
+- Hosted task retry was exercised against real failed task
+  `660de695-de4a-4c4f-9ef8-4268af5202fb`. Restore task
+  `71f26799-40a5-47db-9134-3cbd5b16c7dc` and retry task
+  `a4939232-46fe-46ee-a4b6-09d7755b4ce6` both completed; the retry rebuilt 5
+  records with no failures.
