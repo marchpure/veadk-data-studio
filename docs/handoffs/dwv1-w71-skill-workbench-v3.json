@@ -1,0 +1,54 @@
+{
+  "workstream": "DWV1 W7.1 Unified Skill Workbench",
+  "status": "CODE_READY",
+  "repository": "https://github.com/marchpure/veadk-data-studio.git",
+  "branch": "feat/dwv1-w71-skill-workbench",
+  "w3_input_sha": "6ea184b873249081b972d7afa2403a1abe3f9552",
+  "canonical_route": "/skill",
+  "legacy_redirects": [
+    "/skill/new",
+    "/skill/:id",
+    "/sessions",
+    "/sessions/:id"
+  ],
+  "implementation": {
+    "frontend_mount": "client/src/features/data-workshop/pages/SkillMount.tsx",
+    "frontend_feature": "client/src/features/data-workshop/skill/",
+    "backend": "server/data_workshop/skill/",
+    "models": "server/models/data_workshop_skill.py",
+    "migration": "server/migrations/versions/add_dw_skill_workbench.py"
+  },
+  "integration_status": {
+    "w5": "Server-only AgentKit runtime transport implemented and verified against runtime r-yeub52ve9sq2swebzzja; it returned BLOCKED_CONFIG with no Artifact because downstream I4 configuration is absent. Successful LIVE E2E still requires W5 runtime configuration and delegated OAuth.",
+    "w6": "Consumes only validated viking:// ResourceRefs from a configurable W6 provider, with a tenant-scoped Data Studio metadata fallback. Live OpenViking profile/runtime integration remains dependent on W6 deployment.",
+    "w4": "Consumes only OpenConnector Actions that pass the current user's access preview. Live identity and Oracle validation remain dependent on W4 infrastructure."
+  },
+  "security": {
+    "browser_secrets": false,
+    "local_json_session_store": false,
+    "legacy_custom_skill_repository": false,
+    "artifact_html_sandboxed": true,
+    "artifact_upstream_url_private": true,
+    "tenant_owner_scoped": true
+  },
+  "preview": {
+    "url": "http://127.0.0.1:4176",
+    "mode": "REAL",
+    "expected_runtime_state": "BLOCKED_CONFIG"
+  },
+  "screenshots": [
+    "client/artifacts/data-workshop/skill-workbench-1440x900.png",
+    "client/artifacts/data-workshop/skill-workbench-1280x800.png",
+    "client/artifacts/data-workshop/skill-workbench-390x844.png"
+  ],
+  "verification": {
+    "focused_backend": "68 passed",
+    "w5_runtime_smoke": "reachable; structured functionResponse parsed; terminal BLOCKED_CONFIG; no Artifact",
+    "frontend_typecheck_build": "passed",
+    "frontend_lint": "passed with baseline warnings and no errors",
+    "skill_workbench_e2e": "passed",
+    "fresh_database_migration": "passed",
+    "git_diff_check": "passed",
+    "secret_scan": "passed"
+  }
+}

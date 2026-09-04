@@ -46,6 +46,7 @@ from server.auth.error_messages import AUTH_ERROR_MESSAGES, get_auth_error_messa
 from server.auth.tenant_context import TenantContextMiddleware
 from server.collaboration.feishu.transport import feishu_ws_manager
 from server.data_workshop import api as data_workshop_api
+from server.data_workshop.skill import api as data_workshop_skill_api
 from server.db.session import ensure_database_encoding, ensure_database_schema
 from server.routers import analysis_artifacts as analysis_artifacts_router
 from server.routers import app_config as app_config_router
@@ -661,6 +662,7 @@ app.include_router(cache_router.router, prefix="/api", tags=["cache"])
 app.include_router(schedules_router.router, prefix="/api", tags=["schedules"])
 app.include_router(data_workshop_api.router, prefix="/api", tags=["data-workshop"])
 app.include_router(data_workshop_api.console_router, tags=["openconnector-console"])
+app.include_router(data_workshop_skill_api.router, prefix="/api")
 
 
 @app.get("/health")

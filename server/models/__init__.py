@@ -11,6 +11,11 @@ from server.collaboration.models import (
 from server.models.connections import Connection
 from server.models.conversation_evaluation import ConversationEvaluation
 from server.models.custom_skill import CustomSkill
+from server.models.data_workshop_skill import (
+    DataWorkshopSkill,
+    DataWorkshopSkillRevision,
+    DataWorkshopSkillSession,
+)
 from server.models.dashboard import Dashboard
 from server.models.datasets import Dataset
 from server.models.datasource_annotations import DatasourceAnnotation
@@ -78,6 +83,9 @@ __all__ = [
     "ExternalIdentity",
     "ConversationEvaluation",
     "CustomSkill",
+    "DataWorkshopSkill",
+    "DataWorkshopSkillRevision",
+    "DataWorkshopSkillSession",
     "Dashboard",
     "DatasourceAnnotation",
     "Dataset",

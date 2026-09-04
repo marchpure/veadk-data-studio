@@ -9,6 +9,7 @@
     "build:check": "tsc -b && vite build",
     "lint": "eslint .",
     "test:data-workshop:e2e": "node scripts/data-workshop-e2e.mjs",
+    "test:skill-workbench:e2e": "node scripts/skill-workbench-e2e.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
