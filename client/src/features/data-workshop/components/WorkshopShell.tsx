@@ -4,7 +4,6 @@ import {
   Database,
   Home,
   Menu,
-  MessageSquareText,
   PanelLeftClose,
   Sparkles,
   X,
@@ -19,7 +18,6 @@ const primaryNav = [
   { label: '连接', path: '/connections/overview', icon: Database },
   { label: '知识库', path: '/kb', icon: BookOpen },
   { label: 'Skill', path: '/skill', icon: Sparkles },
-  { label: '最近会话', path: '/sessions', icon: MessageSquareText },
 ]
 
 const connectionNav = [

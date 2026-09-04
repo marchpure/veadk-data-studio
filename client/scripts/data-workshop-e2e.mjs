@@ -78,11 +78,62 @@ for (const step of ['准备数据', '配置访问权限', '查看接入文档', 
   await page.getByText(step, { exact: true }).waitFor()
 }
 await page.getByRole('navigation', { name: '一级导航' }).getByRole('link').allTextContents().then(labels => {
-  const expected = ['首页', '连接', '知识库', 'Skill', '最近会话']
+  const expected = ['首页', '连接', '知识库', 'Skill']
   if (JSON.stringify(labels) !== JSON.stringify(expected)) {
     throw new Error(`Unexpected primary navigation: ${JSON.stringify(labels)}`)
   }
 })
+if (await page.locator('.dw-app > .dw-sidebar').count() !== 1) {
+  throw new Error('Data Workshop shell did not render exactly once')
+}
+if (await page.locator('img[alt="Byaan"]').count()) {
+  throw new Error('Legacy Byaan CollapsibleSidebar rendered on a Data Workshop route')
+}
+
+for (const route of ['/', '/home', '/kb', '/kb/example']) {
+  await page.goto(`${baseUrl}${route}`)
+  await page.getByRole('navigation', { name: '一级导航' }).waitFor()
+  if (await page.locator('.dw-app > .dw-sidebar').count() !== 1 || await page.locator('img[alt="Byaan"]').count()) {
+    throw new Error(`Data Workshop route escaped the WorkshopShell: ${route}`)
+  }
+}
+
+const canonicalRoutes = [
+  ['/skill/new', '/skill?mode=new'],
+  ['/skill/revenue-review', '/skill?skillId=revenue-review'],
+  ['/sessions', '/skill'],
+  ['/sessions/session-42', '/skill?sessionId=session-42'],
+]
+for (const [legacyRoute, canonicalRoute] of canonicalRoutes) {
+  await page.goto(`${baseUrl}${legacyRoute}`)
+  await page.waitForURL(`${baseUrl}${canonicalRoute}`)
+  await page.locator('[data-workshop-skill-mount]').waitFor()
+  await page.getByRole('navigation', { name: '一级导航' }).waitFor()
+  if (await page.locator('.dw-app > .dw-sidebar').count() !== 1 || await page.locator('img[alt="Byaan"]').count()) {
+    throw new Error(`Legacy Byaan shell rendered for ${legacyRoute}`)
+  }
+}
+
+await page.goto(`${baseUrl}/skill?skillId=revenue-review&sessionId=session-42`)
+await page.locator('[data-workshop-skill-mount]').waitFor()
+await page.reload()
+await page.locator('[data-workshop-skill-mount]').waitFor()
+await page.getByRole('link', { name: '首页', exact: true }).click()
+await page.waitForURL('**/home')
+await page.getByRole('link', { name: '连接', exact: true }).click()
+await page.waitForURL('**/connections/overview')
+await page.getByRole('link', { name: 'Skill', exact: true }).click()
+await page.waitForURL('**/skill')
+await page.locator('[data-workshop-skill-mount]').waitFor()
+await page.goBack()
+await page.waitForURL('**/connections/overview')
+await page.goBack()
+await page.waitForURL('**/home')
+await page.goForward()
+await page.waitForURL('**/connections/overview')
+await page.goForward()
+await page.waitForURL('**/skill')
+
 await page.goto(`${baseUrl}/connections/providers/market`)
 const connectionNavigation = page.getByRole('navigation', { name: '连接二级导航' })
 await connectionNavigation.waitFor()
@@ -156,6 +207,18 @@ await page.setViewportSize({ width: 390, height: 844 })
 await page.getByText(expectedHealthLabel, { exact: true }).waitFor()
 await assertViewportGeometry(page, '390x844')
 await page.screenshot({ path: path.join(outputDir, 'connection-docs-390x844.png') })
+
+for (const [route, name] of [['/home', 'unified-shell-home'], ['/skill', 'unified-shell-skill']]) {
+  for (const [width, height] of [[1440, 900], [1280, 800], [390, 844]]) {
+    await page.setViewportSize({ width, height })
+    await page.goto(`${baseUrl}${route}`)
+    await page.getByRole('navigation', { name: '一级导航' }).waitFor()
+    if (route === '/skill') await page.locator('[data-workshop-skill-mount]').waitFor()
+    else await page.getByRole('heading', { name: '数据能力，从连接到 Skill' }).waitFor()
+    await assertViewportGeometry(page, `${name}-${width}x${height}`)
+    await page.screenshot({ path: path.join(outputDir, `${name}-${width}x${height}.png`) })
+  }
+}
 
 for (const route of ['/mcp', '/mcp/new', '/mcp/example', '/mcp/not-found']) {
   await page.goto(`${baseUrl}${route}`)
