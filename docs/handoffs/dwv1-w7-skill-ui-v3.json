@@ -2,8 +2,8 @@
   "schema_version": "1",
   "workstream": "DWV1 V3 W7 Skill Creator UI",
   "w7": {
-    "local_sha": "1e4cd486abb636e455483fd77fcc8004c0520347",
-    "remote_sha": "1e4cd486abb636e455483fd77fcc8004c0520347",
+    "local_sha": "68e426a43d1c838210d08c8c19e7528baa964a98",
+    "remote_sha": "68e426a43d1c838210d08c8c19e7528baa964a98",
     "branch": "feat/dwv1-rerun-20260904-w7-skill-ui",
     "remote": "origin"
   },
