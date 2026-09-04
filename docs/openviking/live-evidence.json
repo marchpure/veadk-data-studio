@@ -1,0 +1,31 @@
+{
+  "provider": "hosted_openviking",
+  "base_url": "https://api.vikingdb.cn-beijing.volces.com/openviking",
+  "api_key_source": "OPENVIKING_E2E_API_KEY",
+  "bff_port": 18434,
+  "preview_url": "http://127.0.0.1:5182/kb",
+  "profile_status": "ready",
+  "resource_ref_contract": "opaque_signed_profile_scoped",
+  "journey": {
+    "profile": true,
+    "health": true,
+    "text_import_task": true,
+    "url_import_task": true,
+    "file_import_task": true,
+    "tree": true,
+    "search": true,
+    "find": true,
+    "grep": true,
+    "glob": true,
+    "invalid_ref_rejected": true,
+    "api_key_in_browser_response": false
+  },
+  "screenshots": [
+    "/tmp/dwv1-w6-desktop-1440x900.png",
+    "/tmp/dwv1-w6-laptop-1280x800.png",
+    "/tmp/dwv1-w6-mobile-390x844.png",
+    "/tmp/dwv1-w6-resource-desktop-1440x900.png",
+    "/tmp/dwv1-w6-resource-laptop-1280x800.png",
+    "/tmp/dwv1-w6-resource-mobile-390x844.png"
+  ]
+}

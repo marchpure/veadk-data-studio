@@ -16,6 +16,7 @@ from server.services.openviking_service import (
     OpenVikingProfile,
     OpenVikingProfileRepository,
     OpenVikingService,
+    SAFE_RESOURCE_NAME,
 )
 
 router = APIRouter(prefix="/knowledge/openviking", tags=["openviking"])
@@ -71,6 +72,12 @@ class ConnectionResourceRequest(BaseModel):
     parent_ref: str = Field(min_length=1, max_length=4096)
     filename: str = Field(min_length=1, max_length=128)
     document: dict[str, Any]
+
+
+class ReadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    offset: int = Field(default=0, ge=0, le=1_000_000)
+    limit: int = Field(default=1_000_000, ge=1, le=1_000_000)
 
 
 def _scope(auth: AuthContext) -> tuple[str, str]:
@@ -200,15 +207,31 @@ async def skill_context(profile_id: str, body: ContextRequest, auth: AuthContext
     )
 
 
+@router.post("/profiles/{profile_id}/resource/resolve")
+async def resolve_resource(profile_id: str, body: ContextRequest, auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))):
+    try:
+        service = _service()
+        return success_response(data=await service.resolve_resource(_ready(service, profile_id, auth), body.resource_ref), message="Resource reference resolved")
+    except OpenVikingError as exc:
+        raise _error(exc)
+
+
+@router.post("/profiles/{profile_id}/resource/read")
+async def read_resource(profile_id: str, body: ContextRequest, options: ReadRequest | None = None, auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))):
+    try:
+        service = _service()
+        profile = _ready(service, profile_id, auth)
+        request = options or ReadRequest()
+        return success_response(data=await service.read_resource(profile, body.resource_ref, request.offset, request.limit), message="Resource content read")
+    except OpenVikingError as exc:
+        raise _error(exc)
+
+
 @router.post("/profiles/{profile_id}/text")
 async def import_text(profile_id: str, body: TextImportRequest, auth: AuthContext = Depends(require_scope(Scope.DATASET_CREATE))):
     try:
         service = _service()
-        result = await service.request(
-            _ready(service, profile_id, auth),
-            "content_write",
-            {"resource_ref": body.parent_ref.rstrip("/") + "/" + body.filename, "content": body.content, "mode": "overwrite", "wait": False},
-        )
+        result = await service.import_text(_ready(service, profile_id, auth), body.filename, body.content, body.parent_ref)
         return success_response(data=result, message="Text import started")
     except OpenVikingError as exc:
         raise _error(exc)
@@ -242,7 +265,7 @@ async def upload(
 ):
     try:
         service = _service()
-        result = await service.upload(_ready(service, profile_id, auth), file.filename or "upload", file.content_type or "application/octet-stream", await file.read(50 * 1024 * 1024 + 1), parent_ref)
+        result = await service.import_uploaded(_ready(service, profile_id, auth), file.filename or "upload", file.content_type or "application/octet-stream", await file.read(50 * 1024 * 1024 + 1), parent_ref)
         return success_response(data=result, message="File import started")
     except OpenVikingError as exc:
         raise _error(exc)

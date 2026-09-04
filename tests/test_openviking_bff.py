@@ -1,5 +1,6 @@
 import base64
 import asyncio
+import json
 
 import pytest
 
@@ -56,3 +57,32 @@ def test_operation_payload_allowlist_and_idempotency_store(tmp_path, monkeypatch
         asyncio.run(value.request(profile, "fs_stat", {"resource_ref": "viking://resources/", "arbitrary": True}))
     value.repository.save_idempotent("k", {"status": "submitted"})
     assert value.repository.get_idempotent("k") == {"status": "submitted"}
+
+
+def test_resource_refs_are_opaque_profile_scoped_and_upstream_refs_are_sanitized(tmp_path, monkeypatch):
+    value = service(tmp_path, monkeypatch)
+    first = value.create("tenant", "workspace", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    second = value.create("tenant", "workspace", "Other", "http://127.0.0.1:9000", "other-key", "viking://resources/")
+    ref = value.resource_ref(first, "viking://resources/docs/readme.md")
+    assert ref.startswith("ovr_")
+    assert "viking://resources" not in ref
+    assert value.resolve_ref(first, ref) == "viking://resources/docs/readme.md"
+    with pytest.raises(OpenVikingError, match="invalid"):
+        value.resolve_ref(second, ref)
+    safe = value._sanitize_upstream(first, {
+        "uri": "viking://resources/docs/readme.md",
+        "nested": {"token": "hidden", "owner": "hidden"},
+    })
+    assert safe["resource_ref"] == ref
+    assert safe["uri"] == "viking://workspace/docs/readme.md"
+    assert "token" not in json.dumps(safe)
+
+
+def test_import_validation_and_text_contract(tmp_path, monkeypatch):
+    value = service(tmp_path, monkeypatch)
+    profile = value.create("tenant", "workspace", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    root = value.resource_ref(profile, profile.workspace_uri)
+    with pytest.raises(OpenVikingError, match="HTTPS"):
+        value.validate_import_url("http://example.com")
+    with pytest.raises(OpenVikingError, match="Manual text"):
+        asyncio.run(value.import_text(profile, "note.pdf", "text", root))

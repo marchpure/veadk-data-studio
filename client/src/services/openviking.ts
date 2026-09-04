@@ -4,6 +4,7 @@ export type OpenVikingProfile = {
   profile_id: string
   display_name: string
   workspace_uri: string
+  root_resource_ref: string
   status: 'pending' | 'ready' | 'error'
   api_key_masked: string
 }
