@@ -1,10 +1,37 @@
 {
-  "workstream": "DWV1 V3 W3 Workshop Access UI",
+  "workstream": "DWV1 V3 W3 Unified Workshop Shell and Access UI",
   "status": "CODE_READY",
   "repository": "https://github.com/marchpure/veadk-data-studio.git",
   "branch": "feat/dwv1-rerun-20260904-w3-workshop-shell",
   "base_sha": "3a197d146748580bfa575d75256c170a2ef4c550",
-  "implementation_sha": "bb75a6048cc486894c30988964ccd587024e47bd",
+  "implementation_sha": "2e5732bc644c3b63bc23cf344b778f6ac1b6b319",
+  "unified_shell_contract": {
+    "primary_navigation": [
+      "首页",
+      "连接",
+      "知识库",
+      "Skill"
+    ],
+    "canonical_skill_route": "/skill",
+    "canonical_skill_query": {
+      "skillId": "selected Skill identifier",
+      "sessionId": "selected session identifier inside the Skill workspace",
+      "mode": "use mode=new to request the new-Skill flow"
+    },
+    "compatibility_redirects": {
+      "/skill/new": "/skill?mode=new",
+      "/skill/:id": "/skill?skillId=:id",
+      "/sessions": "/skill",
+      "/sessions/:id": "/skill?sessionId=:id"
+    },
+    "w7_1_replaceable_component": "client/src/features/data-workshop/pages/SkillMount.tsx",
+    "w7_1_shell_boundaries": [
+      "Do not replace or bypass client/src/features/data-workshop/DataWorkshopApp.tsx.",
+      "Do not modify the primary or connection navigation in client/src/features/data-workshop/components/WorkshopShell.tsx.",
+      "Do not mount Skill or Session UI in the legacy Byaan Layout or CollapsibleSidebar.",
+      "Keep Skill lists, chat, Artifact, and Session selection inside SkillMount and the canonical /skill route."
+    ]
+  },
   "w2_admin_contract": {
     "repository": "https://github.com/marchpure/open-connector.git",
     "sha": "2f5759d72bd4ecee7712d3954362c6b735d712d3",
@@ -31,6 +58,17 @@
     "frontend_build_and_typecheck": "passed",
     "scoped_eslint": "passed",
     "git_diff_check": "passed",
+    "unified_shell_e2e": {
+      "status": "passed",
+      "primary_navigation": "4 items: 首页, 连接, 知识库, Skill",
+      "canonical_redirects": "passed",
+      "workshop_shell_isolation": "passed",
+      "legacy_byaan_sidebar_absent": "passed",
+      "home_connection_skill_navigation": "passed",
+      "deep_link_reload_history": "passed",
+      "console_errors": [],
+      "network_failures": []
+    },
     "test_backend_e2e": {
       "status": "passed",
       "backend_mode": "TEST",
@@ -69,7 +107,13 @@
       "client/artifacts/data-workshop/connection-docs-390x844.png",
       "client/artifacts/data-workshop/real-backend-identity-blocked-1440x900.png",
       "client/artifacts/data-workshop/real-backend-identity-blocked-1280x800.png",
-      "client/artifacts/data-workshop/real-backend-identity-blocked-390x844.png"
+      "client/artifacts/data-workshop/real-backend-identity-blocked-390x844.png",
+      "client/artifacts/data-workshop/unified-shell-home-1440x900.png",
+      "client/artifacts/data-workshop/unified-shell-home-1280x800.png",
+      "client/artifacts/data-workshop/unified-shell-home-390x844.png",
+      "client/artifacts/data-workshop/unified-shell-skill-1440x900.png",
+      "client/artifacts/data-workshop/unified-shell-skill-1280x800.png",
+      "client/artifacts/data-workshop/unified-shell-skill-390x844.png"
     ]
   },
   "integration_w4_live_e2e_remaining": [
