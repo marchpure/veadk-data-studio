@@ -15,15 +15,14 @@ from server.data_workshop.launch_sessions import LaunchSessionStore
 
 class FakeOpenConnector:
     configured = True
+    public_url = "https://connector.example.com"
 
     def __init__(self):
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
 
-    async def request(self, method: str, path: str, **kwargs: Any) -> Any:
+    async def request_admin(self, method: str, path: str, **kwargs: Any) -> Any:
         self.calls.append((method, path, kwargs))
-        if path == "/v1/connections":
-            raise OpenConnectorError("OpenConnector rejected the request", status_code=404)
-        if method == "POST" and path == "/v1/access-grants":
+        if method == "POST" and path == "/api/access-grants":
             payload = kwargs["json"]
             return {
                 "id": "grant-created",
@@ -32,7 +31,7 @@ class FakeOpenConnector:
                 "updatedAt": "2026-09-04T00:00:00Z",
             }
         responses = {
-            "/v1/providers": [
+            "/api/providers": [
                 {
                     "service": "oracle",
                     "displayName": "Oracle",
@@ -41,7 +40,7 @@ class FakeOpenConnector:
                     "authTypes": ["custom_credential"],
                 }
             ],
-            "/v1/apps": [
+            "/api/connections": [
                 {
                     "id": "oracle-prod",
                     "service": "oracle",
@@ -54,7 +53,7 @@ class FakeOpenConnector:
                     "scopes": [],
                 }
             ],
-            "/v1/actions": [
+            "/api/actions": [
                 {
                     "id": "oracle.query_rows",
                     "service": "oracle",
@@ -62,7 +61,7 @@ class FakeOpenConnector:
                     "description": "Query rows",
                 }
             ],
-            "/v1/access-grants": [
+            "/api/access-grants": [
                 {
                     "id": "grant-1",
                     "subjectType": "group",
@@ -75,12 +74,7 @@ class FakeOpenConnector:
                     "updatedAt": "2026-09-04T00:00:00Z",
                 }
             ],
-            "/v1/mcp/config": {
-                "endpoint": "https://connector.example.com/mcp",
-                "admin_token": "must-not-leak",
-                "client_secret": "must-not-leak",
-            },
-            "/v1/identity-provider": {
+            "/api/identity-provider": {
                 "issuer": "https://identity.example.com",
                 "audience": "data-workshop",
                 "jwksUri": "https://identity.example.com/jwks",
@@ -88,7 +82,7 @@ class FakeOpenConnector:
                 "subjectClaim": "sub",
                 "groupsClaim": "groups",
             },
-            "/v1/identity/subjects": [
+            "/api/identity/subjects": [
                 {
                     "issuer": "https://identity.example.com",
                     "audience": "data-workshop",
@@ -97,11 +91,9 @@ class FakeOpenConnector:
                     "groups": ["finance"],
                 }
             ],
-            "/v1/health": {"ok": True, "runtime": "openconnector"},
-            "/v1/mcp/status": {"status": "healthy"},
-            "/v1/mcp/tests/tools-list": {"tools": [{"name": "list_connections"}]},
+            "/openapi.json": {"openapi": "3.1.0", "info": {"title": "OpenConnector", "version": "test"}},
         }
-        if path == "/v1/access:preview":
+        if path == "/api/access/preview":
             action_id = kwargs["json"]["actionId"]
             return {
                 "subject": kwargs["json"]["subject"],
@@ -114,6 +106,21 @@ class FakeOpenConnector:
                 "policyVersion": 1,
             }
         return responses.get(path, {"ok": True})
+
+    async def request_public(self, method: str, path: str) -> Any:
+        self.calls.append((method, path, {"scope": "public"}))
+        return {"ok": True, "runtime": "openconnector"}
+
+    async def request_runtime(self, method: str, path: str, **kwargs: Any) -> Any:
+        self.calls.append((method, path, {**kwargs, "scope": "runtime"}))
+        payload = kwargs["json"]
+        if payload["method"] == "tools/list":
+            return {"jsonrpc": "2.0", "id": payload["id"], "result": {"tools": [{"name": "list_connections"}]}}
+        return {
+            "jsonrpc": "2.0",
+            "id": payload["id"],
+            "result": {"structuredContent": {"ok": True, "data": []}},
+        }
 
     async def proxy(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         self.calls.append((method, path, kwargs))
@@ -154,10 +161,64 @@ def client() -> TestClient:
     yield TestClient(app)
 
 
-def test_adapter_only_accepts_versioned_control_plane_paths() -> None:
+def test_adapter_enforces_admin_runtime_and_public_paths() -> None:
     adapter = OpenConnectorClient(base_url="https://connector.example.com", admin_token="secret")
-    with pytest.raises(ValueError, match="/v1"):
-        adapter._url("/api/connections")
+    assert adapter._url("/api/connections", scope="admin").endswith("/api/connections")
+    assert adapter._url("/mcp", scope="runtime").endswith("/mcp")
+    assert adapter._url("/v1/actions", scope="runtime").endswith("/v1/actions")
+    assert adapter._url("/health", scope="public").endswith("/health")
+    with pytest.raises(ValueError, match="admin"):
+        adapter._url("/v1/actions", scope="admin")
+    with pytest.raises(ValueError, match="runtime"):
+        adapter._url("/api/connections", scope="runtime")
+
+
+@pytest.mark.asyncio
+async def test_adapter_keeps_admin_and_runtime_credentials_separate(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[dict[str, Any]] = []
+
+    class RecordingClient:
+        async def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+            captured.append({"method": method, "url": url, **kwargs})
+            return httpx.Response(200, json={"ok": True})
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_: Any):
+            return None
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **_: RecordingClient())
+    adapter = OpenConnectorClient(base_url="https://connector.example.com", admin_token="server-admin")
+
+    await adapter.request_admin("GET", "/api/connections", tenant_id="tenant-a")
+    await adapter.request_runtime(
+        "POST",
+        "/mcp",
+        bearer_token="user-runtime",
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        tenant_id="tenant-a",
+    )
+    await adapter.request_public("GET", "/health")
+
+    assert captured[0]["headers"]["Authorization"] == "Bearer server-admin"
+    assert captured[0]["url"].endswith("/api/connections")
+    assert captured[1]["headers"]["Authorization"] == "Bearer user-runtime"
+    assert captured[1]["url"].endswith("/mcp")
+    assert "Authorization" not in captured[2]["headers"]
+    assert captured[2]["url"].endswith("/health")
+
+
+def test_adapter_decodes_single_mcp_sse_event() -> None:
+    assert OpenConnectorClient._parse_sse_json(
+        'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[]}}\n\n'
+    ) == {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}
+
+
+@pytest.mark.parametrize("body", ["", "event: message\ndata: nope\n\n", "data: {}\n\ndata: {}\n\n"])
+def test_adapter_rejects_invalid_mcp_sse(body: str) -> None:
+    with pytest.raises(OpenConnectorError, match="invalid MCP"):
+        OpenConnectorClient._parse_sse_json(body)
 
 
 @pytest.mark.asyncio
@@ -173,6 +234,15 @@ async def test_console_proxy_rejects_absolute_url_path() -> None:
             content_type=None,
             tenant_id="tenant-a",
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["mcp", "mcp/tools", "v1/actions", "v1/apps"])
+async def test_console_proxy_never_sends_admin_token_to_runtime_paths(path: str) -> None:
+    adapter = OpenConnectorClient(base_url="https://connector.example.com", admin_token="server-admin")
+
+    with pytest.raises(OpenConnectorError, match="runtime paths"):
+        await adapter.proxy("GET", path, query=b"", body=b"", content_type=None, tenant_id="tenant-a")
 
 
 def test_console_proxy_rewrites_same_upstream_redirect_and_rejects_other_hosts() -> None:
@@ -200,40 +270,77 @@ def test_console_proxy_rewrites_root_relative_assets_and_api_paths() -> None:
     assert api._rewrite_console_content(b"\x89PNG", "image/png") == b"\x89PNG"
 
 
-def test_docs_aggregates_only_non_sensitive_v1_metadata(client: TestClient, fake_client: FakeOpenConnector) -> None:
+def test_docs_aggregates_only_non_sensitive_admin_metadata(client: TestClient, fake_client: FakeOpenConnector) -> None:
     response = client.get("/api/v1/connection-docs/config")
 
     assert response.status_code == 200
     assert response.json()["data"]["mcp"]["endpoint"] == "https://connector.example.com/mcp"
-    assert [call[1] for call in fake_client.calls] == ["/v1/mcp/config", "/v1/identity-provider"]
+    assert [call[1] for call in fake_client.calls] == ["/api/identity-provider", "/openapi.json"]
+    assert response.json()["data"]["backend_mode"] == "REAL"
     assert "secret" not in response.text.lower()
     assert "token" not in response.text.lower()
     assert response.json()["data"]["mcp"]["workbuddy_config"]["auth"] == "oauth"
     assert all(call[2]["tenant_id"] == "tenant-a" for call in fake_client.calls)
 
 
-def test_docs_rejects_non_https_endpoint(client: TestClient, fake_client: FakeOpenConnector) -> None:
-    original_request = fake_client.request
+def test_backend_mode_is_explicit_and_defaults_to_real(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DATA_WORKSHOP_BACKEND_MODE", raising=False)
+    assert client.get("/api/v1/bootstrap").json()["data"]["backend_mode"] == "REAL"
 
-    async def insecure_request(method: str, path: str, **kwargs: Any) -> Any:
-        if path == "/v1/mcp/config":
-            return {"endpoint": "http://connector.example.com/mcp"}
+    monkeypatch.setenv("DATA_WORKSHOP_BACKEND_MODE", "TEST")
+    assert client.get("/api/v1/bootstrap").json()["data"]["backend_mode"] == "TEST"
+
+
+def test_docs_status_requires_process_health_and_identity_jwks(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+) -> None:
+    response = client.get("/api/v1/connection-docs/status")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "healthy"
+    assert response.json()["data"]["identity_status"] == "ready"
+    assert [call[1] for call in fake_client.calls] == ["/health", "/api/identity-provider"]
+
+
+def test_docs_status_is_degraded_when_identity_is_unconfigured(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+) -> None:
+    original_request = fake_client.request_admin
+
+    async def no_identity(method: str, path: str, **kwargs: Any) -> Any:
+        if path == "/api/identity-provider":
+            return None
         return await original_request(method, path, **kwargs)
 
-    fake_client.request = insecure_request
+    fake_client.request_admin = no_identity
+    response = client.get("/api/v1/connection-docs/status")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "degraded"
+    assert response.json()["data"]["identity_status"] == "unconfigured"
+
+
+def test_docs_rejects_non_https_endpoint(client: TestClient, fake_client: FakeOpenConnector) -> None:
+    fake_client.public_url = "http://connector.example.com"
     response = client.get("/api/v1/connection-docs/config")
 
     assert response.status_code == 502
     assert "HTTPS" in response.json()["detail"]["message"]
 
 
-def test_provider_catalog_uses_v1_upstream(client: TestClient, fake_client: FakeOpenConnector) -> None:
+def test_provider_catalog_uses_admin_upstream(client: TestClient, fake_client: FakeOpenConnector) -> None:
     response = client.get("/api/v1/providers")
 
     assert response.status_code == 200
+    assert response.headers["x-data-workshop-upstream-scope"] == "admin"
     assert response.json()["data"][0]["name"] == "Oracle"
     assert response.json()["data"][0]["id"] == "oracle"
-    assert fake_client.calls[-1][1] == "/v1/providers"
+    assert fake_client.calls[-1][1] == "/api/providers"
 
 
 def test_identity_status_exposes_only_operational_metadata(
@@ -246,24 +353,24 @@ def test_identity_status_exposes_only_operational_metadata(
     assert response.json()["data"] == {
         "status": "ready",
         "user_pool_ref": "dw-users",
-        "jwks_status": None,
+        "jwks_status": "configured",
         "jwks_last_refresh_at": None,
     }
-    assert fake_client.calls[-1][1] == "/v1/identity-provider"
+    assert fake_client.calls[-1][1] == "/api/identity-provider"
 
 
 def test_unconfigured_identity_is_explicit_not_an_upstream_error(
     client: TestClient,
     fake_client: FakeOpenConnector,
 ) -> None:
-    original_request = fake_client.request
+    original_request = fake_client.request_admin
 
     async def no_identity(method: str, path: str, **kwargs: Any) -> Any:
-        if path == "/v1/identity-provider":
+        if path == "/api/identity-provider":
             return None
         return await original_request(method, path, **kwargs)
 
-    fake_client.request = no_identity
+    fake_client.request_admin = no_identity
 
     status_response = client.get("/api/v1/identity-provider")
     docs_response = client.get("/api/v1/connection-docs/config")
@@ -274,7 +381,7 @@ def test_unconfigured_identity_is_explicit_not_an_upstream_error(
     assert docs_response.json()["data"]["identity"]["status"] == "unconfigured"
 
 
-def test_connections_and_actions_translate_w1_runtime_contract(
+def test_connections_and_actions_translate_w1_admin_contract(
     client: TestClient,
     fake_client: FakeOpenConnector,
 ) -> None:
@@ -292,17 +399,10 @@ def test_connections_and_actions_translate_w1_runtime_contract(
     }
     assert actions.json()["data"][0]["read_only"] is True
     assert actions.json()["data"][0]["risk"] == "low"
-    assert [call[1] for call in fake_client.calls] == [
-        "/v1/connections",
-        "/v1/apps",
-        "/v1/connections",
-        "/v1/apps",
-        "/v1/actions",
-    ]
-    assert fake_client.calls[-1][2]["params"] == {"service": "oracle"}
+    assert [call[1] for call in fake_client.calls] == ["/api/connections", "/api/connections", "/api/actions"]
 
 
-def test_access_grants_translate_w2_runtime_contract(
+def test_access_grants_translate_w2_admin_contract(
     client: TestClient,
     fake_client: FakeOpenConnector,
 ) -> None:
@@ -316,7 +416,7 @@ def test_access_grants_translate_w2_runtime_contract(
     assert grant["subject_display_snapshot"] == "finance"
     assert grant["role_id"] == "reader"
     assert grant["status"] == "active"
-    assert [call[1] for call in fake_client.calls] == ["/v1/access-grants", "/v1/identity/subjects"]
+    assert [call[1] for call in fake_client.calls] == ["/api/access-grants", "/api/identity/subjects"]
 
 
 def test_grant_write_translates_to_w2_camel_case(client: TestClient, fake_client: FakeOpenConnector) -> None:
@@ -358,7 +458,7 @@ def test_access_preview_uses_verified_subject_and_per_action_decisions(
     preview = response.json()["data"]
     assert preview["subject"]["id"] == "alice"
     assert [action["id"] for action in preview["connections"][0]["actions"]] == ["oracle.query_rows"]
-    preview_call = next(call for call in fake_client.calls if call[1] == "/v1/access:preview")
+    preview_call = next(call for call in fake_client.calls if call[1] == "/api/access/preview")
     assert preview_call[2]["json"]["subject"]["sub"] == "alice"
     assert preview_call[2]["json"]["connectionId"] == "oracle-prod"
     assert preview_call[2]["json"]["actionId"] == "oracle.query_rows"
@@ -368,36 +468,22 @@ def test_connection_payload_recursively_removes_secret_fields(
     client: TestClient,
     fake_client: FakeOpenConnector,
 ) -> None:
-    original_request = fake_client.request
+    original_request = fake_client.request_admin
 
     async def response_with_secrets(method: str, path: str, **kwargs: Any) -> Any:
-        if path == "/v1/connections":
-            return {
-                "items": [
-                    {
-                        "id": "oracle-prod",
-                        "displayName": "Oracle",
-                        "service": "oracle",
-                        "credentials": {"password": "hidden"},
-                        "metadata": {"api_key": "hidden", "region": "cn-beijing"},
-                    }
-                ]
-            }
-        if path == "/v1/apps":
-            return {
-                "items": [
-                    {
-                        "id": "oracle-prod",
-                        "displayName": "Oracle",
-                        "service": "oracle",
-                        "credentials": {"password": "hidden"},
-                        "metadata": {"api_key": "hidden", "region": "cn-beijing"},
-                    }
-                ]
-            }
+        if path == "/api/connections":
+            return [
+                {
+                    "id": "oracle-prod",
+                    "displayName": "Oracle",
+                    "service": "oracle",
+                    "credentials": {"password": "hidden"},
+                    "metadata": {"api_key": "hidden", "region": "cn-beijing"},
+                }
+            ]
         return await original_request(method, path, **kwargs)
 
-    fake_client.request = response_with_secrets
+    fake_client.request_admin = response_with_secrets
     response = client.get("/api/v1/connections")
 
     assert response.status_code == 200
@@ -413,39 +499,100 @@ def test_upstream_error_details_are_not_forwarded(client: TestClient, fake_clien
             detail={"authorization": "Bearer sensitive", "message": "token=sensitive"},
         )
 
-    fake_client.request = rejected
+    fake_client.request_admin = rejected
     response = client.get("/api/v1/connections")
 
     assert response.status_code == 403
     assert "sensitive" not in response.text
 
 
-@pytest.mark.parametrize(
-    ("operation", "method", "path"),
-    [
-        ("health", "GET", "/v1/health"),
-        ("identity", "GET", "/v1/identity-provider"),
-        ("tools_list", "POST", "/v1/mcp/tests/tools-list"),
-        ("list_connections", "POST", "/v1/mcp/tests/read-only"),
-    ],
-)
-def test_read_only_tester_maps_to_fixed_allowlist(
+def test_read_only_tester_uses_public_health_without_a_token(
     client: TestClient,
     fake_client: FakeOpenConnector,
-    operation: str,
-    method: str,
-    path: str,
 ) -> None:
     response = client.post(
         "/api/v1/connection-docs/read-only-tests",
-        json={"operation": operation, "arguments": {"ignored_path": "/v1/access-grants"}},
+        json={"operation": "health", "arguments": {"ignored_path": "/api/access-grants"}},
     )
 
     assert response.status_code == 200
-    assert fake_client.calls[-1][0:2] == (method, path)
-    if method == "POST":
-        assert fake_client.calls[-1][2]["json"]["operation"] == operation
-        assert fake_client.calls[-1][2]["json"]["arguments"] == {}
+    assert response.headers["x-data-workshop-upstream-scope"] == "public"
+    assert fake_client.calls[-1] == ("GET", "/health", {"scope": "public"})
+
+
+def test_read_only_tester_uses_admin_identity_endpoint(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+) -> None:
+    response = client.post("/api/v1/connection-docs/read-only-tests", json={"operation": "identity"})
+
+    assert response.status_code == 200
+    assert response.headers["x-data-workshop-upstream-scope"] == "admin"
+    assert fake_client.calls[-1][0:2] == ("GET", "/api/identity-provider")
+    assert "bearer_token" not in fake_client.calls[-1][2]
+
+
+@pytest.mark.parametrize(
+    ("operation", "method", "params"),
+    [
+        ("tools_list", "tools/list", {}),
+        ("list_connections", "tools/call", {"name": "list_connections", "arguments": {}}),
+    ],
+)
+def test_read_only_tester_uses_user_runtime_credential_for_mcp(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    method: str,
+    params: dict[str, Any],
+) -> None:
+    monkeypatch.setenv("DATA_WORKSHOP_BACKEND_MODE", "TEST")
+    monkeypatch.setenv("OPENCONNECTOR_TEST_RUNTIME_TOKEN", "runtime-user-token")
+    response = client.post("/api/v1/connection-docs/read-only-tests", json={"operation": operation})
+
+    assert response.status_code == 200
+    assert response.headers["x-data-workshop-upstream-scope"] == "runtime"
+    assert fake_client.calls[-1][0:2] == ("POST", "/mcp")
+    assert fake_client.calls[-1][2]["bearer_token"] == "runtime-user-token"
+    assert fake_client.calls[-1][2]["json"] == {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+
+
+def test_real_mode_mcp_test_requires_controlled_user_credential(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATA_WORKSHOP_BACKEND_MODE", "REAL")
+    monkeypatch.delenv("OPENCONNECTOR_TEST_RUNTIME_TOKEN", raising=False)
+    response = client.post("/api/v1/connection-docs/read-only-tests", json={"operation": "tools_list"})
+
+    assert response.status_code == 503
+    assert fake_client.calls == []
+
+
+def test_real_mode_uses_server_side_controlled_user_credential(
+    fake_client: FakeOpenConnector,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATA_WORKSHOP_BACKEND_MODE", "REAL")
+    monkeypatch.setenv("OPENCONNECTOR_TEST_RUNTIME_TOKEN", "controlled-user-jwt")
+    app = FastAPI()
+    app.include_router(api.router, prefix="/api")
+    member = SimpleNamespace(tenant_id="tenant-a", user_id="user-a", is_admin=False, has_scope=lambda _: True)
+    app.dependency_overrides[api.require_workshop_member] = lambda: member
+    runtime_client = TestClient(app)
+
+    response = runtime_client.post(
+        "/api/v1/connection-docs/read-only-tests",
+        headers={"Authorization": "Bearer studio-user-jwt"},
+        json={"operation": "tools_list"},
+    )
+
+    assert response.status_code == 200
+    assert fake_client.calls[-1][0:2] == ("POST", "/mcp")
+    assert fake_client.calls[-1][2]["bearer_token"] == "controlled-user-jwt"
+    assert fake_client.calls[-1][2]["bearer_token"] != "studio-user-jwt"
 
 
 def test_launch_session_cookie_is_short_lived_http_only_secure_and_strict(
@@ -561,7 +708,7 @@ def test_unconfigured_upstream_returns_recoverable_503(client: TestClient, monke
     class Unconfigured:
         configured = False
 
-        async def request(self, *_: Any, **__: Any) -> Any:
+        async def request_admin(self, *_: Any, **__: Any) -> Any:
             raise OpenConnectorError("OpenConnector is not configured", status_code=503)
 
     monkeypatch.setattr(api, "get_openconnector_client", Unconfigured)

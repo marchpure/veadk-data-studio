@@ -3,7 +3,12 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 
 const baseUrl = process.env.DATA_WORKSHOP_PREVIEW_URL || 'http://127.0.0.1:4173'
-const mcpEndpoint = 'https://s4j054gh1e125mqsipi2e.apigateway-cn-beijing.volceapi.com/mcp'
+const mcpEndpoint = process.env.DATA_WORKSHOP_MCP_ENDPOINT ||
+  'https://s4j054gh1e125mqsipi2e.apigateway-cn-beijing.volceapi.com/mcp'
+const groupName = process.env.DATA_WORKSHOP_E2E_GROUP_NAME || '财务分析组'
+const userQuery = process.env.DATA_WORKSHOP_E2E_USER_QUERY || 'Alice'
+const userMatch = process.env.DATA_WORKSHOP_E2E_USER_MATCH || 'user-alice'
+const oracleProviderId = process.env.DATA_WORKSHOP_E2E_ORACLE_PROVIDER_ID || 'oracle'
 const outputDir = path.resolve('artifacts/data-workshop')
 await fs.mkdir(outputDir, { recursive: true })
 
@@ -40,15 +45,35 @@ const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const consoleErrors = []
 const browserRequests = []
+const networkFailures = []
+const upstreamScopes = []
 page.on('console', message => {
   if (message.type() === 'error') consoleErrors.push(message.text())
 })
 page.on('request', request => {
   browserRequests.push({ url: request.url(), authorization: request.headers().authorization || '' })
 })
+page.on('response', response => {
+  if (response.status() >= 400) networkFailures.push({ url: response.url(), status: response.status() })
+  const scope = response.headers()['x-data-workshop-upstream-scope']
+  if (scope) upstreamScopes.push({ path: new URL(response.url()).pathname, scope })
+})
 
+const bootstrapResponse = page.waitForResponse(response =>
+  new URL(response.url()).pathname === '/api/v1/bootstrap' && response.ok(),
+)
 await page.goto(baseUrl)
 await page.waitForURL('**/home')
+const bootstrapPayload = await (await bootstrapResponse).json()
+const backendMode = bootstrapPayload.data.backend_mode
+if (process.env.DATA_WORKSHOP_EXPECT_MODE && backendMode !== process.env.DATA_WORKSHOP_EXPECT_MODE) {
+  throw new Error(`Expected backend mode ${process.env.DATA_WORKSHOP_EXPECT_MODE}, received ${backendMode}`)
+}
+if (backendMode === 'TEST') {
+  await page.getByText('TEST BACKEND', { exact: true }).waitFor()
+} else if (await page.getByText('TEST BACKEND', { exact: true }).count()) {
+  throw new Error('REAL preview must not display the TEST BACKEND banner')
+}
 for (const step of ['准备数据', '配置访问权限', '查看接入文档', '生成 Skill']) {
   await page.getByText(step, { exact: true }).waitFor()
 }
@@ -72,20 +97,20 @@ await page.getByRole('link', { name: /Oracle/ }).click()
 await page.getByRole('link', { name: '访问权限' }).first().click()
 await page.getByRole('button', { name: '新增授权' }).click()
 await page.getByRole('button', { name: '用户组', exact: true }).click()
-await page.getByRole('button', { name: /财务分析组/ }).click()
+await page.getByRole('button', { name: new RegExp(groupName) }).click()
 await page.getByRole('button', { name: /下一步/ }).click()
 await page.getByRole('button', { name: /只读者/ }).click()
 await page.getByRole('button', { name: /下一步/ }).click()
 await page.getByRole('button', { name: '保存授权' }).click()
-await page.getByText('财务分析组').first().waitFor()
+await page.getByText(groupName).first().waitFor()
 await page.getByText('Access allowed').first().waitFor()
 await page.getByRole('button', { name: '权限预览' }).click()
-await page.getByPlaceholder('选择要预览的用户').fill('Alice')
+await page.getByPlaceholder('选择要预览的用户').fill(userQuery)
 await page.getByRole('button', { name: '搜索' }).click()
-await page.getByRole('button', { name: /user-alice/ }).click()
+await page.getByRole('button', { name: new RegExp(userMatch) }).click()
 await page.getByText('最终 Actions 由直接授权').waitFor()
 await page.getByRole('button', { name: '关闭权限预览' }).click()
-const grantRow = page.locator('.dw-table tbody tr').filter({ hasText: '财务分析组' }).last()
+const grantRow = page.locator('.dw-table tbody tr').filter({ hasText: groupName }).last()
 await grantRow.getByTitle('编辑授权').click()
 await page.getByRole('button', { name: /自定义/ }).click()
 const highRiskAction = page.locator('.dw-action-picker label').filter({ hasText: 'refresh_snapshot' })
@@ -110,20 +135,25 @@ await page.getByRole('tab', { name: 'HTTP API' }).click()
 await page.getByText('版本化 HTTP API').waitFor()
 await page.getByRole('tab', { name: 'SDK' }).click()
 await page.getByText('Python SDK').waitFor()
+await page.locator('.dw-tester select').selectOption('tools_list')
 await page.getByRole('button', { name: '运行测试' }).click()
 await page.getByText('测试完成').waitFor()
 
 await page.goto(`${baseUrl}/connections/docs`)
 await page.getByText(mcpEndpoint, { exact: true }).waitFor()
-await page.getByText('服务正常', { exact: true }).waitFor()
+const expectedHealthLabel = backendMode === 'TEST' ? '测试后端' : '服务正常'
+await page.getByText(expectedHealthLabel, { exact: true }).waitFor()
+if (backendMode === 'TEST' && await page.getByText('服务正常', { exact: true }).count()) {
+  throw new Error('Test-backed preview must not claim normal service health')
+}
 await assertViewportGeometry(page, '1440x900')
 await page.screenshot({ path: path.join(outputDir, 'connection-docs-1440x900.png') })
 await page.setViewportSize({ width: 1280, height: 800 })
-await page.getByText('服务正常', { exact: true }).waitFor()
+await page.getByText(expectedHealthLabel, { exact: true }).waitFor()
 await assertViewportGeometry(page, '1280x800')
 await page.screenshot({ path: path.join(outputDir, 'connection-docs-1280x800.png') })
 await page.setViewportSize({ width: 390, height: 844 })
-await page.getByText('服务正常', { exact: true }).waitFor()
+await page.getByText(expectedHealthLabel, { exact: true }).waitFor()
 await assertViewportGeometry(page, '390x844')
 await page.screenshot({ path: path.join(outputDir, 'connection-docs-390x844.png') })
 
@@ -137,7 +167,7 @@ await page.goBack()
 await page.goForward()
 await page.reload()
 await page.getByRole('heading', { name: '使用连接能力' }).waitFor()
-await page.goto(`${baseUrl}/connections/providers/new/oracle`)
+await page.goto(`${baseUrl}/connections/providers/new/${oracleProviderId}`)
 await page.getByRole('heading', { name: '新建 Oracle 连接' }).waitFor()
 await page.frameLocator('iframe[title="OpenConnector 新建 Oracle 连接"]').getByText('"console":"connections/new"').waitFor()
 
@@ -152,5 +182,31 @@ const browserEvidence = JSON.stringify({ browserRequests, storage })
 if (browserEvidence.includes('test-admin-token') || browserEvidence.includes('OPENCONNECTOR_ADMIN_TOKEN')) {
   throw new Error('OpenConnector admin credential leaked into browser-visible state')
 }
-console.log(JSON.stringify({ ok: true, preview_url: baseUrl, screenshots: outputDir }, null, 2))
+const managementEvidence = upstreamScopes.filter(item =>
+  /\/api\/v1\/(?:providers|connections|identity|access|connection-docs\/config)/.test(item.path),
+)
+if (managementEvidence.some(item => item.scope !== 'admin')) {
+  throw new Error(`Management request escaped Admin API: ${JSON.stringify(managementEvidence)}`)
+}
+const mcpTestEvidence = upstreamScopes.filter(item => item.path.endsWith('/connection-docs/read-only-tests'))
+if (!mcpTestEvidence.some(item => item.scope === 'runtime')) {
+  throw new Error(`Missing controlled-user MCP evidence: ${JSON.stringify(mcpTestEvidence)}`)
+}
+const upstreamScopeSummary = Object.entries(upstreamScopes.reduce((summary, item) => {
+  const key = `${item.scope} ${item.path}`
+  summary[key] = (summary[key] || 0) + 1
+  return summary
+}, {})).map(([route, count]) => ({ route, count }))
+console.log(JSON.stringify({
+  ok: true,
+  backend_mode: backendMode,
+  preview_url: baseUrl,
+  screenshots: outputDir,
+  console_errors: consoleErrors,
+  network_failures: networkFailures,
+  upstream_scopes: upstreamScopeSummary,
+  browser_request_paths: [...new Set(browserRequests
+    .map(request => new URL(request.url).pathname)
+    .filter(pathname => pathname.startsWith('/api/') || pathname.startsWith('/oc/')))],
+}, null, 2))
 await browser.close()

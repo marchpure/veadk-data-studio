@@ -9,6 +9,7 @@ import type {
   IdentityStatus,
   Provider,
   Subject,
+  WorkshopBootstrap,
 } from './types'
 import { apiFetch } from '../../services/api'
 
@@ -59,6 +60,7 @@ function asItems<T>(value: T[] | { items: T[] }): T[] {
 }
 
 export const workshopApi = {
+  getBootstrap: () => request<WorkshopBootstrap>('/bootstrap'),
   listProviders: async () => asItems(await request<Provider[] | { items: Provider[] }>('/providers')),
   listConnections: async () => asItems(await request<Connection[] | { items: Connection[] }>('/connections')),
   getConnection: (connectionId: string) => request<Connection>(`/connections/${connectionId}`),

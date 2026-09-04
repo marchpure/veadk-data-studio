@@ -1,6 +1,14 @@
+import os
 from types import SimpleNamespace
 
 from fastapi import FastAPI
+
+os.environ.setdefault("DATA_WORKSHOP_BACKEND_MODE", "TEST")
+os.environ.setdefault("OPENCONNECTOR_TEST_RUNTIME_TOKEN", "test-runtime-token")
+os.environ.setdefault(
+    "OPENCONNECTOR_PUBLIC_URL",
+    "https://s4j054gh1e125mqsipi2e.apigateway-cn-beijing.volceapi.com",
+)
 
 from server.data_workshop import api
 from server.schemas.standard_response import success_response

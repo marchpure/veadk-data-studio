@@ -9,9 +9,10 @@ import {
   Sparkles,
   X,
 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useStore } from '../../../stores/useStore'
+import { workshopApi } from '../api'
 
 const primaryNav = [
   { label: '首页', path: '/home', icon: Home },
@@ -33,12 +34,19 @@ const connectionNav = [
 export function WorkshopShell({ children }: { children: ReactNode }) {
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [backendMode, setBackendMode] = useState<'REAL' | 'TEST'>('TEST')
   const user = useStore(state => state.user)
   const inConnections = location.pathname.startsWith('/connections')
   const userName = user?.full_name || user?.email || '当前用户'
+  useEffect(() => {
+    void workshopApi.getBootstrap()
+      .then(bootstrap => setBackendMode(bootstrap.backend_mode))
+      .catch(() => setBackendMode('TEST'))
+  }, [])
 
   return (
-    <div className="dw-app">
+    <div className={`dw-app ${backendMode === 'TEST' ? 'has-test-backend' : ''}`}>
+      {backendMode === 'TEST' && <div className="dw-test-backend" role="alert">TEST BACKEND</div>}
       <header className="dw-mobile-header">
         <button aria-label="打开导航" onClick={() => setMobileOpen(true)}><Menu /></button>
         <span>Data Workshop</span>

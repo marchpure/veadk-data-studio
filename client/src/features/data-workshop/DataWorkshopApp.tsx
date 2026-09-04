@@ -23,6 +23,7 @@ export function DataWorkshopApp() {
     <Route path="/connections/providers/:id/access" element={<ConnectionAccess />} />
     <Route path="/connections/actions" element={<ConsoleEmbed title="Actions" consolePath="actions" />} />
     <Route path="/connections/trace" element={<ConsoleEmbed title="Trace" consolePath="traces" />} />
+    <Route path="/connections/access/identity" element={<ConsoleEmbed title="Identity 配置" consolePath="access" />} />
     <Route path="/connections/access" element={<ConnectionAccess />} />
     <Route path="/connections/docs" element={<ConnectionDocs />} />
     <Route path="/kb/*" element={<OwnedElsewhere title="知识库" owner="OpenViking" />} />

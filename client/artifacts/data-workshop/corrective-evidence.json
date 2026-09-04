@@ -1,0 +1,57 @@
+{
+  "contract": {
+    "w2_commit": "2f5759d72bd4ecee7712d3954362c6b735d712d3",
+    "admin_prefix": "/api",
+    "runtime_paths": [
+      "/mcp",
+      "/v1"
+    ]
+  },
+  "test_preview": {
+    "url": "http://127.0.0.1:4173",
+    "backend_mode": "TEST",
+    "banner": "TEST BACKEND",
+    "journey": "passed",
+    "console_errors": [],
+    "network_failures": [],
+    "screenshots": [
+      "connection-docs-1440x900.png",
+      "connection-docs-1280x800.png",
+      "connection-docs-390x844.png"
+    ]
+  },
+  "real_preview": {
+    "url": "http://127.0.0.1:4175",
+    "backend_mode": "REAL",
+    "backend": "server.main",
+    "openconnector": "W1 integrated runtime plus W2 2f5759d security contract",
+    "identity_status": "unconfigured",
+    "mcp_tools_list": "passed",
+    "mcp_list_connections": "passed",
+    "admin_token_on_runtime_status": 401,
+    "runtime_token_on_admin_status": 401,
+    "console_errors": [],
+    "network_failures": [],
+    "screenshots": [
+      "real-backend-identity-blocked-1440x900.png",
+      "real-backend-identity-blocked-1280x800.png",
+      "real-backend-identity-blocked-390x844.png"
+    ]
+  },
+  "blocked": {
+    "reason": "The approved Identity issuer/JWKS/UserPool and Oracle test credentials are unavailable, and the public W4 origin still runs the donor image.",
+    "missing_real_journey": [
+      "create Oracle connection",
+      "create group reader grant",
+      "preview a verified user",
+      "edit grant to custom",
+      "revoke grant",
+      "verify resulting audit"
+    ],
+    "external_evidence": "W4 deploy/dwv1-public-edge/evidence/upstream-blocker.json"
+  },
+  "startup": {
+    "studio_backend": "DATA_WORKSHOP_BACKEND_MODE=REAL OPENCONNECTOR_URL=<internal-origin> OPENCONNECTOR_PUBLIC_URL=<https-origin> OPENCONNECTOR_ADMIN_TOKEN=<server-only> OPENCONNECTOR_TEST_RUNTIME_TOKEN=<controlled-user-token> .venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 18184",
+    "frontend": "VITE_API_URL=http://127.0.0.1:18184 pnpm dev --host 127.0.0.1 --port 4175 --strictPort"
+  }
+}

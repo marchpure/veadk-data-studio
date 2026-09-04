@@ -1,5 +1,12 @@
 export type LoadState = 'loading' | 'ready' | 'empty' | 'error'
 
+export interface WorkshopBootstrap {
+  backend_mode: 'REAL' | 'TEST'
+  openconnector_configured: boolean
+  navigation: string[]
+  tenant_id: string
+}
+
 export interface Connection {
   id: string
   name: string
@@ -60,6 +67,7 @@ export interface AccessPreview {
 }
 
 export interface DocsConfig {
+  backend_mode: 'REAL' | 'TEST'
   mcp: {
     endpoint: string
     protocol?: string
@@ -80,6 +88,8 @@ export interface DocsConfig {
 
 export interface DocsStatus {
   status: 'healthy' | 'degraded' | 'unavailable'
+  backend_mode: 'REAL' | 'TEST'
+  identity_status: 'ready' | 'unconfigured'
   protocol?: string
   checked_at?: string
 }

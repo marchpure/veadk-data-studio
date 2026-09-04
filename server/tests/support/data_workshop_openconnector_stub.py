@@ -53,58 +53,56 @@ providers = [
 ]
 
 
-def check_auth(request: Request) -> None:
+def check_admin_auth(request: Request) -> None:
     if request.headers.get("authorization") != "Bearer test-admin-token":
         raise HTTPException(status_code=401, detail="admin authentication required")
     if request.headers.get("x-tenant-id") != "00000000-0000-0000-0000-000000000001":
         raise HTTPException(status_code=403, detail="tenant context required")
 
 
-@app.get("/v1/health")
-async def runtime_health(request: Request):
-    check_auth(request)
+def check_runtime_auth(request: Request) -> None:
+    if request.headers.get("authorization") != "Bearer test-runtime-token":
+        raise HTTPException(status_code=401, detail="runtime authentication required")
+
+
+@app.get("/health")
+async def health():
     return {"ok": True, "runtime": "openconnector"}
 
 
-@app.get("/v1/apps")
+@app.get("/api/connections")
 async def list_connections(request: Request):
-    check_auth(request)
-    return {"items": [connection]}
+    check_admin_auth(request)
+    return [connection]
 
 
-@app.get("/v1/connections")
-async def list_connections_v3(request: Request):
-    check_auth(request)
-    return {"items": [connection]}
-
-
-@app.get("/v1/providers")
+@app.get("/api/providers")
 async def list_providers(request: Request):
-    check_auth(request)
-    return {"items": providers}
+    check_admin_auth(request)
+    return providers
 
 
-@app.get("/v1/actions")
+@app.get("/api/actions")
 async def list_actions(request: Request, service: str | None = None):
-    check_auth(request)
-    return {"items": actions if service in {None, connection["service"]} else []}
+    check_admin_auth(request)
+    return actions if service in {None, connection["service"]} else []
 
 
-@app.get("/v1/access-grants")
+@app.get("/api/access-grants")
 async def list_grants(request: Request):
-    check_auth(request)
-    return {"items": grants}
+    check_admin_auth(request)
+    return grants
 
 
-@app.get("/v1/identity/subjects")
+@app.get("/api/identity/subjects")
 async def list_subjects(request: Request):
-    check_auth(request)
-    return {"items": subjects}
+    check_admin_auth(request)
+    return subjects
 
 
-@app.post("/v1/access-grants")
+@app.post("/api/access-grants")
 async def create_grant(request: Request):
-    check_auth(request)
+    check_admin_auth(request)
     payload = await request.json()
     if payload["role"] in {"reader", "operator"} and payload["customActions"]:
         raise HTTPException(status_code=422, detail="predefined role scope must be resolved by OpenConnector")
@@ -124,9 +122,9 @@ async def create_grant(request: Request):
     return grant
 
 
-@app.patch("/v1/access-grants/{grant_id}")
+@app.patch("/api/access-grants/{grant_id}")
 async def update_grant(grant_id: str, request: Request):
-    check_auth(request)
+    check_admin_auth(request)
     payload = await request.json()
     if payload["role"] in {"reader", "operator"} and payload["customActions"]:
         raise HTTPException(status_code=422, detail="predefined role scope must be resolved by OpenConnector")
@@ -144,9 +142,9 @@ async def update_grant(grant_id: str, request: Request):
     raise HTTPException(status_code=404, detail="grant not found")
 
 
-@app.post("/v1/access-grants/{grant_id}:revoke")
+@app.post("/api/access-grants/{grant_id}/revoke")
 async def revoke_grant(grant_id: str, request: Request):
-    check_auth(request)
+    check_admin_auth(request)
     for grant in grants:
         if grant["id"] == grant_id:
             grant["revokedAt"] = datetime.now(UTC).isoformat()
@@ -154,9 +152,9 @@ async def revoke_grant(grant_id: str, request: Request):
     raise HTTPException(status_code=404, detail="grant not found")
 
 
-@app.post("/v1/access:preview")
+@app.post("/api/access/preview")
 async def preview_access(request: Request):
-    check_auth(request)
+    check_admin_auth(request)
     payload = await request.json()
     subject = payload["subject"]
     action = next(item for item in actions if item["id"] == payload["actionId"])
@@ -204,9 +202,9 @@ async def preview_access(request: Request):
     }
 
 
-@app.get("/v1/access/audit")
+@app.get("/api/access/audit")
 async def get_audit(request: Request):
-    check_auth(request)
+    check_admin_auth(request)
     return {
         "items": [
             {
@@ -224,66 +222,49 @@ async def get_audit(request: Request):
     }
 
 
-@app.get("/v1/mcp/config")
-async def get_mcp_config(request: Request):
-    check_auth(request)
-    return {
-        "endpoint": f"{PUBLIC_ORIGIN}/mcp",
-        "protocol": "MCP Streamable HTTP 2025-06-18",
-        "workbuddy_config": {
-            "name": "Data Workshop",
-            "transport": "streamable-http",
-            "url": f"{PUBLIC_ORIGIN}/mcp",
-            "auth": "oauth",
-        },
-        "api_reference_url": f"{PUBLIC_ORIGIN}/docs",
-        "openapi_url": f"{PUBLIC_ORIGIN}/openapi.json",
-        "sdk_languages": ["Python", "TypeScript"],
-    }
-
-
-@app.get("/v1/identity-provider")
+@app.get("/api/identity-provider")
 async def get_identity(request: Request):
-    check_auth(request)
+    check_admin_auth(request)
     return {
         "status": "ready",
         "issuer": "https://identity.example.com/tenant/dw",
         "audience": ["data-workshop"],
+        "jwksUri": "https://identity.example.com/tenant/dw/.well-known/jwks.json",
         "user_pool_ref": "dw-enterprise-users",
         "jwks_status": "healthy",
     }
 
 
-@app.get("/v1/mcp/status")
-async def get_mcp_status(request: Request):
-    check_auth(request)
-    return {"status": "healthy", "protocol": "streamable-http", "checked_at": "2026-09-04T00:00:00Z"}
+@app.get("/openapi.json")
+async def get_openapi(request: Request):
+    check_admin_auth(request)
+    return {"openapi": "3.1.0", "info": {"title": "OpenConnector", "version": "test"}}
 
 
-@app.post("/v1/mcp/tests/tools-list")
-async def test_tools_list(request: Request):
-    check_auth(request)
-    return {
-        "tools": [
-            {"name": "list_apps"},
-            {"name": "list_connections"},
-            {"name": "search_actions"},
-            {"name": "get_action_guide"},
-            {"name": "execute_action"},
-        ],
-        "filtered_by": "AccessGrant",
-    }
-
-
-@app.post("/v1/mcp/tests/read-only")
-async def test_read_only(request: Request):
-    check_auth(request)
-    return {"connections": [{"id": connection["id"], "name": connection["name"]}], "read_only": True}
+@app.post("/mcp")
+async def mcp(request: Request):
+    check_runtime_auth(request)
+    payload = await request.json()
+    if payload.get("method") == "tools/list":
+        result = {
+            "tools": [
+                {"name": "list_apps"},
+                {"name": "list_connections"},
+                {"name": "search_actions"},
+                {"name": "get_action_guide"},
+                {"name": "execute_action"},
+            ]
+        }
+    elif payload.get("method") == "tools/call" and payload.get("params", {}).get("name") == "list_connections":
+        result = {"content": [], "structuredContent": {"ok": True, "data": [connection]}}
+    else:
+        raise HTTPException(status_code=400, detail="unsupported MCP test operation")
+    return {"jsonrpc": "2.0", "id": payload.get("id"), "result": result}
 
 
 @app.get("/{console_path:path}")
 async def console(console_path: str, request: Request):
-    check_auth(request)
+    check_admin_auth(request)
     return {
         "console": console_path or "home",
         "embed": request.query_params.get("embed"),

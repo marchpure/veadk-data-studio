@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from server.auth.dependencies import AuthContext, get_current_auth_context
@@ -34,12 +36,6 @@ router = APIRouter(prefix="/v1")
 console_router = APIRouter(prefix="/oc")
 
 LAUNCH_COOKIE = "dw_oc_launch"
-READ_ONLY_TESTS = {
-    "health": ("GET", "/v1/health"),
-    "identity": ("GET", "/v1/identity-provider"),
-    "tools_list": ("POST", "/v1/mcp/tests/tools-list"),
-    "list_connections": ("POST", "/v1/mcp/tests/read-only"),
-}
 SENSITIVE_KEYS = {
     "access_token",
     "admin_token",
@@ -62,6 +58,21 @@ CONSOLE_ROOT_PATH = re.compile(
 
 def get_openconnector_client() -> OpenConnectorClient:
     return OpenConnectorClient()
+
+
+def _backend_mode() -> Literal["REAL", "TEST"]:
+    return "TEST" if os.getenv("DATA_WORKSHOP_BACKEND_MODE", "REAL").strip().upper() == "TEST" else "REAL"
+
+
+def _scoped_success(
+    data: Any,
+    upstream_scope: Literal["admin", "runtime", "public", "admin+public"],
+    message: str = "Operation completed successfully",
+) -> JSONResponse:
+    return JSONResponse(
+        success_response(data=data, message=message),
+        headers={"X-Data-Workshop-Upstream-Scope": upstream_scope},
+    )
 
 
 def _unwrap(data: Any) -> Any:
@@ -135,15 +146,47 @@ def _public_docs_config(config: Any, identity: Any) -> dict[str, Any]:
         if config.get(source_key):
             public_mcp[source_key] = _https_url(config[source_key], source_key)
 
+    identity_ready = bool(identity.get("issuer") and (identity.get("jwksUri") or identity.get("jwks_uri")))
     public_identity = {
-        "status": identity.get("status") or ("ready" if identity.get("issuer") else "unconfigured"),
+        "status": "ready" if identity_ready else "unconfigured",
         "issuer": identity.get("issuer"),
         "audience": [identity["audience"]] if isinstance(identity.get("audience"), str) else identity.get("audience"),
         "user_pool_ref": identity.get("userPoolRef") or identity.get("user_pool_ref"),
-        "jwks_status": identity.get("jwksStatus") or identity.get("jwks_status"),
+        "jwks_status": identity.get("jwksStatus") or identity.get("jwks_status") or (
+            "configured" if identity_ready else "unconfigured"
+        ),
         "jwks_last_refresh_at": identity.get("jwksLastRefreshAt") or identity.get("jwks_last_refresh_at"),
     }
     return {"mcp": public_mcp, "identity": public_identity}
+
+
+def _docs_config(client: OpenConnectorClient, identity: Any, openapi: Any) -> dict[str, Any]:
+    if not isinstance(openapi, dict) or not str(openapi.get("openapi") or "").startswith("3."):
+        raise OpenConnectorError("OpenConnector returned invalid OpenAPI metadata")
+    endpoint = urljoin(f"{client.public_url}/", "mcp")
+    return _public_docs_config(
+        {
+            "endpoint": endpoint,
+            "protocol": "MCP Streamable HTTP",
+            "api_reference_url": urljoin(f"{client.public_url}/", "docs"),
+            "openapi_url": urljoin(f"{client.public_url}/", "openapi.json"),
+            "sdk_languages": ["Python", "TypeScript"],
+        },
+        identity,
+    )
+
+
+def _runtime_test_bearer() -> str:
+    test_token = os.getenv("OPENCONNECTOR_TEST_RUNTIME_TOKEN", "").strip()
+    if test_token:
+        return test_token
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "code": "CONTROLLED_USER_NOT_CONFIGURED",
+            "message": "只读测试器尚未配置受控用户凭据，请联系管理员后重试",
+        },
+    )
 
 
 def _items(data: Any) -> list[dict[str, Any]]:
@@ -163,9 +206,15 @@ def _connection_view(connection: dict[str, Any]) -> dict[str, Any]:
         status = "disabled"
     return {
         "id": str(connection.get("id") or ""),
-        "name": str(connection.get("displayName") or connection.get("connectionName") or connection.get("alias") or ""),
+        "name": str(
+            connection.get("displayName")
+            or (connection.get("profile") or {}).get("displayName")
+            or connection.get("connectionName")
+            or connection.get("alias")
+            or ""
+        ),
         "provider": str(connection.get("service") or ""),
-        "description": connection.get("accountLabel"),
+        "description": connection.get("accountLabel") or (connection.get("profile") or {}).get("accountId"),
         "status": status or ("ready" if connection.get("configured") else "pending"),
         "action_count": connection.get("actionCount"),
         "updated_at": connection.get("updatedAt"),
@@ -360,6 +409,7 @@ async def bootstrap(auth: AuthContext = Depends(require_workshop_member)):
     client = get_openconnector_client()
     return success_response(
         data={
+            "backend_mode": _backend_mode(),
             "openconnector_configured": client.configured,
             "navigation": ["home", "connections", "knowledge", "skill", "sessions"],
             "tenant_id": str(auth.tenant_id),
@@ -411,7 +461,7 @@ async def list_connections(
                 for connection in connections
                 if needle in f"{connection['name']} {connection['provider']}".casefold()
             ]
-        return success_response(data=connections)
+        return _scoped_success(connections, "admin")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -420,8 +470,8 @@ async def list_connections(
 async def list_providers(auth: AuthContext = Depends(require_workshop_member)):
     client = get_openconnector_client()
     try:
-        providers = _items(await client.request("GET", "/v1/providers", tenant_id=str(auth.tenant_id)))
-        return success_response(data=[_provider_view(provider) for provider in providers])
+        providers = _items(await client.request_admin("GET", "/api/providers", tenant_id=str(auth.tenant_id)))
+        return _scoped_success([_provider_view(provider) for provider in providers], "admin")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -437,7 +487,7 @@ async def get_connection(
         connection = next((item for item in connections if _connection_matches(item, connection_id)), None)
         if connection is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
-        return success_response(data=_connection_view(connection))
+        return _scoped_success(_connection_view(connection), "admin")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -454,14 +504,14 @@ async def get_connection_actions(
         if connection is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
         actions = _items(
-            await client.request(
+            await client.request_admin(
                 "GET",
-                "/v1/actions",
-                params={"service": connection.get("service")},
+                "/api/actions",
                 tenant_id=str(auth.tenant_id),
             )
         )
-        return success_response(data=[_action_view(action) for action in actions])
+        actions = [action for action in actions if action.get("service") == connection.get("service")]
+        return _scoped_success([_action_view(action) for action in actions], "admin")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -476,24 +526,20 @@ async def get_connection_access(
         tenant_id = str(auth.tenant_id)
         grants, subjects = await _access_records(client, tenant_id)
         subject_map = {subject["id"]: subject for subject in _subject_views(subjects)}
-        return success_response(
+        return _scoped_success(
             data=[
                 _grant_view(grant, subject_map)
                 for grant in grants
                 if str(grant.get("connectionId") or grant.get("connection_id")) == connection_id
-            ]
+            ],
+            upstream_scope="admin",
         )
     except OpenConnectorError as error:
         _raise_upstream(error)
 
 
 async def _list_apps(client: OpenConnectorClient, tenant_id: str) -> list[dict[str, Any]]:
-    try:
-        return _items(await client.request("GET", "/v1/connections", tenant_id=tenant_id))
-    except OpenConnectorError as error:
-        if error.status_code != status.HTTP_404_NOT_FOUND:
-            raise
-        return _items(await client.request("GET", "/v1/apps", tenant_id=tenant_id))
+    return _items(await client.request_admin("GET", "/api/connections", tenant_id=tenant_id))
 
 
 @router.get("/identity/subjects")
@@ -506,9 +552,9 @@ async def search_subjects(
     try:
         subjects = _subject_views(
             _items(
-                await client.request(
+                await client.request_admin(
                     "GET",
-                    "/v1/identity/subjects",
+                    "/api/identity/subjects",
                     tenant_id=str(auth.tenant_id),
                 )
             )
@@ -525,7 +571,7 @@ async def search_subjects(
                 or needle in str(subject.get("secondary_text") or "").casefold()
             )
         ]
-        return success_response(data=data)
+        return _scoped_success(data, "admin")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -535,13 +581,13 @@ async def _access_records(
     tenant_id: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     grants = _items(
-        await client.request(
+        await client.request_admin(
             "GET",
-            "/v1/access-grants",
+            "/api/access-grants",
             tenant_id=tenant_id,
         )
     )
-    subjects = _items(await client.request("GET", "/v1/identity/subjects", tenant_id=tenant_id))
+    subjects = _items(await client.request_admin("GET", "/api/identity/subjects", tenant_id=tenant_id))
     return grants, subjects
 
 
@@ -551,18 +597,22 @@ async def get_identity_provider(
 ):
     client = get_openconnector_client()
     try:
-        identity = _unwrap(await client.request("GET", "/v1/identity-provider", tenant_id=str(auth.tenant_id)))
+        identity = _unwrap(await client.request_admin("GET", "/api/identity-provider", tenant_id=str(auth.tenant_id)))
         if identity is None:
             identity = {}
         if not isinstance(identity, dict):
             raise OpenConnectorError("OpenConnector returned invalid identity metadata")
-        return success_response(
+        identity_ready = bool(identity.get("issuer") and (identity.get("jwksUri") or identity.get("jwks_uri")))
+        return _scoped_success(
             data={
-                "status": identity.get("status") or ("ready" if identity.get("issuer") else "unconfigured"),
+                "status": "ready" if identity_ready else "unconfigured",
                 "user_pool_ref": identity.get("userPoolRef") or identity.get("user_pool_ref"),
-                "jwks_status": identity.get("jwksStatus") or identity.get("jwks_status"),
+                "jwks_status": identity.get("jwksStatus") or identity.get("jwks_status") or (
+                    "configured" if identity_ready else "unconfigured"
+                ),
                 "jwks_last_refresh_at": identity.get("jwksLastRefreshAt") or identity.get("jwks_last_refresh_at"),
-            }
+            },
+            upstream_scope="admin",
         )
     except OpenConnectorError as error:
         _raise_upstream(error)
@@ -575,16 +625,16 @@ async def create_access_grant(
 ):
     client = get_openconnector_client()
     try:
-        data = await client.request(
+        data = await client.request_admin(
             "POST",
-            "/v1/access-grants",
+            "/api/access-grants",
             json=_grant_input(payload),
             tenant_id=str(auth.tenant_id),
         )
         created = _unwrap(data)
         if not isinstance(created, dict):
             raise OpenConnectorError("OpenConnector returned an invalid AccessGrant")
-        return success_response(data=_grant_view(created), message="Access grant created")
+        return _scoped_success(_grant_view(created), "admin", message="Access grant created")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -597,16 +647,16 @@ async def update_access_grant(
 ):
     client = get_openconnector_client()
     try:
-        data = await client.request(
+        data = await client.request_admin(
             "PATCH",
-            f"/v1/access-grants/{grant_id}",
+            f"/api/access-grants/{grant_id}",
             json=_grant_input(payload, partial=True),
             tenant_id=str(auth.tenant_id),
         )
         updated = _unwrap(data)
         if not isinstance(updated, dict):
             raise OpenConnectorError("OpenConnector returned an invalid AccessGrant")
-        return success_response(data=_grant_view(updated), message="Access grant updated")
+        return _scoped_success(_grant_view(updated), "admin", message="Access grant updated")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -618,15 +668,15 @@ async def revoke_access_grant(
 ):
     client = get_openconnector_client()
     try:
-        data = await client.request(
+        data = await client.request_admin(
             "POST",
-            f"/v1/access-grants/{grant_id}:revoke",
+            f"/api/access-grants/{grant_id}/revoke",
             tenant_id=str(auth.tenant_id),
         )
         revoked = _unwrap(data)
         if not isinstance(revoked, dict):
             raise OpenConnectorError("OpenConnector returned an invalid AccessGrant")
-        return success_response(data=_grant_view(revoked), message="Access grant revoked")
+        return _scoped_success(_grant_view(revoked), "admin", message="Access grant revoked")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -639,7 +689,9 @@ async def preview_access(
     client = get_openconnector_client()
     try:
         tenant_id = str(auth.tenant_id)
-        subjects = _subject_views(_items(await client.request("GET", "/v1/identity/subjects", tenant_id=tenant_id)))
+        subjects = _subject_views(
+            _items(await client.request_admin("GET", "/api/identity/subjects", tenant_id=tenant_id))
+        )
         subject_view = next(
             (subject for subject in subjects if subject["type"] == "user" and subject["id"] == payload.subject_id),
             None,
@@ -656,20 +708,20 @@ async def preview_access(
         preview_connections = []
         for connection in selected_connections:
             action_items = _items(
-                await client.request(
+                await client.request_admin(
                     "GET",
-                    "/v1/actions",
-                    params={"service": connection.get("service")},
+                    "/api/actions",
                     tenant_id=tenant_id,
                 )
             )
+            action_items = [action for action in action_items if action.get("service") == connection.get("service")]
             allowed_actions = []
             reasons: list[dict[str, Any]] = []
             for action in action_items:
                 result = _unwrap(
-                    await client.request(
+                    await client.request_admin(
                         "POST",
-                        "/v1/access:preview",
+                        "/api/access/preview",
                         json={
                             "subject": runtime_subject,
                             "connectionId": connection.get("id"),
@@ -691,8 +743,9 @@ async def preview_access(
                 }
             )
         public_subject = _public_subject(subject_view)
-        return success_response(
+        return _scoped_success(
             data={"subject": public_subject, "connections": preview_connections},
+            upstream_scope="admin",
             message="Access preview calculated",
         )
     except OpenConnectorError as error:
@@ -708,9 +761,9 @@ async def get_access_audit(
     client = get_openconnector_client()
     try:
         data = _items(
-            await client.request(
+            await client.request_admin(
                 "GET",
-                "/v1/access/audit",
+                "/api/access/audit",
                 params={"limit": limit},
                 tenant_id=str(auth.tenant_id),
             )
@@ -721,7 +774,7 @@ async def get_access_audit(
             if connection_id and event_connection_id != connection_id:
                 continue
             events.append(_audit_view(event))
-        return success_response(data=events)
+        return _scoped_success(events, "admin")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -732,9 +785,13 @@ async def get_connection_docs_config(
 ):
     client = get_openconnector_client()
     try:
-        config = _unwrap(await client.request("GET", "/v1/mcp/config", tenant_id=str(auth.tenant_id)))
-        identity = _unwrap(await client.request("GET", "/v1/identity-provider", tenant_id=str(auth.tenant_id)))
-        return success_response(data=_public_docs_config(config, identity))
+        tenant_id = str(auth.tenant_id)
+        identity = _unwrap(await client.request_admin("GET", "/api/identity-provider", tenant_id=tenant_id))
+        openapi = _unwrap(await client.request_admin("GET", "/openapi.json", tenant_id=tenant_id))
+        return _scoped_success(
+            {**_docs_config(client, identity, openapi), "backend_mode": _backend_mode()},
+            "admin",
+        )
     except OpenConnectorError as error:
         _raise_upstream(error)
 
@@ -745,8 +802,20 @@ async def get_connection_docs_status(
 ):
     client = get_openconnector_client()
     try:
-        return success_response(
-            data=_unwrap(await client.request("GET", "/v1/mcp/status", tenant_id=str(auth.tenant_id)))
+        health = _unwrap(await client.request_public("GET", "/health"))
+        identity = _unwrap(
+            await client.request_admin("GET", "/api/identity-provider", tenant_id=str(auth.tenant_id))
+        )
+        process_healthy = isinstance(health, dict) and bool(health.get("ok"))
+        identity_ready = isinstance(identity, dict) and bool(identity.get("issuer") and identity.get("jwksUri"))
+        return _scoped_success(
+            data={
+                "status": "healthy" if process_healthy and identity_ready else "degraded" if process_healthy else "unavailable",
+                "protocol": "streamable-http",
+                "backend_mode": _backend_mode(),
+                "identity_status": "ready" if identity_ready else "unconfigured",
+            },
+            upstream_scope="admin+public",
         )
     except OpenConnectorError as error:
         _raise_upstream(error)
@@ -755,16 +824,31 @@ async def get_connection_docs_status(
 @router.post("/connection-docs/read-only-tests")
 async def run_read_only_test(
     payload: ReadOnlyTestPayload,
+    request: Request,
     auth: AuthContext = Depends(require_workshop_member),
 ):
     client = get_openconnector_client()
-    method, path = READ_ONLY_TESTS[payload.operation]
-    body = None
-    if method == "POST":
-        body = {"operation": payload.operation, "arguments": {}}
     try:
-        result = await client.request(method, path, json=body, tenant_id=str(auth.tenant_id))
-        return success_response(data=_unwrap(result), message="Read-only test completed")
+        if payload.operation == "health":
+            result = await client.request_public("GET", "/health")
+        elif payload.operation == "identity":
+            result = await client.request_admin(
+                "GET",
+                "/api/identity-provider",
+                tenant_id=str(auth.tenant_id),
+            )
+        else:
+            method = "tools/list" if payload.operation == "tools_list" else "tools/call"
+            params = {} if payload.operation == "tools_list" else {"name": "list_connections", "arguments": {}}
+            result = await client.request_runtime(
+                "POST",
+                "/mcp",
+                bearer_token=_runtime_test_bearer(),
+                json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+                tenant_id=str(auth.tenant_id),
+            )
+        scope = "public" if payload.operation == "health" else "admin" if payload.operation == "identity" else "runtime"
+        return _scoped_success(_unwrap(result), scope, message="Read-only test completed")
     except OpenConnectorError as error:
         _raise_upstream(error)
 
