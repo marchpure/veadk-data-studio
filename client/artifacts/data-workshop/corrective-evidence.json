@@ -2,7 +2,7 @@
   "contract": {
     "w2_commit": "2f5759d72bd4ecee7712d3954362c6b735d712d3",
     "admin_prefix": "/api",
-    "focused_contract_tests": "41 passed",
+    "focused_contract_tests": "42 passed",
     "runtime_paths": [
       "/mcp",
       "/v1"
