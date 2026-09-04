@@ -234,6 +234,21 @@ async def test_bff_validation_failure_is_not_success(test_client, isolated_bff):
     assert recovered.json()["data"]["artifact"] is None
 
 
+def test_delegated_auth_reference_refreshes_for_existing_session(monkeypatch):
+    item = {"delegated_auth_ref": None}
+    auth = object()
+    refs = iter(["oauth-ref-after-reauthorize"])
+
+    class FakeAdapter:
+        def delegated_auth_ref(self, received_auth):
+            assert received_auth is auth
+            return next(refs)
+
+    monkeypatch.setattr(skill_agent_bff, "_adapter", FakeAdapter())
+    skill_agent_bff._refresh_delegated_auth(item, auth)
+    assert item["delegated_auth_ref"] == "oauth-ref-after-reauthorize"
+
+
 @pytest.mark.asyncio
 async def test_bff_artifact_download_and_preview_proxy_w5_zip(test_client, isolated_bff, monkeypatch):
     created = await test_client.post("/api/skill-agent-bff/sessions", json={"target": "sales-skill"})

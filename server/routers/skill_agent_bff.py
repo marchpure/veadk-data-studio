@@ -180,6 +180,11 @@ def _owned(sid: str, auth: AuthContext) -> dict[str, Any]:
     return item
 
 
+def _refresh_delegated_auth(item: dict[str, Any], auth: AuthContext) -> None:
+    """Refresh the short-lived auth reference after OAuth without changing session identity."""
+    item["delegated_auth_ref"] = _adapter.delegated_auth_ref(auth)
+
+
 @router.get("/skill-agent-bff/sessions")
 async def sessions(auth: AuthContext = Depends(require_scope(Scope.USER_READ))):
     items = [_payload(item) for item in _sessions.values() if item["owner_id"] == str(auth.user_id)]
@@ -195,6 +200,7 @@ async def get_session(sid: str, auth: AuthContext = Depends(require_scope(Scope.
 @router.post("/skill-agent-bff/sessions/{sid}/invocations")
 async def invoke(sid: str, payload: SkillInvocationCreate, auth: AuthContext = Depends(require_scope(Scope.USER_UPDATE))):
     item = _owned(sid, auth)
+    _refresh_delegated_auth(item, auth)
     seen = {event.get("client_invocation_id") for event in item["events"]}
     if payload.client_invocation_id in seen:
         return success_response(data=_payload(item), message="Invocation already accepted")
@@ -325,6 +331,7 @@ async def cancel(sid: str, auth: AuthContext = Depends(require_scope(Scope.USER_
 @router.post("/skill-agent-bff/sessions/{sid}/retry")
 async def retry(sid: str, payload: SkillRetryRequest | None = None, auth: AuthContext = Depends(require_scope(Scope.USER_UPDATE))):
     item = _owned(sid, auth)
+    _refresh_delegated_auth(item, auth)
     previous = item.get("last_invocation")
     if not previous:
         item["status"] = "idle"
