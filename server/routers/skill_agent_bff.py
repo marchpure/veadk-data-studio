@@ -86,8 +86,12 @@ def _public(item: dict[str, Any]) -> dict[str, Any]:
     if isinstance(artifact, dict):
         artifact = dict(artifact)
         artifact.pop("download", None)
-        artifact["download_url"] = f"/api/skill-agent-bff/sessions/{item['id']}/artifact/download"
-        artifact["preview_url"] = f"/api/skill-agent-bff/sessions/{item['id']}/artifact/preview"
+        if item.get("artifact_url"):
+            artifact["download_url"] = f"/api/skill-agent-bff/sessions/{item['id']}/artifact/download"
+            artifact["preview_url"] = f"/api/skill-agent-bff/sessions/{item['id']}/artifact/preview"
+        else:
+            artifact.pop("download_url", None)
+            artifact.pop("preview_url", None)
         value["artifact"] = artifact
     return value
 

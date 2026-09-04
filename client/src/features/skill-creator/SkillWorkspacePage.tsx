@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Download, FileCode2, FileText, Folder, History, RefreshCw, Send, ShieldAlert, Square } from 'lucide-react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { ApiService } from '../../services/api'
 import { skillCreatorApi, type SkillArtifact, type SkillRef, type SkillSession } from './api'
 import './skill-creator.css'
 
@@ -18,7 +19,13 @@ export default function SkillWorkspacePage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [tab, setTab] = useState<'preview' | 'diff' | 'revision'>('preview')
-  useEffect(() => { skillCreatorApi.catalog().then(setCatalog).catch(error => setError(error.message)); skillCreatorApi.listSessions().then(result => setSessions(result.items)).catch(() => {}) }, [])
+  useEffect(() => {
+    skillCreatorApi.catalog().then(setCatalog).catch(error => setError(error.message))
+    skillCreatorApi.listSessions().then(result => setSessions(result.items)).catch(() => {})
+    if (id && id !== 'new') {
+      ApiService.getCustomSkill(id).then(result => setTarget(result.data?.name || '')).catch(() => {})
+    }
+  }, [id])
   const load = useCallback(async (idToLoad: string) => { const value = await skillCreatorApi.getSession(idToLoad); setSession(value); setTarget(value.target); setMcp(value.mcp_refs.map(ref => ref.id)); setKnowledge(value.knowledge_refs.map(ref => ref.id)) }, [])
   useEffect(() => { if (sessionId) void load(sessionId) }, [sessionId, load])
   const ensure = async () => {
