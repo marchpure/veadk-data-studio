@@ -46,7 +46,14 @@
     "completed_imports": 8,
     "real_failed_tasks_observed": 2,
     "retry_path_exercised": true,
-    "hosted_reindex_result": 502
+    "historical_failed_task_id": "660de695-de4a-4c4f-9ef8-4268af5202fb",
+    "missing_resource_restore_task_id": "71f26799-40a5-47db-9134-3cbd5b16c7dc",
+    "missing_resource_restore_status": "completed",
+    "retry_task_id": "e43efa5a-ddd8-4ae3-b5a4-d9c794a571ea",
+    "retry_status": "completed",
+    "retry_scanned_records": 3,
+    "retry_rebuilt_records": 5,
+    "retry_failed_records": 0
   },
   "watch": {
     "create": true,
