@@ -1,0 +1,91 @@
+{
+  "workstream": "DWV1 V3 W3 Workshop Access UI",
+  "status": "CODE_READY",
+  "repository": "https://github.com/marchpure/veadk-data-studio.git",
+  "branch": "feat/dwv1-rerun-20260904-w3-workshop-shell",
+  "base_sha": "3a197d146748580bfa575d75256c170a2ef4c550",
+  "implementation_sha": "bb75a6048cc486894c30988964ccd587024e47bd",
+  "w2_admin_contract": {
+    "repository": "https://github.com/marchpure/open-connector.git",
+    "sha": "2f5759d72bd4ecee7712d3954362c6b735d712d3",
+    "document": "docs/admin-api-contract.md",
+    "admin_prefix": "/api",
+    "runtime_paths": [
+      "/mcp",
+      "/v1"
+    ]
+  },
+  "preview": {
+    "url": "http://127.0.0.1:4175",
+    "backend_mode": "REAL",
+    "status": "degraded",
+    "identity_status": "unconfigured",
+    "startup_commands": {
+      "openconnector": "PORT=<openconnector-port> HOST=127.0.0.1 OOMOL_CONNECT_ORIGIN=<internal-origin> OOMOL_CONNECT_DATA_DIR=<data-dir> OOMOL_CONNECT_ADMIN_TOKEN=<server-only-admin-token> OOMOL_CONNECT_RUNTIME_TOKEN=<controlled-user-token> OOMOL_CONNECT_ENCRYPTION_KEY=<encryption-key> npm run start",
+      "studio_backend": "DATA_WORKSHOP_BACKEND_MODE=REAL OPENCONNECTOR_URL=<internal-origin> OPENCONNECTOR_PUBLIC_URL=<https-public-origin> OPENCONNECTOR_ADMIN_TOKEN=<server-only-admin-token> OPENCONNECTOR_TEST_RUNTIME_TOKEN=<controlled-user-token> DATABASE_URL=<studio-database-url> .venv/bin/uvicorn server.main:app --host 127.0.0.1 --port <backend-port>",
+      "frontend": "VITE_API_URL=http://127.0.0.1:<backend-port> pnpm dev --host 127.0.0.1 --port <frontend-port> --strictPort"
+    }
+  },
+  "verification": {
+    "bff_contract": "42 passed",
+    "frontend_build_and_typecheck": "passed",
+    "scoped_eslint": "passed",
+    "git_diff_check": "passed",
+    "test_backend_e2e": {
+      "status": "passed",
+      "backend_mode": "TEST",
+      "visible_banner": "TEST BACKEND",
+      "console_errors": [],
+      "network_failures": [],
+      "admin_runtime_scope_evidence": "passed",
+      "browser_token_leak_check": "passed",
+      "legacy_mcp_redirects": "passed",
+      "deep_link_reload_history": "passed"
+    },
+    "real_backend_smoke": {
+      "backend_mode": "REAL",
+      "studio_backend": "server.main",
+      "openconnector_health": "passed",
+      "mcp_tools_list": "passed",
+      "mcp_list_connections": "passed",
+      "admin_token_on_runtime_status": 401,
+      "runtime_token_on_admin_status": 401,
+      "identity_blocking_state": "passed",
+      "console_errors": [],
+      "network_failures": []
+    },
+    "full_backend_suite": {
+      "passed": 878,
+      "skipped": 2,
+      "failed": 2,
+      "unrelated_baseline_failures": [
+        "tests/integration/test_connections_workflows.py::TestConnectionEncryptionWorkflow::test_connection_encryption_persistence_workflow",
+        "tests/test_migration_chain_hardening.py::test_semantic_versions_revision_alias_preserves_legacy_and_short_ids"
+      ]
+    },
+    "screenshots": [
+      "client/artifacts/data-workshop/connection-docs-1440x900.png",
+      "client/artifacts/data-workshop/connection-docs-1280x800.png",
+      "client/artifacts/data-workshop/connection-docs-390x844.png",
+      "client/artifacts/data-workshop/real-backend-identity-blocked-1440x900.png",
+      "client/artifacts/data-workshop/real-backend-identity-blocked-1280x800.png",
+      "client/artifacts/data-workshop/real-backend-identity-blocked-390x844.png"
+    ]
+  },
+  "integration_w4_live_e2e_remaining": [
+    "Promote a finalized W1 image containing the production Oracle driver.",
+    "Configure an approved Identity issuer, JWKS URI, audience, UserPool, and controlled test user/group.",
+    "Configure a real Oracle connection with approved credentials.",
+    "Run connection list, Oracle detail, group reader grant, final-user preview, custom edit, revoke, and audit.",
+    "Run MCP, HTTP API, SDK, and read-only tester checks through the promoted public endpoint.",
+    "Capture production browser network evidence and the three required responsive screenshots.",
+    "Issue DWV1_W3_WORKSHOP_ACCESS_UI_CORRECTED_V3 only after all live checks pass."
+  ],
+  "security": {
+    "admin_token_browser_exposure": false,
+    "controlled_user_token_browser_exposure": false,
+    "console_proxy_runtime_paths": "blocked",
+    "fixture_claimed_as_real": false,
+    "credentials_in_handoff": false
+  }
+}
