@@ -105,6 +105,7 @@ def test_resource_refs_are_opaque_and_profile_scoped(tmp_path, monkeypatch):
     ref = value.resource_ref(first, "viking://resources/docs/readme.md")
     assert ref.startswith("ovr_")
     assert "viking://resources" not in ref
+    assert "readme" not in ref
     assert value.resolve_ref(first, ref) == "viking://resources/docs/readme.md"
     with pytest.raises(OpenVikingError, match="invalid"):
         value.resolve_ref(second, ref)

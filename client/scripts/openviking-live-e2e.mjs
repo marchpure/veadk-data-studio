@@ -3,6 +3,8 @@ import path from 'node:path'
 import { chromium } from 'playwright'
 
 const previewUrl = process.env.OPENVIKING_PREVIEW_URL || 'http://127.0.0.1:5184/kb'
+const profileId = process.env.OPENVIKING_PROFILE_ID || ''
+const profileName = process.env.OPENVIKING_PROFILE_NAME || 'W6.1 Hosted Validation Updated'
 const outputDir = path.resolve(
   process.cwd(),
   '../docs/openviking/screenshots/w61',
@@ -17,6 +19,15 @@ const browser = await chromium.launch({
   headless: true,
 })
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+if (profileId) {
+  await page.addInitScript(
+    ({ profileId }) => {
+      localStorage.setItem('openviking.activeProfileId', profileId)
+      localStorage.setItem('byaan_active_tenant', '00000000-0000-0000-0000-000000000001')
+    },
+    { profileId },
+  )
+}
 
 page.on('response', (response) => {
   const url = response.url()
@@ -29,7 +40,7 @@ page.on('response', (response) => {
 })
 
 await page.goto(previewUrl, { waitUntil: 'networkidle' })
-await page.getByText('W6.1 Hosted Validation Updated').first().waitFor()
+await page.getByText(profileName).first().waitFor()
 const resourceTreeVisible = await page
   .locator('[aria-label="OpenViking context tree"]')
   .isVisible()
@@ -91,7 +102,7 @@ await page.getByRole('button', { name: '加入 Skill 上下文' }).click()
 const skillContextStatus = (await skillContextResponse).status()
 
 await page.reload({ waitUntil: 'networkidle' })
-await page.getByText('W6.1 Hosted Validation Updated').first().waitFor()
+await page.getByText(profileName).first().waitFor()
 const refreshRecovered = await page.getByRole('button', { name: 'Retrieval' }).isVisible()
 
 await page.setViewportSize({ width: 390, height: 844 })

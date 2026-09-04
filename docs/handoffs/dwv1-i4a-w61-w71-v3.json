@@ -1,6 +1,6 @@
 {
   "workstream": "DWV1 I4-A W6.1 + W7.1 Integration Owner",
-  "status": "INTEGRATED_CODE_READY",
+  "status": "FROZEN_V3",
   "repository": "https://github.com/marchpure/veadk-data-studio.git",
   "branch": "integration/dwv1-i4a-w61-w71-v3",
   "worktree": "/Users/bytedance/worktrees/dwv1-i4a-w61-w71-v3",
@@ -47,12 +47,27 @@
     "w5_transport_changed": false,
     "resource_reference": "opaque profile-scoped ovr_... signed capability"
   },
+  "browser_evidence": {
+    "openviking_e2e": "passed: profile, resource preview, retrieval, tasks, watches, handoff, refresh, responsive screenshots",
+    "skill_workbench_e2e": "passed: W5 BLOCKED_CONFIG, no fabricated artifact, responsive layout, legacy redirects",
+    "kb_to_skill_lifecycle": "passed: opaque URL, imported metadata, create, reload restore, PATCH removal, empty state",
+    "openviking_browser_evidence": "docs/openviking/w61-browser-evidence.json",
+    "screenshots": [
+      "docs/openviking/screenshots/w61/openviking-w61-resource-1440x900.png",
+      "docs/openviking/screenshots/w61/openviking-w61-retrieval-1280x800.png",
+      "docs/openviking/screenshots/w61/openviking-w61-profile-390x844.png",
+      "client/artifacts/data-workshop/skill-workbench-1440x900.png",
+      "client/artifacts/data-workshop/skill-workbench-1280x800.png",
+      "client/artifacts/data-workshop/skill-workbench-390x844.png"
+    ]
+  },
   "verification": {
     "python_compile": "passed",
-    "backend_focused": "57 passed",
+    "backend_focused": "95 passed",
     "openviking_frontend": "31 files, 131 tests passed",
     "frontend_typecheck": "passed",
     "frontend_production_build": "passed with existing donor CSS/chunk warnings",
+    "ruff": "passed",
     "alembic_heads": [
       "add_dw_skill_workbench"
     ],

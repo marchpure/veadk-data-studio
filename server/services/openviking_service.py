@@ -105,6 +105,12 @@ class OpenVikingProfileRepository:
               scope_key TEXT PRIMARY KEY, response_json TEXT NOT NULL,
               observed_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS openviking_resource_refs (
+              ref_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,
+              encrypted_uri BLOB NOT NULL, created_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS openviking_resource_ref_profile
+              ON openviking_resource_refs(profile_id);
             """
         )
         columns = {
@@ -156,7 +162,23 @@ class OpenVikingProfileRepository:
             "DELETE FROM openviking_profiles WHERE profile_id=? AND tenant_id=? AND workspace_id=? AND principal_id=?",
             (profile_id, tenant_id, workspace_id, principal_id),
         )
+        self._db.execute("DELETE FROM openviking_resource_refs WHERE profile_id=?", (profile_id,))
         self._db.commit()
+
+    def save_resource_ref(self, ref_id: str, profile_id: str, encrypted_uri: bytes) -> None:
+        self._db.execute(
+            """INSERT OR REPLACE INTO openviking_resource_refs
+            (ref_id, profile_id, encrypted_uri, created_at) VALUES(?,?,?,?)""",
+            (ref_id, profile_id, encrypted_uri, time.time()),
+        )
+        self._db.commit()
+
+    def get_resource_ref(self, ref_id: str, profile_id: str) -> bytes | None:
+        row = self._db.execute(
+            "SELECT encrypted_uri FROM openviking_resource_refs WHERE ref_id=? AND profile_id=?",
+            (ref_id, profile_id),
+        ).fetchone()
+        return bytes(row["encrypted_uri"]) if row else None
 
     def save_tasks(self, profile: OpenVikingProfile, tasks: list[dict[str, Any]]) -> None:
         now = time.time()
@@ -339,11 +361,18 @@ class OpenVikingService:
         normalized = uri.rstrip("/") + "/" if uri.endswith("/") else uri
         if not normalized.startswith("viking://"):
             raise OpenVikingError("RESOURCE_OUT_OF_SCOPE", "Resource is outside OpenViking", 403)
-        payload = base64.urlsafe_b64encode(
-            json.dumps({"p": profile.profile_id, "u": normalized}, separators=(",", ":")).encode()
-        ).decode().rstrip("=")
-        signature = hmac.new(self._ref_signing_key, payload.encode(), hashlib.sha256).hexdigest()
-        return f"ovr_{payload}.{signature}"
+        ref_id = secrets.token_urlsafe(24)
+        signature = hmac.new(
+            self._ref_signing_key,
+            f"{profile.profile_id}:{ref_id}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        self.repository.save_resource_ref(
+            ref_id,
+            profile.profile_id,
+            self._crypt(normalized, f"ref:{profile.profile_id}:{ref_id}"),
+        )
+        return f"ovr_{ref_id}.{signature}"
 
     def resource_ref(self, profile: OpenVikingProfile, uri: str) -> str:
         root = profile.workspace_uri.rstrip("/") + "/"
@@ -359,15 +388,21 @@ class OpenVikingService:
             prefix, signature = value.rsplit(".", 1)
             if not prefix.startswith("ovr_"):
                 raise ValueError
-            payload = prefix[4:]
-            expected = hmac.new(self._ref_signing_key, payload.encode(), hashlib.sha256).hexdigest()
+            ref_id = prefix[4:]
+            if not re.fullmatch(r"[A-Za-z0-9_-]{32}", ref_id):
+                raise ValueError
+            expected = hmac.new(
+                self._ref_signing_key,
+                f"{profile.profile_id}:{ref_id}".encode(),
+                hashlib.sha256,
+            ).hexdigest()
             if not hmac.compare_digest(signature, expected):
                 raise ValueError
-            data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
-            if data["p"] != profile.profile_id:
+            encrypted_uri = self.repository.get_resource_ref(ref_id, profile.profile_id)
+            if encrypted_uri is None:
                 raise ValueError
-            uri = str(data["u"])
-        except (ValueError, KeyError, json.JSONDecodeError, UnicodeError) as exc:
+            uri = self._decrypt(encrypted_uri, f"ref:{profile.profile_id}:{ref_id}")
+        except (ValueError, OpenVikingError, UnicodeError) as exc:
             raise OpenVikingError("INVALID_RESOURCE_REF", "Resource reference is invalid", 422) from exc
         if not uri.startswith("viking://"):
             raise OpenVikingError("RESOURCE_OUT_OF_SCOPE", "Resource is outside OpenViking", 403)

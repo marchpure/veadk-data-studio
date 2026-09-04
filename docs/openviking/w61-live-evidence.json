@@ -27,7 +27,7 @@
       "task_id": "4153f482-a10d-454a-b99d-c48289869e86",
       "status": "completed",
       "parent": "viking://workspace/",
-      "resource_ref": "ovr_eyJwIjoib3ZfMzkwZTcwYTM1YmVjYTExZWI0ZWI3ZDVmIiwidSI6InZpa2luZzovL3Jlc291cmNlcy93NjEtbGl2ZS1ub3RlIn0.e8a8a7010aca18c82fdcfc40cf260c30d53d46edd68d1d21eea09318d8010c47",
+      "resource_ref": "ovr_<opaque-ref-1>",
       "display_uri": "viking://workspace/w61-live-note"
     },
     {
@@ -36,7 +36,7 @@
       "task_id": "eb8fc559-39ef-4201-a751-7b6cee77ba2b",
       "status": "completed",
       "parent": "viking://workspace/",
-      "resource_ref": "ovr_eyJwIjoib3ZfMzkwZTcwYTM1YmVjYTExZWI0ZWI3ZDVmIiwidSI6InZpa2luZzovL3Jlc291cmNlcy9XNi4xX0V4YW1wbGUifQ.e3ea3c30a8a152b1834a5546f2d1e16116e96cfbfcdf9f7c446f55021a5cfa0a",
+      "resource_ref": "ovr_<opaque-ref-2>",
       "display_uri": "viking://workspace/W6.1_Example"
     },
     {
@@ -45,7 +45,7 @@
       "task_id": "4e2db45c-4d3b-4c23-baf7-297a7a9e1937",
       "status": "completed",
       "parent": "viking://workspace/",
-      "resource_ref": "ovr_eyJwIjoib3ZfMzkwZTcwYTM1YmVjYTExZWI0ZWI3ZDVmIiwidSI6InZpa2luZzovL3Jlc291cmNlcy9za2lsbF9wcm9tcHQifQ.5cf3d8e328a334dcd4d14b45acaaa2cfefb9f26a31fb399231833b5f8c720e71",
+      "resource_ref": "ovr_<opaque-ref-3>",
       "display_uri": "viking://workspace/skill_prompt"
     },
     {
@@ -55,7 +55,7 @@
       "task_id": "4e355de8-3d76-4b55-b324-6bcc83115bb1",
       "status": "completed",
       "parent": "viking://workspace/",
-      "resource_ref": "ovr_eyJwIjoib3ZfMzkwZTcwYTM1YmVjYTExZWI0ZWI3ZDVmIiwidSI6InZpa2luZzovL3Jlc291cmNlcy93NjEtY29ubmVjdGlvbi1zb3VyY2UifQ.d79c705b8dfe8ccfec08afe41a4ba4d004ec61a68a0adbad4e07c99ed4c4c417",
+      "resource_ref": "ovr_<opaque-ref-4>",
       "display_uri": "viking://workspace/w61-connection-source"
     }
   ],

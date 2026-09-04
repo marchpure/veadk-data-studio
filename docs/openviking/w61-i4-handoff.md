@@ -11,7 +11,10 @@
 
 `ResourceRef` is an opaque, signed, profile-scoped capability:
 
-`ovr_<base64url({"p":"<profile_id>","u":"viking://resources/<path>"})>.<hmac-sha256>`
+`ovr_<random-server-side-reference-id>.<hmac-sha256>`
+
+The reference ID maps to an encrypted server-side record. It does not encode
+the upstream Viking URI, profile credentials, or file content.
 
 The HMAC key is derived from `OPENVIKING_PROFILE_ENCRYPTION_KEY` inside the BFF and never leaves the server. The reference contains no API key and no file content. Profile lookup is tenant/owner scoped before resolution, and the BFF rejects invalid signatures, another profile, another tenant/owner, and untrusted URI schemes.
 
@@ -49,7 +52,7 @@ Timeouts are bounded by `OPENVIKING_TIMEOUT_SECONDS` and map to `OPENVIKING_TIME
 ```json
 {
   "profile_id": "ov_example",
-  "resource_ref": "ovr_<opaque-payload>.<signature>"
+  "resource_ref": "ovr_<random-server-side-reference-id>.<signature>"
 }
 ```
 
