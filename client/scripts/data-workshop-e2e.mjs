@@ -179,8 +179,15 @@ const storage = await page.evaluate(() => ({
   session: { ...sessionStorage },
 }))
 const browserEvidence = JSON.stringify({ browserRequests, storage })
-if (browserEvidence.includes('test-admin-token') || browserEvidence.includes('OPENCONNECTOR_ADMIN_TOKEN')) {
-  throw new Error('OpenConnector admin credential leaked into browser-visible state')
+for (const credentialMarker of [
+  'test-admin-token',
+  'test-runtime-token',
+  'OPENCONNECTOR_ADMIN_TOKEN',
+  'OPENCONNECTOR_TEST_RUNTIME_TOKEN',
+]) {
+  if (browserEvidence.includes(credentialMarker)) {
+    throw new Error(`OpenConnector credential leaked into browser-visible state: ${credentialMarker}`)
+  }
 }
 const managementEvidence = upstreamScopes.filter(item =>
   /\/api\/v1\/(?:providers|connections|identity|access|connection-docs\/config)/.test(item.path),
