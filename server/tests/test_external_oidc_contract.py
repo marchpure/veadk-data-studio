@@ -37,6 +37,24 @@ def test_runtime_secret_domains_are_independent(monkeypatch: pytest.MonkeyPatch)
     )
 
 
+def test_userpool_group_uid_claim_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DWV1_OIDC_GROUPS_CLAIM", "groups")
+    assert external_oidc._groups(
+        {"identity_userpool_group_uids": ["group-a", "group-b"], "groups": []}
+    ) == ["group-a", "group-b"]
+
+
+def test_missing_email_uses_non_routable_subject_association(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "DWV1_OIDC_ISSUER",
+        "https://userpool-f69c17b4-d030-43bc-b4a7-9cae0f6370c3.userpool.auth.id.cn-beijing.volces.com",
+    )
+    subject = "external-subject"
+    address = f"oidc-{external_oidc._hash(f'{external_oidc._issuer()}:{subject}')[:32]}@external.invalid"
+    assert address.endswith("@external.invalid")
+    assert "external-subject" not in address
+
+
 @pytest.mark.asyncio
 async def test_external_cookie_context_rejects_missing_session() -> None:
     class Result:

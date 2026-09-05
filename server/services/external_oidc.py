@@ -74,11 +74,23 @@ def _client_id() -> str:
 
 
 def _groups(claims: dict[str, Any]) -> list[str]:
-    value = claims.get(os.getenv("DWV1_OIDC_GROUPS_CLAIM", "groups"))
-    if isinstance(value, str):
-        return [value] if value else []
-    if isinstance(value, list) and all(isinstance(item, str) and item for item in value):
-        return list(dict.fromkeys(value))
+    configured_claim = os.getenv("DWV1_OIDC_GROUPS_CLAIM", "groups").strip() or "groups"
+    claim_names = [configured_claim]
+    # VeIdentity UserPool emits group UIDs under this claim. Keep the
+    # configured claim first, while accepting the provider's canonical claim
+    # when a deployment still has the legacy "groups" setting.
+    for claim_name in ("identity_userpool_group_uids", "identity_userpool_groups", "groups"):
+        if claim_name not in claim_names:
+            claim_names.append(claim_name)
+    for claim_name in claim_names:
+        value = claims.get(claim_name)
+        if isinstance(value, str):
+            if value:
+                return [value]
+            continue
+        if isinstance(value, list) and all(isinstance(item, str) and item for item in value):
+            if value:
+                return list(dict.fromkeys(value))
     return []
 
 
@@ -237,8 +249,14 @@ async def complete_login(code: str, state: str, db: AsyncSession) -> str:
     claims = {**access_claims, **id_claims, **userinfo_claims}
     subject = claims.get("sub")
     email = claims.get("email")
-    if not isinstance(subject, str) or not subject or not isinstance(email, str) or "@" not in email:
+    if not isinstance(subject, str) or not subject:
         raise ExternalOIDCError("OIDC user claims are incomplete")
+    if not isinstance(email, str) or "@" not in email:
+        # Some UserPool test and service identities intentionally have no
+        # email attribute. The local user table still requires a unique email,
+        # so derive a non-routable association key from the verified issuer
+        # and subject. This value is never treated as an external claim.
+        email = f"oidc-{_hash(f'{_issuer()}:{subject}')[:32]}@external.invalid"
     if id_claims.get("sub") and id_claims["sub"] != access_claims["sub"]:
         raise ExternalOIDCError("OIDC subject mismatch")
     if userinfo_claims.get("sub") and userinfo_claims["sub"] != access_claims["sub"]:
