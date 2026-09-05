@@ -92,7 +92,7 @@ class OpenVikingProfile:
 class OpenVikingProfileRepository:
     def __init__(self, database: str | Path) -> None:
         self._postgres = isinstance(database, str) and database.startswith(
-            ("postgresql://", "postgresql+psycopg2://")
+            ("postgresql://", "postgresql+asyncpg://", "postgresql+psycopg2://")
         )
         if self._postgres:
             import psycopg2
