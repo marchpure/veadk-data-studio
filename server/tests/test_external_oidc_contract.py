@@ -55,6 +55,44 @@ def test_missing_email_uses_non_routable_subject_association(monkeypatch: pytest
     assert "external-subject" not in address
 
 
+def test_jwt_validation_does_not_require_optional_nbf(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Key:
+        key = "public-key"
+
+    class KeyClient:
+        def __init__(self, _url: str) -> None:
+            pass
+
+        def get_signing_key_from_jwt(self, _token: str) -> Key:
+            return Key()
+
+    def decode(_token: str, _key: str, **kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"sub": "subject", "client_id": "client"}
+
+    monkeypatch.setattr(external_oidc.jwt, "PyJWKClient", KeyClient)
+    monkeypatch.setattr(external_oidc.jwt, "decode", decode)
+    monkeypatch.setenv("DWV1_OIDC_ISSUER", "https://issuer.example.test")
+    monkeypatch.setenv("DWV1_OIDC_CLIENT_ID", "client")
+
+    import asyncio
+
+    claims = asyncio.run(
+        external_oidc._verify_jwt(
+            "header.payload.signature",
+            {"jwks_uri": "https://issuer.example.test/keys"},
+            audience="audience",
+        )
+    )
+    assert claims["sub"] == "subject"
+    assert captured["options"] == {
+        "require": ["exp", "iss", "aud", "sub"],
+        "verify_nbf": True,
+    }
+
+
 @pytest.mark.asyncio
 async def test_external_cookie_context_rejects_missing_session() -> None:
     class Result:

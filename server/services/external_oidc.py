@@ -145,7 +145,9 @@ async def _verify_jwt(
             algorithms=["RS256"],
             issuer=_issuer(),
             audience=audience,
-            options={"require": ["exp", "nbf", "iss", "aud", "sub"]},
+            # VeIdentity access tokens do not always emit nbf. PyJWT still
+            # validates nbf when present; absence means no not-before bound.
+            options={"require": ["exp", "iss", "aud", "sub"], "verify_nbf": True},
         )
     except Exception as exc:
         raise ExternalOIDCError("OIDC token verification failed") from exc
