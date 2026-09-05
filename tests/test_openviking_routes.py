@@ -1,4 +1,5 @@
 import base64
+import socket
 from types import SimpleNamespace
 
 import pytest
@@ -33,6 +34,7 @@ def _service(tmp_path) -> OpenVikingService:
 async def test_profile_routes_use_standard_envelope_and_owner_scope(tmp_path, monkeypatch):
     service = _service(tmp_path)
     monkeypatch.setattr(routes, "_service", lambda: service)
+    monkeypatch.setattr(socket, "gethostbyname", lambda _host: "8.8.8.8")
     owner = _auth("tenant-a", "owner-a")
 
     created = await routes.create_profile(

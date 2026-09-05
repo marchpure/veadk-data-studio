@@ -76,7 +76,7 @@
     "frontend_production_build": "passed with existing donor CSS/chunk warnings",
     "ruff": "passed",
     "migration_fresh_upgrade_downgrade": "passed: fresh upgrade, full downgrade, upgrade, and add_feishu_oauth_flows -> add_dw_skill_workbench",
-    "bff_restart_resource_ref": "passed: encrypted ResourceRef resolved after repository restart",
+    "bff_restart_persistence": "passed: encrypted Profile/ResourceRef and W7 Skill/Session context refs restored after fresh repository/database sessions",
     "revocation_fail_closed": "passed: revoked ResourceRef sets blocked_auth and never invokes W5 adapter",
     "alembic_heads": [
       "add_dw_skill_workbench"

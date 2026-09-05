@@ -165,8 +165,14 @@ async def test_skill_and_session_persist_across_clients(skill_app) -> None:
             and (await restarted_process_db.get(DataWorkshopSkill, UUID(skill_id))).tenant_id,
             (await restarted_process_db.get(DataWorkshopSkill, UUID(skill_id))).owner_id,
         )
-        assert (await repo.get_skill(UUID(skill_id))).target_skill == "revenue-review"
-        assert (await repo.get_session(UUID(session_id))).title == "初始会话"
+        restored_skill = await repo.get_skill(UUID(skill_id))
+        restored_session = await repo.get_session(UUID(session_id))
+        assert restored_skill is not None
+        assert restored_session is not None
+        assert restored_skill.target_skill == "revenue-review"
+        assert restored_session.title == "初始会话"
+        assert restored_skill.context_refs_json == created.json()["data"]["skill"]["context_refs"]
+        assert restored_session.context_refs_json == created.json()["data"]["session"]["context_refs"]
 
     listed = await client.get("/api/v1/skills")
     assert listed.json()["data"]["items"][0]["id"] == skill_id
