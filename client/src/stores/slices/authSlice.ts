@@ -54,6 +54,26 @@ export const createAuthSlice: StateCreator<
   ...initialState,
 
   initAuth: async () => {
+    try {
+      const configResponse = await fetch('/api/app/config', { credentials: 'include' })
+      const config = await configResponse.json()
+      if (config?.data?.external_oidc_enabled) {
+        clearAccessToken()
+        clearRefreshToken()
+        const response = await fetch('/api/auth/external/me', { credentials: 'include' })
+        if (!response.ok) {
+          set({ isAuthenticated: false, isLoading: false })
+          return
+        }
+        const payload = await response.json()
+        const user = payload?.data ?? payload
+        set({ user, token: null, isAuthenticated: true, isLoading: false })
+        await get().fetchTenants()
+        return
+      }
+    } catch {
+      // Fall through to the existing local/self-hosted auth bootstrap.
+    }
     const token = getAccessToken()
 
     if (token && isTauriApp()) {
@@ -183,6 +203,7 @@ export const createAuthSlice: StateCreator<
 
   logout: () => {
     void ApiService.authLogout()
+    void fetch('/api/auth/external/logout', { method: 'POST', credentials: 'include' })
     set({ user: null, token: null, isAuthenticated: false, authError: null })
     clearAccessToken()
     clearRefreshToken()
@@ -221,6 +242,17 @@ export const createAuthSlice: StateCreator<
   fetchUser: async () => {
     const { token } = get()
     if (!token) {
+      try {
+        const response = await fetch('/api/auth/external/me', { credentials: 'include' })
+        if (response.ok) {
+          const payload = await response.json()
+          const user = payload?.data ?? payload
+          set({ user, isAuthenticated: true })
+          return
+        }
+      } catch {
+        // The external session endpoint is unavailable in local/self-hosted mode.
+      }
       set({ isAuthenticated: false })
       return
     }

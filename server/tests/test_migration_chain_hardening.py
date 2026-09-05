@@ -26,7 +26,7 @@ def test_semantic_versions_revision_alias_preserves_legacy_and_short_ids() -> No
     assert legacy.down_revision == "add_semantic_model_versions"
     assert alias.revision == "harden_semantic_versions"
     assert alias.down_revision == "harden_semantic_model_versions_compat"
-    assert script.get_heads() == ["add_dw_skill_workbench"]
+    assert script.get_heads() == ["add_dwv1_openviking_profile_store"]
 
     workbench = script.get_revision("add_dw_skill_workbench")
     assert workbench.down_revision == "add_feishu_oauth_flows"

@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.auth.dependencies import AuthContext
 from server.models.delegation import Delegation
 from server.services.crypto_service import CryptoService
+from server.services.runtime_secrets import RuntimeSecretError, get_runtime_secret
 
 MAX_TTL_SECONDS = 300
 DEFAULT_AUDIENCE = "dwv1-skill-agent"
@@ -53,20 +54,13 @@ def _as_utc(value: datetime) -> datetime:
 
 async def _service_credential() -> str:
     """Resolve the broker service credential through the runtime IAM/KMS chain."""
-    secret_name = _configured(os.getenv("I4A_BROKER_SERVICE_SECRET_NAME"))
-    if not secret_name:
-        raise DelegationBrokerError("BLOCKED_CONFIG")
     try:
-        from volcenginesdkcore import ApiClient, Configuration
-        from volcenginesdkkms import GetSecretValueRequest, KMSApi
-
-        configuration = Configuration()
-        configuration.region = os.getenv("REGION", "cn-beijing")
-        configuration.connect_timeout = 5
-        configuration.read_timeout = 10
-        response = KMSApi(ApiClient(configuration)).get_secret_value(GetSecretValueRequest(secret_name=secret_name))
-        value = getattr(response, "secret_value", None)
-    except Exception as exc:
+        value = get_runtime_secret(
+            "broker_service_credential",
+            env_name="I4A_BROKER_SERVICE_CREDENTIAL",
+            required=True,
+        )
+    except RuntimeSecretError as exc:
         raise DelegationBrokerError("BLOCKED_CONFIG") from exc
     if not isinstance(value, str) or not value:
         raise DelegationBrokerError("BLOCKED_CONFIG")
@@ -174,6 +168,8 @@ async def resolve(
     record = result.scalar_one_or_none()
     now = datetime.now(UTC)
     configured_audience = _configured(os.getenv("I4A_DELEGATION_AUDIENCE")) or DEFAULT_AUDIENCE
+    configured_issuer = _configured(os.getenv("I4A_DELEGATION_ISSUER"))
+    configured_user_pool = _configured(os.getenv("I4A_DELEGATION_USER_POOL"))
     if (
         record is None
         or record.revoked_at is not None
@@ -181,6 +177,10 @@ async def resolve(
         or record.uses >= record.max_uses
         or intended_audience != configured_audience
         or record.audience != intended_audience
+        or not configured_issuer
+        or record.issuer != configured_issuer
+        or not configured_user_pool
+        or record.user_pool != configured_user_pool
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="delegation unavailable")
     record.uses += 1

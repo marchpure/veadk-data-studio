@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from server.utils.config_loader import is_self_hosted
 from server.utils.custom_logger import get_logger
+from server.utils.database_config import async_connect_args, configured_database_url
 
 logger = get_logger(__name__)
 
@@ -26,7 +27,7 @@ def get_database_url() -> str:
     """
     if is_self_hosted():
         # Hosted mode: require DATABASE_URL for PostgreSQL
-        url = os.getenv("DATABASE_URL")
+        url = configured_database_url()
         if not url:
             raise ValueError("DATABASE_URL environment variable is required in hosted mode")
         return url
@@ -49,6 +50,7 @@ async_engine = create_async_engine(
     echo=False,
     future=True,
     pool_pre_ping=True,
+    connect_args=async_connect_args(),
 )
 
 

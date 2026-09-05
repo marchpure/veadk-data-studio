@@ -19,7 +19,7 @@ export default function Login() {
   const registrationDisabled = location.state?.registrationDisabled
   const noAccess = location.state?.noAccess // User doesn't have access to any workspace
 
-  const { features, isSelfHosted } = useAppConfig()
+  const { features, isSelfHosted, externalOIDCEnabled } = useAppConfig()
 
   const [email, setEmail] = useState(invitationEmail || '')
   const [password, setPassword] = useState('')
@@ -32,6 +32,24 @@ export default function Login() {
 
   // Combined loading state for UI
   const isSubmitting = isLoading || isProcessingInvitation
+
+  if (externalOIDCEnabled) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0f0f0f] px-6">
+        <div className="w-full max-w-md rounded-lg border border-gray-800 bg-[#171717] p-8 text-center">
+          <h1 className="text-2xl font-semibold text-white">Data Studio</h1>
+          <p className="mt-2 text-sm text-gray-400">Sign in with your organization account.</p>
+          <button
+            type="button"
+            className="mt-8 w-full rounded-md bg-brand-orange px-4 py-3 font-medium text-black"
+            onClick={() => { window.location.href = '/api/auth/external/start' }}
+          >
+            Continue with organization sign-in
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   const handleGoogleSuccess = async (credential: string) => {
     setAuthError(null)

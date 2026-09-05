@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
@@ -10,6 +9,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
+from server.services.runtime_secrets import RuntimeSecretError, get_runtime_secret
 
 
 class W5AdapterError(RuntimeError):
@@ -45,14 +46,25 @@ class W5SkillAgentAdapter:
     ) -> None:
         self.runtime_id = runtime_id if runtime_id is not None else os.getenv("W5_SKILL_AGENT_RUNTIME_ID", "")
         self.endpoint = endpoint if endpoint is not None else os.getenv("W5_SKILL_AGENT_ENDPOINT", "")
-        self.api_key = api_key if api_key is not None else os.getenv("W5_SKILL_AGENT_API_KEY", "")
+        if api_key is not None:
+            self.api_key = api_key
+        else:
+            try:
+                self.api_key = get_runtime_secret(
+                    "w5_runtime_api_key",
+                    env_name="W5_SKILL_AGENT_API_KEY",
+                    required=False,
+                    secret_name_env="DWV1_SKILL_AGENT_SECRET_NAME",
+                ) or ""
+            except RuntimeSecretError:
+                self.api_key = ""
         self.region = region if region is not None else os.getenv("W5_SKILL_AGENT_REGION", "cn-beijing")
-        self.cli_path = cli_path if cli_path is not None else os.getenv("AGENTKIT_CLI_PATH", "agentkit")
+        self.cli_path = cli_path if cli_path is not None else ""
         self.timeout = timeout or float(os.getenv("W5_SKILL_AGENT_TIMEOUT_SECONDS", "120"))
 
     async def invoke(self, invocation: W5Invocation) -> AsyncIterator[dict[str, Any]]:
-        if not self.runtime_id and not self.endpoint:
-            raise W5AdapterError("BLOCKED_CONFIG", "W5 production transport 尚未配置。")
+        if not self.endpoint:
+            raise W5AdapterError("BLOCKED_CONFIG", "W5 production HTTPS transport 尚未配置。")
         if not invocation.delegated_auth_ref:
             raise W5AdapterError("BLOCKED_AUTH", "请完成 OAuth 授权或重新授权后继续。")
 
@@ -69,70 +81,6 @@ class W5SkillAgentAdapter:
             async for event in self._invoke_endpoint(request, invocation):
                 yield event
             return
-
-        command = [self.cli_path, "invoke", "run"]
-        command.extend(["--runtime-id", self.runtime_id, "--region", self.region])
-        command.extend(
-            [
-                "--raw",
-                "--payload",
-                json.dumps({"prompt": json.dumps(request, ensure_ascii=False)}, ensure_ascii=False),
-                "--headers",
-                json.dumps(
-                    {
-                        "delegated_auth_ref": invocation.delegated_auth_ref,
-                        "session_id": invocation.session_id,
-                    }
-                ),
-            ]
-        )
-        process: asyncio.subprocess.Process | None = None
-        stderr_task: asyncio.Task[bytes] | None = None
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "COLUMNS": "10000", "NO_COLOR": "1", "TERM": "dumb"},
-            )
-            stderr_task = asyncio.create_task(process.stderr.read()) if process.stderr else None
-            deadline = asyncio.get_running_loop().time() + self.timeout
-            while process.stdout:
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    raise TimeoutError
-                line = await asyncio.wait_for(process.stdout.readline(), timeout=remaining)
-                if not line:
-                    break
-                event = self.parse_event(line.decode(errors="replace"))
-                if event is not None:
-                    yield event
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                raise TimeoutError
-            await asyncio.wait_for(process.wait(), timeout=remaining)
-            stderr = await stderr_task if stderr_task else b""
-        except TimeoutError as exc:
-            if process is not None:
-                await self._terminate(process)
-            raise W5AdapterError("RETRYABLE", "W5 调用超时，可稍后重试。", retryable=True) from exc
-        except asyncio.CancelledError as exc:
-            if process is not None:
-                await self._terminate(process)
-            raise W5AdapterError("CANCELLED", "W5 调用已停止。") from exc
-        except OSError as exc:
-            raise W5AdapterError("BLOCKED_CONFIG", "AgentKit CLI 不可用或未正确配置。") from exc
-
-        if process.returncode != 0:
-            detail = stderr.decode(errors="replace").strip() or "AgentKit 调用失败"
-            if "401" in detail or "403" in detail or "BLOCKED_AUTH" in detail:
-                raise W5AdapterError("BLOCKED_AUTH", "W5 拒绝了委托授权，请重新授权。")
-            if any(
-                marker in detail.casefold()
-                for marker in ("blocked_config", "config", "not deployed", "failed to obtain runtime", "api key")
-            ):
-                raise W5AdapterError("BLOCKED_CONFIG", "W5 production transport 尚未正确配置。")
-            raise W5AdapterError("RETRYABLE", "W5 AgentKit 调用失败，可稍后重试。", retryable=True)
 
     async def _invoke_endpoint(
         self,
@@ -179,17 +127,6 @@ class W5SkillAgentAdapter:
             raise W5AdapterError("RETRYABLE", "W5 调用超时，可稍后重试。", retryable=True) from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise W5AdapterError("RETRYABLE", "W5 响应无效，可稍后重试。", retryable=True) from exc
-
-    @staticmethod
-    async def _terminate(process: asyncio.subprocess.Process) -> None:
-        if process.returncode is not None:
-            return
-        process.terminate()
-        try:
-            await asyncio.wait_for(process.wait(), timeout=2)
-        except TimeoutError:
-            process.kill()
-            await process.wait()
 
     @staticmethod
     def parse_event(line: str) -> dict[str, Any] | None:

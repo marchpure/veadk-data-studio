@@ -6,6 +6,7 @@ import resource
 import sys
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -20,7 +21,7 @@ if app_mode not in VALID_APP_MODES:
 import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from server.services.database_operations import AsyncDatabaseService
@@ -65,6 +66,7 @@ from server.routers import (
 )  # Unified datasources (connections + datasets)
 from server.routers import delegations as delegations_router
 from server.routers import exports as exports_router
+from server.routers import external_oidc as external_oidc_router
 from server.routers import (
     file_upload as file_upload_router,
 )  # File upload with DB storage
@@ -97,6 +99,7 @@ from server.schemas.standard_response import error_response, success_response
 from server.services.conversation_evaluation_service import skill_loop_service
 from server.services.credit_sync_service import credit_sync_service
 from server.services.dashboard_refresh_service import dashboard_refresh_service
+from server.services.external_oidc import enabled as external_oidc_enabled
 from server.services.posthog_service import PostHogService
 from server.services.schedule_runner_service import schedule_runner_service
 from server.utils.config_loader import get_skill_loop_config, is_community_mode, is_self_hosted
@@ -166,8 +169,9 @@ async def app_lifespan(app: FastAPI):
         else:
             logger.info(f"ℹ️  Running in desktop mode (APP_MODE={os.getenv('APP_MODE')})")
 
-        # Self-hosted setup
-        if is_self_hosted():
+        # Self-hosted setup is not applicable to the external OIDC deployment:
+        # the first verified OIDC login creates the local user/workspace.
+        if is_self_hosted() and not external_oidc_enabled():
             from server.services.self_hosted_setup import setup_self_hosted_environment
 
             start = time.perf_counter()
@@ -176,7 +180,7 @@ async def app_lifespan(app: FastAPI):
             logger.info(f"✅ Self-hosted setup completed: {time.perf_counter() - start:.3f}s")
 
         # Local setup (auto-create/reuse workspace, no external onboarding required)
-        else:
+        elif not is_self_hosted():
             from server.services.community_setup import setup_community_environment
 
             start = time.perf_counter()
@@ -655,6 +659,7 @@ app.include_router(openviking_router.router, prefix="/api", tags=["openviking"])
 app.include_router(delegations_router.router, tags=["internal-delegations"])
 
 app.include_router(auth_router.router, prefix="/api", tags=["auth"])
+app.include_router(external_oidc_router.router, prefix="/api", tags=["external-oidc"])
 
 app.include_router(app_config_router.router, prefix="/api", tags=["config"])
 
@@ -706,6 +711,37 @@ async def health_check():
         "migrations": migration_status,
         "message": "Backend is running",
     }
+
+
+def _frontend_dist() -> Path:
+    configured = os.getenv("DWV1_FRONTEND_DIST", "").strip()
+    if configured:
+        return Path(configured)
+    return Path(__file__).resolve().parents[1] / "client" / "dist"
+
+
+@app.get("/{path:path}", include_in_schema=False)
+async def serve_frontend(path: str):
+    """Serve the compiled Web shell from the same origin as the BFF."""
+    if path == "" or path == "index.html":
+        candidate = _frontend_dist() / "index.html"
+    else:
+        if path.startswith("api/") or path in {"docs", "redoc", "openapi.json"}:
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+        candidate = _frontend_dist() / path
+    dist = _frontend_dist().resolve()
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
+    if dist not in resolved.parents and resolved != dist:
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
+    if resolved.is_file():
+        return FileResponse(resolved)
+    index = dist / "index.html"
+    if index.is_file():
+        return FileResponse(index)
+    return JSONResponse(status_code=404, content={"detail": "Frontend bundle unavailable"})
 
 
 if __name__ == "__main__":

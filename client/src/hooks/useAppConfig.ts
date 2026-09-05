@@ -23,6 +23,7 @@ interface CommunityBootstrap {
 
 interface AppConfig {
   features: FeatureFlags
+  external_oidc_enabled?: boolean
   org_name?: string
   local_bootstrap?: CommunityBootstrap
   community_bootstrap?: CommunityBootstrap
@@ -76,5 +77,6 @@ export function useAppConfig() {
     isSelfHosted,
     features,
     orgName: config?.org_name,
+    externalOIDCEnabled: Boolean(config?.external_oidc_enabled),
   }
 }

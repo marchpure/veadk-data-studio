@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import logging
-from logging.config import fileConfig
 import sys
+from logging.config import fileConfig
 from pathlib import Path
 
+from alembic import context
+from dotenv import load_dotenv
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.sql import text
-from alembic import context
-from dotenv import load_dotenv
 
 config = context.config
 if config.config_file_name is not None:
@@ -30,14 +29,20 @@ if str(PROJECT_ROOT) not in sys.path:
 ENV_PATH = PROJECT_ROOT / ".env"
 load_dotenv(dotenv_path=str(ENV_PATH), override=False)
 
-from server.db.base import Base  # noqa: E402
 import server.models  # noqa: F401,E402
+from server.db.base import Base  # noqa: E402
+from server.utils.database_config import (  # noqa: E402
+    add_schema_query,
+    async_connect_args,
+    configured_database_url,
+    database_schema,
+)
 
 target_metadata = Base.metadata
 
 
 def _get_database_url() -> str:
-    url = os.getenv("DATABASE_URL")
+    url = configured_database_url()
     if not url:
         url = f"sqlite+aiosqlite:///{BASE_DIR / '.data' / 'app.db'}"
     return url
@@ -96,11 +101,22 @@ async def run_migrations_online() -> None:
     from sqlalchemy.ext.asyncio import create_async_engine
 
     connectable = create_async_engine(
-        _get_database_url(),
+        add_schema_query(_get_database_url()),
         poolclass=pool.NullPool,
+        connect_args=async_connect_args(),
     )
 
     async with connectable.connect() as connection:  # type: ignore[assignment]
+        if database_schema() != "public":
+            schema = database_schema()
+            exists = await connection.execute(
+                text("SELECT EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = :schema)"),
+                {"schema": schema},
+            )
+            if not exists.scalar():
+                raise RuntimeError(f"Required PostgreSQL schema {schema!r} does not exist")
+            await connection.execute(text(f'SET search_path TO "{schema}"'))
+            await connection.commit()
         await _ensure_wide_alembic_version_column(connection, _get_database_url())
         await connection.run_sync(do_run_migrations)
 

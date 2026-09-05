@@ -11,6 +11,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { I18nextProvider } from 'react-i18next'
 import { Toaster } from 'sonner'
+import { useAppConfig } from '../../hooks/useAppConfig'
 
 import { openVikingApi } from './api'
 import {
@@ -183,6 +184,7 @@ function ProfileForm({
 }: {
   onCreated: (profile: OpenVikingProfile) => void
 }) {
+  const { externalOIDCEnabled } = useAppConfig()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
 
@@ -227,19 +229,18 @@ function ProfileForm({
           <input name="workspace_uri" required defaultValue="viking://resources/" />
         </label>
       </div>
-      <label>
-        Base URL
-        <input
-          name="base_url"
-          required
-          type="url"
-          defaultValue={CANONICAL_BASE_URL}
-        />
-      </label>
-      <label>
-        API key
-        <input name="api_key" required type="password" autoComplete="off" />
-      </label>
+      {!externalOIDCEnabled && (
+        <label>
+          Base URL
+          <input name="base_url" required type="url" defaultValue={CANONICAL_BASE_URL} />
+        </label>
+      )}
+      {!externalOIDCEnabled && (
+        <label>
+          API key
+          <input name="api_key" required type="password" autoComplete="off" />
+        </label>
+      )}
       {error ? <p className="ov-form-error" role="alert">{error}</p> : null}
       <div className="ov-form-actions">
         <button className="ov-primary-button" disabled={pending} type="submit">
@@ -261,6 +262,7 @@ function ConnectionPage({
   onProfilesChanged: () => Promise<void>
   onRevoke: (profile: OpenVikingProfile) => void
 }) {
+  const { externalOIDCEnabled } = useAppConfig()
   const [editing, setEditing] = useState<OpenVikingProfile | null>(null)
   const [pendingId, setPendingId] = useState('')
   const [message, setMessage] = useState('')
@@ -344,8 +346,12 @@ function ConnectionPage({
             <label>Name<input name="display_name" required defaultValue={editing.display_name} /></label>
             <label>Workspace URI<input readOnly value={editing.workspace_uri} /></label>
           </div>
-          <label>Base URL<input name="base_url" type="url" placeholder="Keep current hosted URL" /></label>
-          <label>New API key<input name="api_key" type="password" autoComplete="off" /></label>
+          {!externalOIDCEnabled && (
+            <>
+              <label>Base URL<input name="base_url" type="url" placeholder="Keep current hosted URL" /></label>
+              <label>New API key<input name="api_key" type="password" autoComplete="off" /></label>
+            </>
+          )}
           <div className="ov-form-actions">
             <button className="ov-primary-button" disabled={pendingId === editing.profile_id} type="submit">Save changes</button>
             <button type="button" onClick={() => setEditing(null)}>Cancel</button>

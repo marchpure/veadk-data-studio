@@ -18,6 +18,7 @@ from sqlalchemy import create_engine, text
 
 from server.utils.config_loader import is_self_hosted
 from server.utils.custom_logger import get_logger
+from server.utils.database_config import add_schema_query, configured_database_url, sync_connect_args, sync_database_url
 
 logger = get_logger(__name__)
 
@@ -82,11 +83,11 @@ def get_alembic_config() -> Config:
     # Set the database URL based on deployment mode
     if is_self_hosted():
         # Hosted mode: use PostgreSQL from DATABASE_URL
-        database_url = os.getenv("DATABASE_URL")
+        database_url = configured_database_url()
         if not database_url:
             raise ValueError("DATABASE_URL environment variable is required in hosted mode")
         # Alembic expects sync URLs, convert asyncpg to psycopg2
-        sync_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+        sync_url = add_schema_query(sync_database_url(database_url))
         logger.info("🔧 Hosted mode: Database URL configured (PostgreSQL)")
         alembic_cfg.set_main_option("sqlalchemy.url", sync_url)
     else:
@@ -124,7 +125,7 @@ def check_database_has_tables(database_url: str) -> bool:
             sync_url = sync_url.replace("postgresql+asyncpg://", "postgresql://")
 
         # Create a sync engine for checking
-        engine = create_engine(sync_url, echo=False)
+        engine = create_engine(sync_url, echo=False, connect_args=sync_connect_args())
 
         with engine.connect() as conn:
             if sync_url.startswith("sqlite"):
@@ -165,7 +166,7 @@ def _ensure_wide_alembic_version_column(database_url: str) -> None:
         return
 
     sync_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
-    engine = create_engine(sync_url, echo=False)
+    engine = create_engine(sync_url, echo=False, connect_args=sync_connect_args())
     try:
         with engine.begin() as conn:
             conn.execute(
@@ -204,7 +205,7 @@ def run_migrations() -> None:
 
         # Get database URL based on deployment mode
         if is_self_hosted():
-            database_url = os.getenv("DATABASE_URL")
+            database_url = configured_database_url()
             if not database_url:
                 raise ValueError("DATABASE_URL environment variable is required in hosted mode")
             logger.info("ℹ️  Hosted mode: Using PostgreSQL from DATABASE_URL")

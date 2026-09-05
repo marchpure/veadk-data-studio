@@ -12,6 +12,7 @@ from server.auth.dependencies import AuthContext, require_scope
 from server.auth.scopes import Scope
 from server.db.session import get_async_session
 from server.schemas.standard_response import success_response
+from server.services.external_oidc import enabled as external_oidc_enabled
 from server.services.openviking_service import (
     OpenVikingConfig,
     OpenVikingError,
@@ -19,6 +20,7 @@ from server.services.openviking_service import (
     OpenVikingProfileRepository,
     OpenVikingService,
 )
+from server.services.runtime_secrets import RuntimeSecretError, get_runtime_secret
 from server.services.source_resources import SourceResourceService
 
 router = APIRouter(prefix="/knowledge/openviking", tags=["openviking"])
@@ -27,6 +29,14 @@ source_resource_service = SourceResourceService()
 
 def _service() -> OpenVikingService:
     database = os.getenv("OPENVIKING_PROFILE_DATABASE")
+    if not database and external_oidc_enabled():
+        try:
+            database = get_runtime_secret("database_url")
+        except RuntimeSecretError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "BLOCKED_CONFIG", "message": "Data Studio database is not configured"},
+            ) from exc
     if not database:
         data_dir = Path(os.getenv("DATA_DIR", ".data"))
         database = str(data_dir / "openviking-profiles.sqlite3")
@@ -42,6 +52,14 @@ class ProfileCreate(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     base_url: str = Field(min_length=1, max_length=2048)
     api_key: str = Field(min_length=1, max_length=4096)
+    workspace_uri: str = Field(default="viking://resources/", max_length=2048)
+
+
+class ManagedProfileCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    display_name: str = Field(min_length=1, max_length=120)
+    base_url: str | None = Field(default=None, max_length=2048)
+    api_key: str | None = Field(default=None, max_length=4096)
     workspace_uri: str = Field(default="viking://resources/", max_length=2048)
 
 
@@ -108,13 +126,24 @@ async def list_profiles(auth: AuthContext = Depends(require_scope(Scope.DATASET_
 
 
 @router.post("/profiles", status_code=201)
-async def create_profile(body: ProfileCreate, auth: AuthContext = Depends(require_scope(Scope.DATASET_CREATE))):
+async def create_profile(
+    body: ProfileCreate | ManagedProfileCreate,
+    auth: AuthContext = Depends(require_scope(Scope.DATASET_CREATE)),
+):
     try:
         service = _service()
         tenant_id, workspace_id, principal_id = _scope(auth)
-        profile = service.create(tenant_id, workspace_id, principal_id, **body.model_dump())
+        values = body.model_dump()
+        if external_oidc_enabled():
+            if values.get("base_url") or values.get("api_key"):
+                raise HTTPException(status_code=400, detail="Managed OpenViking credentials are server-controlled")
+            values["base_url"] = values.get("base_url") or os.getenv("OPENVIKING_MANAGED_BASE_URL")
+            values["api_key"] = values.get("api_key") or get_runtime_secret("openviking_api_key")
+        if not values.get("base_url") or not values.get("api_key"):
+            raise OpenVikingError("OPENVIKING_UNAVAILABLE", "OpenViking profile credentials are required", 503)
+        profile = service.create(tenant_id, workspace_id, principal_id, **values)
         return success_response(data=service.public(profile), message="Profile created")
-    except OpenVikingError as exc:
+    except (OpenVikingError, RuntimeSecretError) as exc:
         raise _error(exc)
 
 
@@ -122,9 +151,13 @@ async def create_profile(body: ProfileCreate, auth: AuthContext = Depends(requir
 async def update_profile(profile_id: str, body: ProfileUpdate, auth: AuthContext = Depends(require_scope(Scope.DATASET_UPDATE))):
     try:
         service = _service()
-        profile = service.update(_get_profile(service, profile_id, auth), **body.model_dump(exclude_none=True))
+        values = body.model_dump(exclude_none=True)
+        if external_oidc_enabled():
+            values.pop("base_url", None)
+            values.pop("api_key", None)
+        profile = service.update(_get_profile(service, profile_id, auth), **values)
         return success_response(data=service.public(profile), message="Profile updated")
-    except OpenVikingError as exc:
+    except (OpenVikingError, RuntimeSecretError) as exc:
         raise _error(exc)
 
 

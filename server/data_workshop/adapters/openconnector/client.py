@@ -8,6 +8,8 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse
 
 import httpx
 
+from server.services.runtime_secrets import RuntimeSecretError, get_runtime_secret
+
 
 class OpenConnectorError(RuntimeError):
     def __init__(self, message: str, status_code: int = 502, detail: Any = None):
@@ -26,7 +28,17 @@ class OpenConnectorClient:
     ):
         self.base_url = (base_url or os.getenv("OPENCONNECTOR_URL", "")).rstrip("/")
         self.public_url = (public_url or os.getenv("OPENCONNECTOR_PUBLIC_URL", "") or self.base_url).rstrip("/")
-        self.admin_token = admin_token or os.getenv("OPENCONNECTOR_ADMIN_TOKEN", "")
+        if admin_token:
+            self.admin_token = admin_token
+        else:
+            try:
+                self.admin_token = get_runtime_secret(
+                    "openconnector_admin_token",
+                    env_name="OPENCONNECTOR_ADMIN_TOKEN",
+                    required=False,
+                ) or ""
+            except RuntimeSecretError:
+                self.admin_token = ""
         self.timeout_seconds = timeout_seconds
 
     @property

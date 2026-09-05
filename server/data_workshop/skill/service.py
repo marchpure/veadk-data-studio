@@ -349,6 +349,13 @@ async def resolve_requested_openviking_refs(
         )
 
         database = os.getenv("OPENVIKING_PROFILE_DATABASE")
+        if not database and os.getenv("DWV1_EXTERNAL_OIDC_ENABLED", "").strip().lower() in {"1", "true", "yes"}:
+            from server.services.runtime_secrets import RuntimeSecretError, get_runtime_secret
+
+            try:
+                database = get_runtime_secret("database_url")
+            except RuntimeSecretError as exc:
+                raise ValueError("Data Studio database is not configured") from exc
         if not database:
             database = str(__import__("pathlib").Path(os.getenv("DATA_DIR", ".data")) / "openviking-profiles.sqlite3")
         service = OpenVikingService(

@@ -1,7 +1,9 @@
 from fastapi import APIRouter
+
 from server.db.session import AsyncSessionFactory
 from server.schemas.standard_response import success_response
 from server.services.community_setup import get_local_bootstrap
+from server.services.external_oidc import enabled as external_oidc_enabled
 from server.utils.config_loader import get_self_hosted_config, is_self_hosted
 from server.utils.deployment import get_feature_flags
 
@@ -18,6 +20,7 @@ async def get_app_config():
 
     config = {
         "features": features,
+        "external_oidc_enabled": external_oidc_enabled(),
     }
 
     # Add org name for self-hosted mode

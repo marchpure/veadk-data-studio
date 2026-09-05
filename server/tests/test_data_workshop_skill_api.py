@@ -28,7 +28,7 @@ from server.data_workshop.skill.service import (
     session_payload,
     validate_refs,
 )
-from server.data_workshop.skill.w5_adapter import W5Invocation, W5SkillAgentAdapter
+from server.data_workshop.skill.w5_adapter import W5AdapterError, W5Invocation, W5SkillAgentAdapter
 from server.db.base import Base
 from server.db.session import get_async_session
 from server.models.data_workshop_skill import (
@@ -548,36 +548,10 @@ def test_w5_parser_unwraps_agentkit_tool_response() -> None:
 
 
 @pytest.mark.asyncio
-async def test_w5_adapter_uses_documented_agentkit_invocation_contract(monkeypatch: pytest.MonkeyPatch) -> None:
-    commands = []
-
-    class Stream:
-        def __init__(self, lines):
-            self.lines = list(lines)
-
-        async def readline(self):
-            return self.lines.pop(0) if self.lines else b""
-
-        async def read(self):
-            return b""
-
-    class Process:
-        returncode = 0
-        stdout = Stream([b'data: {"status":"BLOCKED_AUTH","target_skill":"report","artifact":null}\n'])
-        stderr = Stream([])
-
-        async def wait(self):
-            return 0
-
-    async def subprocess(*command, **_kwargs):
-        commands.append(command)
-        return Process()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", subprocess)
+async def test_w5_adapter_rejects_cli_only_configuration() -> None:
     adapter = W5SkillAgentAdapter(runtime_id="runtime-1", region="cn-beijing", cli_path="agentkit")
-    events = [
-        event
-        async for event in adapter.invoke(
+    with pytest.raises(W5AdapterError, match="HTTPS"):
+        async for _ in adapter.invoke(
             W5Invocation(
                 business_goal="Build",
                 mcp_capability_refs=["mcp://read"],
@@ -587,14 +561,8 @@ async def test_w5_adapter_uses_documented_agentkit_invocation_contract(monkeypat
                 session_id="session-1",
                 delegated_auth_ref="opaque-reference",
             )
-        )
-    ]
-    command = list(commands[0])
-    assert command[:3] == ["agentkit", "invoke", "run"]
-    assert command[command.index("--runtime-id") + 1] == "runtime-1"
-    assert command[command.index("--region") + 1] == "cn-beijing"
-    assert "--raw" in command
-    assert events == [{"status": "BLOCKED_AUTH", "target_skill": "report", "artifact": None}]
+        ):
+            pass
 
 
 @pytest.mark.asyncio

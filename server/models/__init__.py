@@ -20,6 +20,7 @@ from server.models.data_workshop_skill import (
 from server.models.datasets import Dataset
 from server.models.datasource_annotations import DatasourceAnnotation
 from server.models.delegation import Delegation
+from server.models.external_oidc import ExternalOIDCLogin, ExternalOIDCSession
 from server.models.files import File
 from server.models.folder import Folder
 from server.models.folder_dashboard import FolderDashboard
@@ -89,6 +90,8 @@ __all__ = [
     "DataWorkshopSkillSession",
     "Dashboard",
     "Delegation",
+    "ExternalOIDCLogin",
+    "ExternalOIDCSession",
     "DatasourceAnnotation",
     "Dataset",
     "File",

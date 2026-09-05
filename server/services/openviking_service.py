@@ -26,6 +26,9 @@ from urllib.parse import urlsplit
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from server.services.runtime_secrets import RuntimeSecretError, get_runtime_secret
+from server.utils.database_config import sync_connect_args
+
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".json", ".md", ".pdf", ".txt", ".xlsx"}
 SAFE_RESOURCE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$")
@@ -47,7 +50,14 @@ class OpenVikingConfig:
 
     @classmethod
     def from_env(cls) -> OpenVikingConfig:
-        raw = os.getenv("OPENVIKING_PROFILE_ENCRYPTION_KEY", "")
+        try:
+            raw = get_runtime_secret(
+                "openviking_profile_key",
+                env_name="OPENVIKING_PROFILE_ENCRYPTION_KEY",
+                required=False,
+            ) or ""
+        except RuntimeSecretError:
+            raw = ""
         if not raw:
             raise OpenVikingError("OPENVIKING_UNAVAILABLE", "OpenViking profile encryption is not configured", 503)
         try:
@@ -81,6 +91,22 @@ class OpenVikingProfile:
 
 class OpenVikingProfileRepository:
     def __init__(self, database: str | Path) -> None:
+        self._postgres = isinstance(database, str) and database.startswith(
+            ("postgresql://", "postgresql+psycopg2://")
+        )
+        if self._postgres:
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+
+            sync_database = database.replace("postgresql+asyncpg://", "postgresql://").replace(
+                "postgresql+psycopg2://", "postgresql://"
+            )
+            self._db = psycopg2.connect(sync_database, **sync_connect_args())
+            self._db.autocommit = False
+            self._cursor_factory = RealDictCursor
+            self._lock = threading.RLock()
+            self._init_postgres()
+            return
         Path(database).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(database), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
@@ -131,7 +157,41 @@ class OpenVikingProfileRepository:
         )
         self._db.commit()
 
+    def _init_postgres(self) -> None:
+        with self._db.cursor(cursor_factory=self._cursor_factory) as cursor:
+            cursor.execute(
+                """
+                SELECT to_regclass('openviking_profiles'),
+                       to_regclass('openviking_task_history'),
+                       to_regclass('openviking_idempotency'),
+                       to_regclass('openviking_resource_refs')
+                """
+            )
+            tables = cursor.fetchone()
+            if not tables or any(item is None for item in tables):
+                raise RuntimeError("OpenViking profile store migration is not installed")
+        self._db.commit()
+
+    def _rows(self, query: str, params: tuple[Any, ...] = (), *, for_update: bool = False) -> list[dict[str, Any]]:
+        if not self._postgres:
+            return [dict(row) for row in self._db.execute(query, params).fetchall()]
+        with self._db.cursor(cursor_factory=self._cursor_factory) as cursor:
+            cursor.execute(query + (" FOR UPDATE" if for_update else ""), params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def _commit(self) -> None:
+        self._db.commit()
+
     def list(self, tenant_id: str, workspace_id: str, principal_id: str) -> list[OpenVikingProfile]:
+        if self._postgres:
+            rows = self._rows(
+                """SELECT profile_id,tenant_id,workspace_id,principal_id,display_name,
+                encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at
+                FROM openviking_profiles
+                WHERE tenant_id=%s AND workspace_id=%s AND principal_id=%s ORDER BY created_at""",
+                (tenant_id, workspace_id, principal_id),
+            )
+            return [OpenVikingProfile(**row) for row in rows]
         rows = self._db.execute(
             """SELECT profile_id,tenant_id,workspace_id,principal_id,display_name,
             encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at
@@ -142,6 +202,15 @@ class OpenVikingProfileRepository:
         return [OpenVikingProfile(**dict(row)) for row in rows]
 
     def get(self, profile_id: str, tenant_id: str, workspace_id: str, principal_id: str) -> OpenVikingProfile | None:
+        if self._postgres:
+            rows = self._rows(
+                """SELECT profile_id,tenant_id,workspace_id,principal_id,display_name,
+                encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at
+                FROM openviking_profiles
+                WHERE profile_id=%s AND tenant_id=%s AND workspace_id=%s AND principal_id=%s""",
+                (profile_id, tenant_id, workspace_id, principal_id),
+            )
+            return OpenVikingProfile(**rows[0]) if rows else None
         row = self._db.execute(
             """SELECT profile_id,tenant_id,workspace_id,principal_id,display_name,
             encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at
@@ -152,6 +221,22 @@ class OpenVikingProfileRepository:
         return OpenVikingProfile(**dict(row)) if row else None
 
     def save(self, profile: OpenVikingProfile) -> OpenVikingProfile:
+        if self._postgres:
+            with self._db.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO openviking_profiles
+                    (profile_id,tenant_id,workspace_id,principal_id,display_name,
+                     encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at)
+                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT(profile_id) DO UPDATE SET display_name=EXCLUDED.display_name,
+                    encrypted_base_url=EXCLUDED.encrypted_base_url,
+                    encrypted_api_key=EXCLUDED.encrypted_api_key,
+                    workspace_uri=EXCLUDED.workspace_uri,status=EXCLUDED.status,
+                    updated_at=EXCLUDED.updated_at""",
+                    tuple(profile.__dict__.values()),
+                )
+            self._commit()
+            return profile
         self._db.execute(
             """INSERT INTO openviking_profiles
             (profile_id,tenant_id,workspace_id,principal_id,display_name,
@@ -166,6 +251,15 @@ class OpenVikingProfileRepository:
         return profile
 
     def delete(self, profile_id: str, tenant_id: str, workspace_id: str, principal_id: str) -> None:
+        if self._postgres:
+            with self._db.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM openviking_profiles WHERE profile_id=%s AND tenant_id=%s AND workspace_id=%s AND principal_id=%s",
+                    (profile_id, tenant_id, workspace_id, principal_id),
+                )
+                cursor.execute("DELETE FROM openviking_resource_refs WHERE profile_id=%s", (profile_id,))
+            self._commit()
+            return
         self._db.execute(
             "DELETE FROM openviking_profiles WHERE profile_id=? AND tenant_id=? AND workspace_id=? AND principal_id=?",
             (profile_id, tenant_id, workspace_id, principal_id),
@@ -182,6 +276,36 @@ class OpenVikingProfileRepository:
     ) -> str:
         """Persist a ref once and return the stable ref id under concurrency."""
         with self._lock:
+            if self._postgres:
+                try:
+                    with self._db.cursor(cursor_factory=self._cursor_factory) as cursor:
+                        cursor.execute(
+                            """SELECT ref_id FROM openviking_resource_refs
+                            WHERE profile_id=%s AND uri_digest=%s AND uri_digest <> '' FOR UPDATE""",
+                            (profile_id, uri_digest),
+                        )
+                        existing = cursor.fetchone()
+                        if existing:
+                            self._commit()
+                            return str(existing["ref_id"])
+                        cursor.execute(
+                            """INSERT INTO openviking_resource_refs
+                            (ref_id, profile_id, encrypted_uri, uri_digest, created_at)
+                            VALUES(%s,%s,%s,%s,%s)""",
+                            (ref_id, profile_id, encrypted_uri, uri_digest, time.time()),
+                        )
+                    self._commit()
+                    return ref_id
+                except Exception:
+                    self._db.rollback()
+                    rows = self._rows(
+                        """SELECT ref_id FROM openviking_resource_refs
+                        WHERE profile_id=%s AND uri_digest=%s AND uri_digest <> ''""",
+                        (profile_id, uri_digest),
+                    )
+                    if rows:
+                        return str(rows[0]["ref_id"])
+                    raise
             existing = self._db.execute(
                 """SELECT ref_id FROM openviking_resource_refs
                 WHERE profile_id=? AND uri_digest=? AND uri_digest <> ''""",
@@ -210,6 +334,13 @@ class OpenVikingProfileRepository:
                 raise
 
     def get_resource_ref(self, ref_id: str, profile_id: str) -> bytes | None:
+        if self._postgres:
+            rows = self._rows(
+                "SELECT encrypted_uri FROM openviking_resource_refs WHERE ref_id=%s AND profile_id=%s",
+                (ref_id, profile_id),
+            )
+            value = rows[0]["encrypted_uri"] if rows else None
+            return bytes(value) if value is not None else None
         row = self._db.execute(
             "SELECT encrypted_uri FROM openviking_resource_refs WHERE ref_id=? AND profile_id=?",
             (ref_id, profile_id),
@@ -217,6 +348,13 @@ class OpenVikingProfileRepository:
         return bytes(row["encrypted_uri"]) if row else None
 
     def get_resource_ref_by_digest(self, profile_id: str, uri_digest: str) -> str | None:
+        if self._postgres:
+            rows = self._rows(
+                """SELECT ref_id FROM openviking_resource_refs
+                WHERE profile_id=%s AND uri_digest=%s AND uri_digest <> ''""",
+                (profile_id, uri_digest),
+            )
+            return str(rows[0]["ref_id"]) if rows else None
         row = self._db.execute(
             """SELECT ref_id FROM openviking_resource_refs
             WHERE profile_id=? AND uri_digest=? AND uri_digest <> ''""",
@@ -225,6 +363,12 @@ class OpenVikingProfileRepository:
         return str(row["ref_id"]) if row else None
 
     def get_resource_ref_owner(self, ref_id: str) -> str | None:
+        if self._postgres:
+            rows = self._rows(
+                "SELECT profile_id FROM openviking_resource_refs WHERE ref_id=%s",
+                (ref_id,),
+            )
+            return str(rows[0]["profile_id"]) if rows else None
         row = self._db.execute(
             "SELECT profile_id FROM openviking_resource_refs WHERE ref_id=?",
             (ref_id,),
@@ -233,6 +377,27 @@ class OpenVikingProfileRepository:
 
     def save_tasks(self, profile: OpenVikingProfile, tasks: list[dict[str, Any]]) -> None:
         now = time.time()
+        if self._postgres:
+            with self._db.cursor() as cursor:
+                for item in tasks:
+                    if item.get("task_id"):
+                        cursor.execute(
+                            """INSERT INTO openviking_task_history
+                            (tenant_id,workspace_id,profile_id,task_id,task_json,observed_at)
+                            VALUES(%s,%s,%s,%s,%s,%s)
+                            ON CONFLICT(tenant_id,workspace_id,profile_id,task_id)
+                            DO UPDATE SET task_json=EXCLUDED.task_json, observed_at=EXCLUDED.observed_at""",
+                            (
+                                profile.tenant_id,
+                                profile.workspace_id,
+                                profile.profile_id,
+                                str(item["task_id"]),
+                                json.dumps(item),
+                                now,
+                            ),
+                        )
+            self._commit()
+            return
         self._db.executemany(
             """INSERT INTO openviking_task_history VALUES(?,?,?,?,?,?)
             ON CONFLICT(tenant_id,workspace_id,profile_id,task_id)
@@ -253,6 +418,14 @@ class OpenVikingProfileRepository:
         self._db.commit()
 
     def tasks(self, profile: OpenVikingProfile) -> list[dict[str, Any]]:
+        if self._postgres:
+            rows = self._rows(
+                """SELECT task_json FROM openviking_task_history
+                WHERE tenant_id=%s AND workspace_id=%s AND profile_id=%s
+                ORDER BY observed_at DESC""",
+                (profile.tenant_id, profile.workspace_id, profile.profile_id),
+            )
+            return [json.loads(row["task_json"]) for row in rows]
         rows = self._db.execute(
             """SELECT task_json FROM openviking_task_history
             WHERE tenant_id=? AND workspace_id=? AND profile_id=?
@@ -262,6 +435,9 @@ class OpenVikingProfileRepository:
         return [json.loads(row["task_json"]) for row in rows]
 
     def get_idempotent(self, key: str) -> Any | None:
+        if self._postgres:
+            rows = self._rows("SELECT response_json FROM openviking_idempotency WHERE scope_key=%s", (key,))
+            return json.loads(rows[0]["response_json"]) if rows else None
         row = self._db.execute(
             "SELECT response_json FROM openviking_idempotency WHERE scope_key=?",
             (key,),
@@ -269,6 +445,17 @@ class OpenVikingProfileRepository:
         return json.loads(row["response_json"]) if row else None
 
     def save_idempotent(self, key: str, value: Any) -> None:
+        if self._postgres:
+            with self._db.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO openviking_idempotency(scope_key,response_json,observed_at)
+                    VALUES(%s,%s,%s)
+                    ON CONFLICT(scope_key) DO UPDATE SET response_json=EXCLUDED.response_json,
+                    observed_at=EXCLUDED.observed_at""",
+                    (key, json.dumps(value, ensure_ascii=False), time.time()),
+                )
+            self._commit()
+            return
         self._db.execute(
             """INSERT INTO openviking_idempotency VALUES(?,?,?)
             ON CONFLICT(scope_key) DO UPDATE SET response_json=excluded.response_json,

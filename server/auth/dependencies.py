@@ -365,9 +365,21 @@ async def get_auth_context_hosted(
     return auth
 
 
+async def get_auth_context_external_oidc(
+    request: Request,
+    session: AsyncSession = Depends(get_async_session),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
+) -> AuthContext:
+    from server.services.external_oidc import auth_context_from_cookie
+
+    return await auth_context_from_cookie(request, session, x_tenant_id)
+
+
 # Create the appropriate dependency based on mode at import time
 # Self-hosted mode = JWT auth, otherwise local auth (no JWT, always OWNER)
-if is_self_hosted():
+if os.getenv("DWV1_EXTERNAL_OIDC_ENABLED", "").strip().lower() in {"1", "true", "yes"}:
+    _auth_context_dependency = get_auth_context_external_oidc
+elif is_self_hosted():
     _auth_context_dependency = get_auth_context_hosted
 else:
     _auth_context_dependency = get_auth_context

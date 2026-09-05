@@ -1,5 +1,18 @@
-# Stage 1: Build dependencies
+# Stage 1: Build the same-origin Web bundle
 ARG PYTHON_BASE_IMAGE=public.ecr.aws/docker/library/python:3.11-slim
+FROM node:20-alpine AS frontend
+
+WORKDIR /app/client
+
+RUN npm install -g pnpm@10.18.3
+
+COPY client/package.json client/pnpm-lock.yaml client/.npmrc ./
+RUN pnpm install --frozen-lockfile --prod=false
+
+COPY client/ ./
+RUN pnpm build
+
+# Stage 2: Build Python dependencies
 FROM ${PYTHON_BASE_IMAGE} AS deps
 
 WORKDIR /app
@@ -31,8 +44,7 @@ ENV UV_HTTP_TIMEOUT=300
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_DEFAULT_INDEX="$UV_DEFAULT_INDEX" UV_LINK_MODE=copy uv sync --frozen --no-install-project
 
-# Stage 2: Runtime image
-ARG PYTHON_BASE_IMAGE=public.ecr.aws/docker/library/python:3.11-slim
+# Stage 3: Runtime image
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 
 WORKDIR /app
@@ -78,6 +90,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.3 /uv /usr/local/bin/uv
 
 COPY --from=deps /app/.venv /app/.venv
 
+COPY --from=frontend /app/client/dist /app/client/dist
 COPY server/ /app/server/
 COPY pyproject.toml uv.lock /app/
 

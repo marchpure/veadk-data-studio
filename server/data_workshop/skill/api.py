@@ -40,7 +40,7 @@ from server.data_workshop.skill.service import (
     validate_requested_refs,
     visible_catalog,
 )
-from server.data_workshop.skill.w5_adapter import W5AdapterError
+from server.data_workshop.skill.w5_adapter import W5AdapterError, W5SkillAgentAdapter
 from server.db.session import AsyncSessionFactory, get_async_session
 from server.schemas.standard_response import success_response
 
@@ -105,10 +105,8 @@ async def get_catalog(
 ):
     data = await visible_catalog(db, auth.tenant_id, auth.user_id, auth.user.email)
     data["backend"] = "TEST BACKEND" if os.getenv("DATA_WORKSHOP_BACKEND_MODE", "REAL").upper() == "TEST" else "REAL"
-    data["w5_configured"] = bool(
-        os.getenv("W5_SKILL_AGENT_RUNTIME_ID")
-        or (os.getenv("W5_SKILL_AGENT_ENDPOINT") and os.getenv("W5_SKILL_AGENT_API_KEY"))
-    )
+    w5_adapter = W5SkillAgentAdapter()
+    data["w5_configured"] = bool(w5_adapter.endpoint and w5_adapter.api_key)
     return success_response(data=data, message="Skill catalog retrieved")
 
 
