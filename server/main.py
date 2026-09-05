@@ -355,6 +355,11 @@ async def faas_runtime_middleware(request: Request, call_next):
         return await call_next(request)
 
     with request_faas_credentials(request):
+        # The Web shell and health endpoint are static/read-only and must remain
+        # reachable while the platform identity path is unavailable. All API
+        # routes still fail closed below until KMS-backed initialization works.
+        if not request.url.path.startswith("/api/"):
+            return await call_next(request)
         try:
             await _ensure_deferred_runtime_ready()
         except Exception:
