@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from server.services.faas_runtime import deferred_runtime_enabled
 from server.utils.config_loader import is_self_hosted
 from server.utils.custom_logger import get_logger
-from server.utils.database_config import async_connect_args, configured_database_url
+from server.utils.database_config import async_connect_args, async_database_url, configured_database_url
 
 logger = get_logger(__name__)
 
@@ -63,11 +63,11 @@ def _initialize_engine() -> async_sessionmaker[AsyncSession]:
 
         DATABASE_URL = get_database_url()
         async_engine = create_async_engine(
-            DATABASE_URL,
+            async_database_url(DATABASE_URL),
             echo=False,
             future=True,
             pool_pre_ping=True,
-            connect_args=async_connect_args(),
+            connect_args=async_connect_args(DATABASE_URL),
         )
 
         if async_engine.dialect.name == "sqlite":

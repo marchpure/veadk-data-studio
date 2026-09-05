@@ -65,9 +65,30 @@ def sync_database_url(url: str) -> str:
     )
 
 
-def async_connect_args() -> dict[str, object]:
+def async_database_url(url: str) -> str:
+    """Remove libpq-only SSL query options before handing a URL to asyncpg."""
+    if "postgresql" not in url:
+        return url
+    parts = urlsplit(url)
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key not in {"ssl", "sslmode"}
+    ]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def async_connect_args(url: str | None = None) -> dict[str, object]:
     schema = database_schema()
-    return {"server_settings": {"search_path": schema}} if schema != "public" else {}
+    args: dict[str, object] = {"server_settings": {"search_path": schema}} if schema != "public" else {}
+    if url and "postgresql" in url:
+        query = dict(parse_qsl(urlsplit(url).query, keep_blank_values=True))
+        ssl_value = (query.get("sslmode") or query.get("ssl") or "").strip().lower()
+        if ssl_value in {"0", "false", "no", "off", "disable"}:
+            args["ssl"] = False
+        elif ssl_value in {"1", "true", "yes", "on", "require", "verify-ca", "verify-full"}:
+            args["ssl"] = True
+    return args
 
 
 def sync_connect_args() -> dict[str, str]:

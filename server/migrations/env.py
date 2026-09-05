@@ -34,6 +34,7 @@ from server.db.base import Base  # noqa: E402
 from server.utils.database_config import (  # noqa: E402
     add_schema_query,
     async_connect_args,
+    async_database_url,
     configured_database_url,
     database_schema,
 )
@@ -100,10 +101,11 @@ def do_run_migrations(connection: Connection) -> None:
 async def run_migrations_online() -> None:
     from sqlalchemy.ext.asyncio import create_async_engine
 
+    database_url = _get_database_url()
     connectable = create_async_engine(
-        add_schema_query(_get_database_url()),
+        async_database_url(add_schema_query(database_url)),
         poolclass=pool.NullPool,
-        connect_args=async_connect_args(),
+        connect_args=async_connect_args(database_url),
     )
 
     async with connectable.connect() as connection:  # type: ignore[assignment]
@@ -117,7 +119,7 @@ async def run_migrations_online() -> None:
                 raise RuntimeError(f"Required PostgreSQL schema {schema!r} does not exist")
             await connection.execute(text(f'SET search_path TO "{schema}"'))
             await connection.commit()
-        await _ensure_wide_alembic_version_column(connection, _get_database_url())
+        await _ensure_wide_alembic_version_column(connection, database_url)
         await connection.run_sync(do_run_migrations)
 
     await connectable.dispose()

@@ -1,4 +1,4 @@
-from server.utils.database_config import sync_database_url
+from server.utils.database_config import async_connect_args, async_database_url, sync_database_url
 
 
 def test_sync_database_url_translates_boolean_ssl_query() -> None:
@@ -20,3 +20,10 @@ def test_sync_database_url_preserves_explicit_sslmode() -> None:
     url = "postgresql+asyncpg://user:pass@db.example.test/app?ssl=true&sslmode=verify-full"
 
     assert sync_database_url(url) == "postgresql://user:pass@db.example.test/app?ssl=true&sslmode=verify-full"
+
+
+def test_async_database_url_moves_disable_ssl_to_connect_args() -> None:
+    url = "postgresql+asyncpg://user:pass@db.example.test/app?sslmode=disable"
+
+    assert async_database_url(url) == "postgresql+asyncpg://user:pass@db.example.test/app"
+    assert async_connect_args(url)["ssl"] is False
