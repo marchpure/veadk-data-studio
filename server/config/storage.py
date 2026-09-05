@@ -34,6 +34,13 @@ if os.getenv("DATA_DIR"):
     DEFAULT_DATA_DIR = Path(os.path.expandvars(os.path.expanduser(os.environ["DATA_DIR"]))).resolve()
 elif getattr(sys, "frozen", False) and platform.system() in ["Darwin", "Windows", "Linux"]:
     DEFAULT_DATA_DIR = get_persistent_data_path()
+elif (
+    os.getenv("APP_MODE", "").strip().lower() == "self-hosted"
+    and os.getenv("DWV1_EXTERNAL_OIDC_ENABLED", "").strip().lower() in {"1", "true", "yes"}
+):
+    # VeFaaS code is mounted read-only under /opt/bytefaas. Local scratch
+    # files remain disposable; durable application state uses PostgreSQL/TOS.
+    DEFAULT_DATA_DIR = Path("/tmp/dwv1-data-studio")
 else:
     DEFAULT_DATA_DIR = BASE_DIR / ".data"
 
