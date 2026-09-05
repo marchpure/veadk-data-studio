@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 import io
+import os
+import tempfile
 import zipfile
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -35,6 +38,11 @@ from server.models.data_workshop_skill import (
 )
 from server.models.tenant import Tenant
 from server.models.user import User
+from server.services.openviking_service import (
+    OpenVikingConfig,
+    OpenVikingProfileRepository,
+    OpenVikingService,
+)
 
 CATALOG = {
     "connections": [
@@ -218,6 +226,88 @@ async def test_session_context_update_persists_and_removes_knowledge_ref(skill_a
 
     refreshed = await client.get(f"/api/v1/sessions/{session_id}")
     assert refreshed.json()["data"]["context_refs"] == reduced
+
+
+@pytest.mark.asyncio
+async def test_revoked_openviking_ref_blocks_w5_before_adapter_invocation(skill_app, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, factory, _, identities = skill_app
+    tenant_id, owner_id, _, _ = identities
+
+    with tempfile.TemporaryDirectory() as profile_dir:
+        profile_path = os.path.join(profile_dir, "profiles.sqlite3")
+        key = base64.urlsafe_b64encode(b"r" * 32).decode()
+        monkeypatch.setenv("OPENVIKING_PROFILE_DATABASE", profile_path)
+        monkeypatch.setenv("OPENVIKING_PROFILE_ENCRYPTION_KEY", key)
+        monkeypatch.setenv("OPENVIKING_ALLOW_LOOPBACK", "1")
+        openviking = OpenVikingService(
+            OpenVikingProfileRepository(profile_path),
+            OpenVikingConfig(base64.urlsafe_b64decode(key), 1, True),
+        )
+        profile = openviking.create(
+            str(tenant_id),
+            f"tenant:{tenant_id}",
+            str(owner_id),
+            "Hosted",
+            "http://127.0.0.1:9000",
+            "secret-key",
+            "viking://resources/",
+        )
+        profile = openviking.repository.save(type(profile)(**{**profile.__dict__, "status": "ready"}))
+        resource_ref = openviking.resource_ref(profile, "viking://resources/revoked.md")
+
+        context_refs = {
+            "mcp_refs": [],
+            "knowledge_refs": [
+                {
+                    "id": resource_ref,
+                    "kind": "knowledge_resource",
+                    "name": "revoked.md",
+                    "source": "OpenViking ResourceRef",
+                    "metadata": {"profile_ref": profile.profile_id},
+                }
+            ],
+        }
+        async with factory() as db:
+            repo = SkillWorkbenchRepository(db, tenant_id, owner_id)
+            skill = await repo.create_skill(
+                title="Revoked Resource Skill",
+                target_skill="revoked-resource",
+                description="",
+                context_refs=context_refs,
+            )
+            session = await repo.create_session(
+                skill_id=skill.id,
+                title="初始会话",
+                context_refs=context_refs,
+            )
+            await db.commit()
+
+        openviking.repository.delete(
+            profile.profile_id,
+            profile.tenant_id,
+            profile.workspace_id,
+            profile.principal_id,
+        )
+
+        class UnexpectedAdapter:
+            async def invoke(self, _invocation):
+                raise AssertionError("W5 adapter must not be invoked for a revoked ResourceRef")
+                yield
+
+        await service.run_invocation(
+            tenant_id=tenant_id,
+            owner_id=owner_id,
+            session_id=session.id,
+            payload=api.InvocationCreate(message="run", client_invocation_id="revoked-1"),
+            delegated_auth="opaque-auth",
+            adapter=UnexpectedAdapter(),
+            session_factory=factory,
+        )
+
+        async with factory() as db:
+            refreshed = await db.get(DataWorkshopSkillSession, session.id)
+            assert refreshed.status == "blocked_auth"
+            assert refreshed.events_json[-1]["code"] == "RESOURCE_OUT_OF_SCOPE"
 
 
 @pytest.mark.asyncio

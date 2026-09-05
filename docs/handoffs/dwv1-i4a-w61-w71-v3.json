@@ -51,8 +51,15 @@
     "openviking_e2e": "passed: profile, resource preview, retrieval, tasks, watches, handoff, refresh, responsive screenshots",
     "skill_workbench_e2e": "passed: W5 BLOCKED_CONFIG, no fabricated artifact, responsive layout, legacy redirects",
     "kb_to_skill_lifecycle": "passed: opaque URL, imported metadata, create, reload restore, PATCH removal, empty state",
+    "integrated_browser_evidence": "docs/handoffs/dwv1-i4a-w61-w71-v3-browser-evidence.json",
     "openviking_browser_evidence": "docs/openviking/w61-browser-evidence.json",
     "screenshots": [
+      "docs/handoffs/screenshots/dwv1-i4a-w61-w71-v3/kb-resource-1440x900.png",
+      "docs/handoffs/screenshots/dwv1-i4a-w61-w71-v3/kb-resource-1280x800.png",
+      "docs/handoffs/screenshots/dwv1-i4a-w61-w71-v3/kb-resource-390x844.png",
+      "docs/handoffs/screenshots/dwv1-i4a-w61-w71-v3/skill-imported-1440x900.png",
+      "docs/handoffs/screenshots/dwv1-i4a-w61-w71-v3/skill-imported-1280x800.png",
+      "docs/handoffs/screenshots/dwv1-i4a-w61-w71-v3/skill-imported-390x844.png",
       "docs/openviking/screenshots/w61/openviking-w61-resource-1440x900.png",
       "docs/openviking/screenshots/w61/openviking-w61-retrieval-1280x800.png",
       "docs/openviking/screenshots/w61/openviking-w61-profile-390x844.png",
@@ -63,11 +70,14 @@
   },
   "verification": {
     "python_compile": "passed",
-    "backend_focused": "95 passed",
+    "backend_focused": "101 passed",
     "openviking_frontend": "31 files, 131 tests passed",
     "frontend_typecheck": "passed",
     "frontend_production_build": "passed with existing donor CSS/chunk warnings",
     "ruff": "passed",
+    "migration_fresh_upgrade_downgrade": "passed: fresh upgrade, full downgrade, upgrade, and add_feishu_oauth_flows -> add_dw_skill_workbench",
+    "bff_restart_resource_ref": "passed: encrypted ResourceRef resolved after repository restart",
+    "revocation_fail_closed": "passed: revoked ResourceRef sets blocked_auth and never invokes W5 adapter",
     "alembic_heads": [
       "add_dw_skill_workbench"
     ],

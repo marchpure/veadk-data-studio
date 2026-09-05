@@ -113,6 +113,26 @@ def test_resource_refs_are_opaque_and_profile_scoped(tmp_path, monkeypatch):
         value.resolve_ref(first, ref[:-1] + ("0" if ref[-1] != "0" else "1"))
 
 
+def test_resource_refs_survive_bff_repository_restart(tmp_path, monkeypatch):
+    value = service(tmp_path, monkeypatch)
+    profile = value.create(
+        "tenant",
+        "workspace",
+        "owner",
+        "Hosted",
+        "http://127.0.0.1:9000",
+        "secret-key",
+        "viking://resources/",
+    )
+    ref = value.resource_ref(profile, "viking://resources/restart.md")
+
+    restarted = service(tmp_path, monkeypatch)
+    restored = restarted.repository.get(profile.profile_id, "tenant", "workspace", "owner")
+
+    assert restored is not None
+    assert restarted.resolve_ref(restored, ref) == "viking://resources/restart.md"
+
+
 def test_upstream_refs_and_sensitive_fields_are_recursively_sanitized(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
     profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
