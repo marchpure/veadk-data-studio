@@ -16,6 +16,7 @@ import re
 import secrets
 import socket
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,6 +84,7 @@ class OpenVikingProfileRepository:
         Path(database).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(database), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        self._lock = threading.RLock()
         self._db.executescript(
             """
             CREATE TABLE IF NOT EXISTS openviking_profiles (
@@ -107,20 +109,26 @@ class OpenVikingProfileRepository:
             );
             CREATE TABLE IF NOT EXISTS openviking_resource_refs (
               ref_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,
-              encrypted_uri BLOB NOT NULL, created_at REAL NOT NULL
+              encrypted_uri BLOB NOT NULL, uri_digest TEXT NOT NULL DEFAULT '',
+              created_at REAL NOT NULL
             );
             CREATE INDEX IF NOT EXISTS openviking_resource_ref_profile
               ON openviking_resource_refs(profile_id);
             """
         )
-        columns = {
-            str(row["name"])
-            for row in self._db.execute("PRAGMA table_info(openviking_profiles)").fetchall()
-        }
+        columns = {str(row["name"]) for row in self._db.execute("PRAGMA table_info(openviking_profiles)").fetchall()}
         if "principal_id" not in columns:
-            self._db.execute(
-                "ALTER TABLE openviking_profiles ADD COLUMN principal_id TEXT NOT NULL DEFAULT ''"
-            )
+            self._db.execute("ALTER TABLE openviking_profiles ADD COLUMN principal_id TEXT NOT NULL DEFAULT ''")
+        ref_columns = {
+            str(row["name"]) for row in self._db.execute("PRAGMA table_info(openviking_resource_refs)").fetchall()
+        }
+        if "uri_digest" not in ref_columns:
+            self._db.execute("ALTER TABLE openviking_resource_refs ADD COLUMN uri_digest TEXT NOT NULL DEFAULT ''")
+        self._db.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS openviking_resource_ref_unique
+            ON openviking_resource_refs(profile_id, uri_digest)
+            WHERE uri_digest <> ''"""
+        )
         self._db.commit()
 
     def list(self, tenant_id: str, workspace_id: str, principal_id: str) -> list[OpenVikingProfile]:
@@ -165,13 +173,41 @@ class OpenVikingProfileRepository:
         self._db.execute("DELETE FROM openviking_resource_refs WHERE profile_id=?", (profile_id,))
         self._db.commit()
 
-    def save_resource_ref(self, ref_id: str, profile_id: str, encrypted_uri: bytes) -> None:
-        self._db.execute(
-            """INSERT OR REPLACE INTO openviking_resource_refs
-            (ref_id, profile_id, encrypted_uri, created_at) VALUES(?,?,?,?)""",
-            (ref_id, profile_id, encrypted_uri, time.time()),
-        )
-        self._db.commit()
+    def save_resource_ref(
+        self,
+        ref_id: str,
+        profile_id: str,
+        encrypted_uri: bytes,
+        uri_digest: str = "",
+    ) -> str:
+        """Persist a ref once and return the stable ref id under concurrency."""
+        with self._lock:
+            existing = self._db.execute(
+                """SELECT ref_id FROM openviking_resource_refs
+                WHERE profile_id=? AND uri_digest=? AND uri_digest <> ''""",
+                (profile_id, uri_digest),
+            ).fetchone()
+            if existing:
+                return str(existing["ref_id"])
+            try:
+                self._db.execute(
+                    """INSERT INTO openviking_resource_refs
+                    (ref_id, profile_id, encrypted_uri, uri_digest, created_at)
+                    VALUES(?,?,?,?,?)""",
+                    (ref_id, profile_id, encrypted_uri, uri_digest, time.time()),
+                )
+                self._db.commit()
+                return ref_id
+            except sqlite3.IntegrityError:
+                self._db.rollback()
+                existing = self._db.execute(
+                    """SELECT ref_id FROM openviking_resource_refs
+                    WHERE profile_id=? AND uri_digest=? AND uri_digest <> ''""",
+                    (profile_id, uri_digest),
+                ).fetchone()
+                if existing:
+                    return str(existing["ref_id"])
+                raise
 
     def get_resource_ref(self, ref_id: str, profile_id: str) -> bytes | None:
         row = self._db.execute(
@@ -180,6 +216,21 @@ class OpenVikingProfileRepository:
         ).fetchone()
         return bytes(row["encrypted_uri"]) if row else None
 
+    def get_resource_ref_by_digest(self, profile_id: str, uri_digest: str) -> str | None:
+        row = self._db.execute(
+            """SELECT ref_id FROM openviking_resource_refs
+            WHERE profile_id=? AND uri_digest=? AND uri_digest <> ''""",
+            (profile_id, uri_digest),
+        ).fetchone()
+        return str(row["ref_id"]) if row else None
+
+    def get_resource_ref_owner(self, ref_id: str) -> str | None:
+        row = self._db.execute(
+            "SELECT profile_id FROM openviking_resource_refs WHERE ref_id=?",
+            (ref_id,),
+        ).fetchone()
+        return str(row["profile_id"]) if row else None
+
     def save_tasks(self, profile: OpenVikingProfile, tasks: list[dict[str, Any]]) -> None:
         now = time.time()
         self._db.executemany(
@@ -187,8 +238,16 @@ class OpenVikingProfileRepository:
             ON CONFLICT(tenant_id,workspace_id,profile_id,task_id)
             DO UPDATE SET task_json=excluded.task_json, observed_at=excluded.observed_at""",
             [
-                (profile.tenant_id, profile.workspace_id, profile.profile_id, str(item["task_id"]), json.dumps(item), now)
-                for item in tasks if item.get("task_id")
+                (
+                    profile.tenant_id,
+                    profile.workspace_id,
+                    profile.profile_id,
+                    str(item["task_id"]),
+                    json.dumps(item),
+                    now,
+                )
+                for item in tasks
+                if item.get("task_id")
             ],
         )
         self._db.commit()
@@ -220,15 +279,23 @@ class OpenVikingProfileRepository:
 
 
 OPERATIONS: dict[str, tuple[str, str]] = {
-    "fs_list": ("GET", "/api/v1/fs/ls"), "fs_tree": ("GET", "/api/v1/fs/tree"),
-    "fs_stat": ("GET", "/api/v1/fs/stat"), "fs_delete": ("DELETE", "/api/v1/fs"),
-    "content_read": ("GET", "/api/v1/content/read"), "content_abstract": ("GET", "/api/v1/content/abstract"),
-    "content_overview": ("GET", "/api/v1/content/overview"), "content_write": ("POST", "/api/v1/content/write"),
+    "fs_list": ("GET", "/api/v1/fs/ls"),
+    "fs_tree": ("GET", "/api/v1/fs/tree"),
+    "fs_stat": ("GET", "/api/v1/fs/stat"),
+    "fs_delete": ("DELETE", "/api/v1/fs"),
+    "content_read": ("GET", "/api/v1/content/read"),
+    "content_abstract": ("GET", "/api/v1/content/abstract"),
+    "content_overview": ("GET", "/api/v1/content/overview"),
+    "content_write": ("POST", "/api/v1/content/write"),
     "content_reindex": ("POST", "/api/v1/content/reindex"),
-    "resource_import": ("POST", "/api/v1/resources"), "find": ("POST", "/api/v1/search/find"),
-    "search": ("POST", "/api/v1/search/search"), "grep": ("POST", "/api/v1/search/grep"),
-    "glob": ("POST", "/api/v1/search/glob"), "tasks": ("GET", "/api/v1/tasks"),
-    "watches": ("GET", "/api/v1/watches"), "watch_create": ("POST", "/api/v1/watches"),
+    "resource_import": ("POST", "/api/v1/resources"),
+    "find": ("POST", "/api/v1/search/find"),
+    "search": ("POST", "/api/v1/search/search"),
+    "grep": ("POST", "/api/v1/search/grep"),
+    "glob": ("POST", "/api/v1/search/glob"),
+    "tasks": ("GET", "/api/v1/tasks"),
+    "watches": ("GET", "/api/v1/watches"),
+    "watch_create": ("POST", "/api/v1/watches"),
 }
 
 ITEM_OPERATIONS: dict[str, tuple[str, str]] = {
@@ -242,12 +309,25 @@ ITEM_OPERATIONS: dict[str, tuple[str, str]] = {
 
 OPERATION_FIELDS: dict[str, set[str]] = {
     "fs_list": {
-        "resource_ref", "output", "node_limit", "limit", "recursive",
-        "show_all_hidden", "abs_limit", "simple", "sort_by", "sort_order",
+        "resource_ref",
+        "output",
+        "node_limit",
+        "limit",
+        "recursive",
+        "show_all_hidden",
+        "abs_limit",
+        "simple",
+        "sort_by",
+        "sort_order",
     },
     "fs_tree": {
-        "resource_ref", "output", "node_limit", "limit", "level_limit",
-        "show_all_hidden", "abs_limit",
+        "resource_ref",
+        "output",
+        "node_limit",
+        "limit",
+        "level_limit",
+        "show_all_hidden",
+        "abs_limit",
     },
     "fs_stat": {"resource_ref"},
     "fs_delete": {"resource_ref", "recursive", "wait", "timeout"},
@@ -257,30 +337,80 @@ OPERATION_FIELDS: dict[str, set[str]] = {
     "content_write": {"resource_ref", "content", "mode", "wait", "timeout"},
     "content_reindex": {"resource_ref", "mode", "wait", "recursive"},
     "resource_import": {
-        "path", "temp_file_id", "parent_ref", "destination_ref", "source_name",
-        "wait", "timeout", "watch_interval", "add_type", "create_parent",
-        "reason", "instruction", "strict", "ignore_dirs", "include", "exclude",
-        "directly_upload_media", "preserve_structure", "args", "telemetry",
-        "processing_mode", "tags", "tag_mode",
+        "path",
+        "temp_file_id",
+        "parent_ref",
+        "destination_ref",
+        "source_name",
+        "wait",
+        "timeout",
+        "watch_interval",
+        "add_type",
+        "create_parent",
+        "reason",
+        "instruction",
+        "strict",
+        "ignore_dirs",
+        "include",
+        "exclude",
+        "directly_upload_media",
+        "preserve_structure",
+        "args",
+        "telemetry",
+        "processing_mode",
+        "tags",
+        "tag_mode",
     },
     "find": {
-        "query", "image_url", "target_ref", "context_type", "agent_id",
-        "agent_uri", "limit", "node_limit", "score_threshold", "filter",
-        "include_provenance", "tags", "since", "until", "time_field", "level",
+        "query",
+        "image_url",
+        "target_ref",
+        "context_type",
+        "agent_id",
+        "agent_uri",
+        "limit",
+        "node_limit",
+        "score_threshold",
+        "filter",
+        "include_provenance",
+        "tags",
+        "since",
+        "until",
+        "time_field",
+        "level",
         "telemetry",
     },
     "search": {
-        "query", "image_url", "target_ref", "context_type", "agent_id",
-        "agent_uri", "session_id", "limit", "node_limit", "score_threshold",
-        "filter", "include_provenance", "tags", "since", "until",
-        "time_field", "level", "telemetry",
+        "query",
+        "image_url",
+        "target_ref",
+        "context_type",
+        "agent_id",
+        "agent_uri",
+        "session_id",
+        "limit",
+        "node_limit",
+        "score_threshold",
+        "filter",
+        "include_provenance",
+        "tags",
+        "since",
+        "until",
+        "time_field",
+        "level",
+        "telemetry",
     },
     "grep": {"resource_ref", "pattern", "case_insensitive", "node_limit", "level_limit"},
     "glob": {"resource_ref", "pattern", "node_limit"},
     "tasks": {"task_type", "status", "limit", "resource_id_ref"},
     "watches": {"active_only", "to_ref"},
     "watch_create": {
-        "path", "to_ref", "watch_interval", "is_active", "reason", "instruction",
+        "path",
+        "to_ref",
+        "watch_interval",
+        "is_active",
+        "reason",
+        "instruction",
     },
     "task_get": set(),
     "watch_get": {"to_ref"},
@@ -291,8 +421,20 @@ OPERATION_FIELDS: dict[str, set[str]] = {
 }
 
 FORBIDDEN_FIELDS = {
-    "account", "account_id", "api_key", "authorization", "credential", "credentials",
-    "owner", "owner_id", "password", "principal_id", "secret", "token", "user", "user_id",
+    "account",
+    "account_id",
+    "api_key",
+    "authorization",
+    "credential",
+    "credentials",
+    "owner",
+    "owner_id",
+    "password",
+    "principal_id",
+    "secret",
+    "token",
+    "user",
+    "user_id",
 }
 
 
@@ -301,9 +443,19 @@ def _sensitive_key(value: object) -> bool:
     return any(
         marker in normalized
         for marker in {
-            "apikey", "authorization", "baseurl", "credential", "downloadurl",
-            "owner", "password", "principal", "privatekey", "rawstorageuri",
-            "secret", "token", "user",
+            "apikey",
+            "authorization",
+            "baseurl",
+            "credential",
+            "downloadurl",
+            "owner",
+            "password",
+            "principal",
+            "privatekey",
+            "rawstorageuri",
+            "secret",
+            "token",
+            "user",
         }
     )
 
@@ -329,6 +481,9 @@ def _resource_ref(value: Any) -> str | None:
     return normalized
 
 
+OPAQUE_RESOURCE_REF = re.compile(r"^ovr_[A-Za-z0-9_-]{32}\.[0-9a-f]{64}$")
+
+
 def _item_id(value: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,256}", value):
         raise OpenVikingError("INVALID_ITEM_ID", "Item id is invalid", 422)
@@ -340,9 +495,10 @@ class OpenVikingService:
         self.repository = repository
         self.config = config
         self._cipher = AESGCM(config.encryption_key)
-        self._ref_signing_key = config.ref_signing_key or hmac.new(
-            config.encryption_key, b"openviking-resource-ref-v1", hashlib.sha256
-        ).digest()
+        self._ref_signing_key = (
+            config.ref_signing_key
+            or hmac.new(config.encryption_key, b"openviking-resource-ref-v1", hashlib.sha256).digest()
+        )
 
     def _crypt(self, value: str, scope: str) -> bytes:
         nonce = secrets.token_bytes(12)
@@ -355,23 +511,30 @@ class OpenVikingService:
             raise OpenVikingError("OPENVIKING_PROFILE_CORRUPT", "OpenViking profile cannot be decrypted", 500) from exc
 
     def _credentials(self, profile: OpenVikingProfile) -> tuple[str, str]:
-        return self._decrypt(profile.encrypted_base_url, f"url:{profile.profile_id}"), self._decrypt(profile.encrypted_api_key, f"key:{profile.profile_id}")
+        return self._decrypt(profile.encrypted_base_url, f"url:{profile.profile_id}"), self._decrypt(
+            profile.encrypted_api_key, f"key:{profile.profile_id}"
+        )
 
     def _sign_resource_ref(self, profile: OpenVikingProfile, uri: str) -> str:
         normalized = uri.rstrip("/") + "/" if uri.endswith("/") else uri
         if not normalized.startswith("viking://"):
             raise OpenVikingError("RESOURCE_OUT_OF_SCOPE", "Resource is outside OpenViking", 403)
-        ref_id = secrets.token_urlsafe(24)
+        uri_digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+        ref_id = self.repository.get_resource_ref_by_digest(profile.profile_id, uri_digest)
+        if not ref_id:
+            candidate = secrets.token_urlsafe(24)
+            encrypted = self._crypt(normalized, f"ref:{profile.profile_id}:{candidate}")
+            ref_id = self.repository.save_resource_ref(
+                candidate,
+                profile.profile_id,
+                encrypted,
+                uri_digest,
+            )
         signature = hmac.new(
             self._ref_signing_key,
             f"{profile.profile_id}:{ref_id}".encode(),
             hashlib.sha256,
         ).hexdigest()
-        self.repository.save_resource_ref(
-            ref_id,
-            profile.profile_id,
-            self._crypt(normalized, f"ref:{profile.profile_id}:{ref_id}"),
-        )
         return f"ovr_{ref_id}.{signature}"
 
     def resource_ref(self, profile: OpenVikingProfile, uri: str) -> str:
@@ -397,12 +560,25 @@ class OpenVikingService:
                 hashlib.sha256,
             ).hexdigest()
             if not hmac.compare_digest(signature, expected):
+                owner = self.repository.get_resource_ref_owner(ref_id)
+                if owner and owner != profile.profile_id:
+                    raise OpenVikingError(
+                        "RESOURCE_REF_NOT_FOUND",
+                        "Resource reference is no longer available",
+                        404,
+                    )
                 raise ValueError
             encrypted_uri = self.repository.get_resource_ref(ref_id, profile.profile_id)
             if encrypted_uri is None:
-                raise ValueError
+                raise OpenVikingError(
+                    "RESOURCE_REF_NOT_FOUND",
+                    "Resource reference is no longer available",
+                    404,
+                )
             uri = self._decrypt(encrypted_uri, f"ref:{profile.profile_id}:{ref_id}")
-        except (ValueError, OpenVikingError, UnicodeError) as exc:
+        except OpenVikingError:
+            raise
+        except (ValueError, UnicodeError) as exc:
             raise OpenVikingError("INVALID_RESOURCE_REF", "Resource reference is invalid", 422) from exc
         if not uri.startswith("viking://"):
             raise OpenVikingError("RESOURCE_OUT_OF_SCOPE", "Resource is outside OpenViking", 403)
@@ -410,12 +586,17 @@ class OpenVikingService:
 
     def _replace_refs(self, profile: OpenVikingProfile, value: Any) -> Any:
         names = {
-            "resource_ref": "uri", "target_ref": "target_uri", "parent_ref": "parent",
-            "destination_ref": "to", "to_ref": "to_uri", "resource_id_ref": "resource_id",
+            "resource_ref": "uri",
+            "target_ref": "target_uri",
+            "parent_ref": "parent",
+            "destination_ref": "to",
+            "to_ref": "to_uri",
+            "resource_id_ref": "resource_id",
         }
         if isinstance(value, dict):
             return {
-                names.get(key, key): self.resolve_ref(profile, item) if key in names and isinstance(item, str)
+                names.get(key, key): self.resolve_ref(profile, item)
+                if key in names and isinstance(item, str)
                 else self._replace_refs(profile, item)
                 for key, item in value.items()
             }
@@ -429,24 +610,41 @@ class OpenVikingService:
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             raise OpenVikingError("INVALID_IMPORT_URL", "Imported URLs must use HTTPS", 422)
         try:
-            addresses = {item[4][0] for item in socket.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)}
+            addresses = {
+                item[4][0] for item in socket.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+            }
         except socket.gaierror as exc:
             raise OpenVikingError("INVALID_IMPORT_URL", "Import URL host cannot be resolved", 422) from exc
-        if any((ip := ipaddress.ip_address(address)).is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified for address in addresses):
+        if any(
+            (ip := ipaddress.ip_address(address)).is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+            for address in addresses
+        ):
             raise OpenVikingError("SSRF_BLOCKED", "Import URL resolves to a restricted network", 422)
 
     def _sanitize_upstream(self, profile: OpenVikingProfile, value: Any) -> Any:
-        ref_fields = {"uri": "resource_ref", "target_uri": "target_ref", "parent": "parent_ref", "to_uri": "to_ref", "root_uri": "root_ref", "resource_id": "resource_id_ref"}
+        ref_fields = {
+            "uri": "resource_ref",
+            "target_uri": "target_ref",
+            "parent": "parent_ref",
+            "to_uri": "to_ref",
+            "root_uri": "root_ref",
+            "resource_id": "resource_id_ref",
+        }
         if isinstance(value, dict):
             result: dict[str, Any] = {}
             for key, item in value.items():
                 if str(key).casefold() in FORBIDDEN_FIELDS:
                     continue
                 if key in ref_fields and isinstance(item, str) and item.startswith("viking://"):
-                    display_uri = item.replace(profile.workspace_uri, "viking://workspace/", 1)
                     result[ref_fields[key]] = self._sign_resource_ref(profile, item)
-                    result[key] = display_uri
-                    result["display_uri"] = display_uri
+                    name = item.rstrip("/").rsplit("/", 1)[-1] or "workspace"
+                    result.setdefault("name", name)
+                    result.setdefault("is_dir", item.endswith("/"))
                 elif isinstance(item, str) and item.startswith("viking://"):
                     continue
                 elif key in {"path", "source_path"} and isinstance(item, str) and item.startswith("/"):
@@ -457,40 +655,71 @@ class OpenVikingService:
         if isinstance(value, list):
             return [self._sanitize_upstream(profile, item) for item in value]
         if isinstance(value, str):
-            return value.replace(profile.workspace_uri, "viking://workspace/", 1)
+            # Do not expose upstream URI-like strings in BFF responses.
+            return re.sub(r"viking://[^\s\"'<>]+", "[opaque-resource]", value)
         return value
 
     def public(self, profile: OpenVikingProfile) -> dict[str, Any]:
         return {
-            "profile_id": profile.profile_id, "display_name": profile.display_name,
-            "workspace_uri": "viking://workspace/", "status": profile.status,
+            "profile_id": profile.profile_id,
+            "display_name": profile.display_name,
+            "workspace_uri": "opaque-workspace",
+            "status": profile.status,
             "root_resource_ref": self.resource_ref(profile, profile.workspace_uri),
-            "base_url_configured": True, "api_key_configured": True,
-            "created_at": profile.created_at, "updated_at": profile.updated_at,
+            "base_url_configured": True,
+            "api_key_configured": True,
+            "created_at": profile.created_at,
+            "updated_at": profile.updated_at,
             "api_key_masked": "••••••••" if profile.encrypted_api_key else "",
         }
 
-    def create(self, tenant_id: str, workspace_id: str, principal_id: str, display_name: str, base_url: str, api_key: str, workspace_uri: str) -> OpenVikingProfile:
+    def create(
+        self,
+        tenant_id: str,
+        workspace_id: str,
+        principal_id: str,
+        display_name: str,
+        base_url: str,
+        api_key: str,
+        workspace_uri: str,
+    ) -> OpenVikingProfile:
         self._validate_url(base_url)
         profile_id = "ov_" + secrets.token_hex(12)
         now = time.time()
-        return self.repository.save(OpenVikingProfile(
-            profile_id, tenant_id, workspace_id, principal_id, display_name.strip(),
-            self._crypt(base_url.rstrip("/"), f"url:{profile_id}"),
-            self._crypt(api_key, f"key:{profile_id}"), workspace_uri or "viking://resources/",
-            "pending", now, now,
-        ))
+        return self.repository.save(
+            OpenVikingProfile(
+                profile_id,
+                tenant_id,
+                workspace_id,
+                principal_id,
+                display_name.strip(),
+                self._crypt(base_url.rstrip("/"), f"url:{profile_id}"),
+                self._crypt(api_key, f"key:{profile_id}"),
+                workspace_uri or "viking://resources/",
+                "pending",
+                now,
+                now,
+            )
+        )
 
     def update(self, profile: OpenVikingProfile, **values: Any) -> OpenVikingProfile:
         base_url = values.get("base_url")
         if base_url:
             self._validate_url(base_url)
         profile = OpenVikingProfile(
-            profile.profile_id, profile.tenant_id, profile.workspace_id, profile.principal_id,
+            profile.profile_id,
+            profile.tenant_id,
+            profile.workspace_id,
+            profile.principal_id,
             values.get("display_name", profile.display_name),
             self._crypt(base_url.rstrip("/"), f"url:{profile.profile_id}") if base_url else profile.encrypted_base_url,
-            self._crypt(values["api_key"], f"key:{profile.profile_id}") if values.get("api_key") else profile.encrypted_api_key,
-            values.get("workspace_uri", profile.workspace_uri), "pending", profile.created_at, time.time(),
+            self._crypt(values["api_key"], f"key:{profile.profile_id}")
+            if values.get("api_key")
+            else profile.encrypted_api_key,
+            values.get("workspace_uri", profile.workspace_uri),
+            "pending",
+            profile.created_at,
+            time.time(),
         )
         return self.repository.save(profile)
 
@@ -502,26 +731,43 @@ class OpenVikingService:
         host = parsed.hostname or ""
         try:
             address = ipaddress.ip_address(socket.gethostbyname(host))
-            if (address.is_loopback or address.is_private or address.is_link_local) and os.getenv("OPENVIKING_ALLOW_LOOPBACK") != "1":
-                raise OpenVikingError("UPSTREAM_NOT_ALLOWED", "Private or loopback OpenViking endpoints are disabled", 422)
+            if (address.is_loopback or address.is_private or address.is_link_local) and os.getenv(
+                "OPENVIKING_ALLOW_LOOPBACK"
+            ) != "1":
+                raise OpenVikingError(
+                    "UPSTREAM_NOT_ALLOWED", "Private or loopback OpenViking endpoints are disabled", 422
+                )
         except socket.gaierror as exc:
             raise OpenVikingError("UPSTREAM_NOT_ALLOWED", "OpenViking host cannot be resolved", 422) from exc
 
     async def validate(self, profile: OpenVikingProfile) -> OpenVikingProfile:
         try:
-            value = await self.request(profile, "fs_stat", {"resource_ref": self.resource_ref(profile, profile.workspace_uri)})
+            value = await self.request(
+                profile, "fs_stat", {"resource_ref": self.resource_ref(profile, profile.workspace_uri)}
+            )
             if value is None:
                 raise OpenVikingError("UPSTREAM_REJECTED", "OpenViking validation failed", 502)
         except OpenVikingError:
-            self.repository.save(OpenVikingProfile(**{**profile.__dict__, "status": "error", "updated_at": time.time()}))
+            self.repository.save(
+                OpenVikingProfile(**{**profile.__dict__, "status": "error", "updated_at": time.time()})
+            )
             raise
         except httpx.HTTPError as exc:
-            self.repository.save(OpenVikingProfile(**{**profile.__dict__, "status": "error", "updated_at": time.time()}))
+            self.repository.save(
+                OpenVikingProfile(**{**profile.__dict__, "status": "error", "updated_at": time.time()})
+            )
             raise OpenVikingError("UPSTREAM_UNREACHABLE", "OpenViking endpoint is unreachable", 502) from exc
         updated = OpenVikingProfile(**{**profile.__dict__, "status": "ready", "updated_at": time.time()})
         return self.repository.save(updated)
 
-    async def request(self, profile: OpenVikingProfile, operation: str, payload: dict[str, Any], item_id: str | None = None, idempotency_key: str | None = None) -> Any:
+    async def request(
+        self,
+        profile: OpenVikingProfile,
+        operation: str,
+        payload: dict[str, Any],
+        item_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
         operations = ITEM_OPERATIONS if item_id is not None else OPERATIONS
         if operation not in operations:
             raise OpenVikingError("UNSUPPORTED_OPERATION", "OpenViking operation is not allowed", 400)
@@ -533,7 +779,11 @@ class OpenVikingService:
             unknown = set(clean) - allowed_fields
             if unknown:
                 raise OpenVikingError("INVALID_OPERATION_PAYLOAD", "Unsupported OpenViking operation field", 422)
-        if operation == "resource_import" and isinstance(clean.get("path"), str) and clean["path"].startswith(("http://", "https://")):
+        if (
+            operation == "resource_import"
+            and isinstance(clean.get("path"), str)
+            and clean["path"].startswith(("http://", "https://"))
+        ):
             self.validate_import_url(clean["path"])
         ref_keys = ("resource_ref", "target_ref", "parent_ref", "destination_ref")
         if item_id is None:
@@ -549,11 +799,22 @@ class OpenVikingService:
                 path += "/trigger"
             elif operation == "session_commit":
                 path += "/commit"
-        request_key = idempotency_key or hashlib.sha256(
-            json.dumps([profile.profile_id, operation, item_id, clean], sort_keys=True).encode()
-        ).hexdigest()
+        request_key = (
+            idempotency_key
+            or hashlib.sha256(
+                json.dumps([profile.profile_id, operation, item_id, clean], sort_keys=True).encode()
+            ).hexdigest()
+        )
         cache_key = hashlib.sha256(f"{profile.tenant_id}:{profile.workspace_id}:{request_key}".encode()).hexdigest()
-        if operation in {"content_write", "resource_import", "watch_create", "watch_update", "watch_delete", "watch_trigger", "session_commit"}:
+        if operation in {
+            "content_write",
+            "resource_import",
+            "watch_create",
+            "watch_update",
+            "watch_delete",
+            "watch_trigger",
+            "session_commit",
+        }:
             cached = self.repository.get_idempotent(cache_key)
             if cached is not None:
                 return cached
@@ -567,7 +828,11 @@ class OpenVikingService:
             async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
                 response = await client.request(method, f"{base_url}{path}", **kwargs)
         except httpx.HTTPError as exc:
-            raise OpenVikingError("OPENVIKING_TIMEOUT" if isinstance(exc, httpx.TimeoutException) else "OPENVIKING_UNAVAILABLE", "OpenViking endpoint is unavailable", 504 if isinstance(exc, httpx.TimeoutException) else 502) from exc
+            raise OpenVikingError(
+                "OPENVIKING_TIMEOUT" if isinstance(exc, httpx.TimeoutException) else "OPENVIKING_UNAVAILABLE",
+                "OpenViking endpoint is unavailable",
+                504 if isinstance(exc, httpx.TimeoutException) else 502,
+            ) from exc
         if response.status_code >= 400:
             if response.status_code in {401, 403}:
                 raise OpenVikingError("OPENVIKING_AUTH_FAILED", "OpenViking credentials were rejected", 401)
@@ -586,10 +851,16 @@ class OpenVikingService:
             if isinstance(value, dict):
                 task_items = value.get("result", value.get("items"))
             if isinstance(task_items, list):
-                self.repository.save_tasks(
-                    profile, [item for item in task_items if isinstance(item, dict)]
-                )
-        if operation in {"content_write", "resource_import", "watch_create", "watch_update", "watch_delete", "watch_trigger", "session_commit"}:
+                self.repository.save_tasks(profile, [item for item in task_items if isinstance(item, dict)])
+        if operation in {
+            "content_write",
+            "resource_import",
+            "watch_create",
+            "watch_update",
+            "watch_delete",
+            "watch_trigger",
+            "session_commit",
+        }:
             self.repository.save_idempotent(cache_key, value)
         return value
 
@@ -635,7 +906,11 @@ class OpenVikingService:
                     headers={"X-API-Key": api_key, "Accept": "application/json"},
                 )
         except httpx.HTTPError as exc:
-            raise OpenVikingError("OPENVIKING_TIMEOUT" if isinstance(exc, httpx.TimeoutException) else "OPENVIKING_UNAVAILABLE", "OpenViking upload failed", 504 if isinstance(exc, httpx.TimeoutException) else 502) from exc
+            raise OpenVikingError(
+                "OPENVIKING_TIMEOUT" if isinstance(exc, httpx.TimeoutException) else "OPENVIKING_UNAVAILABLE",
+                "OpenViking upload failed",
+                504 if isinstance(exc, httpx.TimeoutException) else 502,
+            ) from exc
         if response.status_code >= 400:
             if response.status_code in {401, 403}:
                 raise OpenVikingError("OPENVIKING_AUTH_FAILED", "OpenViking credentials were rejected", 401)
@@ -645,10 +920,14 @@ class OpenVikingService:
         try:
             result = response.json()
         except ValueError as exc:
-            raise OpenVikingError("OPENVIKING_INVALID_RESPONSE", "OpenViking upload returned invalid JSON", 502) from exc
+            raise OpenVikingError(
+                "OPENVIKING_INVALID_RESPONSE", "OpenViking upload returned invalid JSON", 502
+            ) from exc
         temp = result.get("result", {}).get("temp_file_id") if isinstance(result, dict) else None
         if not isinstance(temp, str) or not temp:
-            raise OpenVikingError("OPENVIKING_INVALID_RESPONSE", "OpenViking upload did not return a temporary file id", 502)
+            raise OpenVikingError(
+                "OPENVIKING_INVALID_RESPONSE", "OpenViking upload did not return a temporary file id", 502
+            )
         return result
 
     async def resolve_resource(self, profile: OpenVikingProfile, resource_ref: str) -> dict[str, Any]:
@@ -669,9 +948,13 @@ class OpenVikingService:
             "detail": detail,
         }
 
-    async def read_resource(self, profile: OpenVikingProfile, resource_ref: str, offset: int = 0, limit: int = 1_000_000) -> Any:
+    async def read_resource(
+        self, profile: OpenVikingProfile, resource_ref: str, offset: int = 0, limit: int = 1_000_000
+    ) -> Any:
         self.resolve_ref(profile, resource_ref)
-        return await self.request(profile, "content_read", {"resource_ref": resource_ref, "offset": offset, "limit": limit, "raw": True})
+        return await self.request(
+            profile, "content_read", {"resource_ref": resource_ref, "offset": offset, "limit": limit, "raw": True}
+        )
 
     async def import_connection_resource(
         self,
@@ -685,9 +968,15 @@ class OpenVikingService:
         content = json.dumps(_sanitize(document), ensure_ascii=False, indent=2)
         return await self.import_uploaded(profile, filename, "application/json", content.encode(), parent_ref)
 
-    async def import_uploaded(self, profile: OpenVikingProfile, filename: str, content_type: str, content: bytes, parent_ref: str) -> Any:
+    async def import_uploaded(
+        self, profile: OpenVikingProfile, filename: str, content_type: str, content: bytes, parent_ref: str
+    ) -> Any:
         uploaded = await self.upload(profile, filename, content_type, content, parent_ref)
-        return await self.request(profile, "resource_import", {"temp_file_id": uploaded["result"]["temp_file_id"], "parent_ref": parent_ref, "wait": False})
+        return await self.request(
+            profile,
+            "resource_import",
+            {"temp_file_id": uploaded["result"]["temp_file_id"], "parent_ref": parent_ref, "wait": False},
+        )
 
     async def import_text(self, profile: OpenVikingProfile, filename: str, content: str, parent_ref: str) -> Any:
         if not SAFE_RESOURCE_NAME.fullmatch(filename) or not filename.lower().endswith((".md", ".txt")):

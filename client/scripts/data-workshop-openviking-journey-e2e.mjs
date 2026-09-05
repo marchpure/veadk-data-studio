@@ -49,7 +49,7 @@ const screenshot = async name => {
   return target
 }
 
-const unsafeUrlMarkers = ['viking://', 'OPENVIKING_E2E_API_KEY', 'volc-', 'skill_prompt']
+const unsafeUrlMarkers = ['viking://', 'OPENVIKING_E2E_API_KEY', 'volc-', 'skill_prompt', 'Build_a_Data-Agent']
 
 await page.goto(`${baseUrl}/kb`, { waitUntil: 'networkidle' })
 await page.getByText(profileName).first().waitFor()
@@ -83,6 +83,9 @@ if (!/^ovr_[A-Za-z0-9_-]+\.[0-9a-f]{64}$/.test(resourceRef)) {
 }
 if (unsafeUrlMarkers.some(marker => handoffUrl.includes(marker))) {
   throw new Error(`Sensitive data appeared in handoff URL: ${handoffUrl}`)
+}
+if (handoffUrl.includes(leafName)) {
+  throw new Error(`Resource filename appeared in handoff URL: ${handoffUrl}`)
 }
 
 await page.getByText('Knowledge ResourceRefs 1', { exact: true }).waitFor()
@@ -154,7 +157,7 @@ const evidence = {
   ok: true,
   preview_url: baseUrl,
   profile_id: profileId,
-  leaf_name: leafName,
+  display_name_visible: true,
   handoff_url_safe: true,
   resource_ref_opaque: true,
   imported_metadata_visible: true,

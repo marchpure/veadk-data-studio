@@ -1,6 +1,6 @@
 {
   "workstream": "DWV1 I4-A W6.1 + W7.1 Integration Owner",
-  "status": "FROZEN_V3",
+  "status": "BLOCKED_MISSING_APPROVED_I4A_DEPLOYMENT_PREREQUISITES",
   "repository": "https://github.com/marchpure/veadk-data-studio.git",
   "branch": "integration/dwv1-i4a-w61-w71-v3",
   "worktree": "/Users/bytedance/worktrees/dwv1-i4a-w61-w71-v3",
@@ -27,7 +27,7 @@
       "data-workshop router once under /api",
       "skill workbench router once under /api"
     ],
-    "migration_head": "add_dw_skill_workbench",
+    "migration_head": "add_dw_skill_workbench (includes i4a_delegations)",
     "w5_boundary": "W5 transport seam retained; no cloud generation integration added"
   },
   "cross_module_journey": {
@@ -38,14 +38,18 @@
     "persist": "W7 create Skill/session BFF stores the ref in formal tenant/owner-scoped Session context",
     "restore": "Session context is loaded from the database after refresh",
     "remove": "PATCH /api/v1/sessions/{session_id}/context removes the ref in the same context store",
-    "fail_closed": "W5 invocation revalidates opaque refs against the current tenant/owner-scoped W6 profile and emits blocked_auth on revocation/deletion/cross-tenant scope"
+    "fail_closed": "W5 invocation revalidates opaque refs against the current tenant/owner-scoped W6 profile and emits blocked_auth on revocation/deletion/cross-tenant scope",
+    "resource_reference_security": "Random opaque server ID with HMAC profile binding; encrypted profile-store mapping; stable per-resource reuse; concurrent-safe persistence; revoked/cross-profile refs fail closed."
   },
   "security": {
     "browser_api_key": false,
     "browser_upstream_uri": false,
     "browser_full_content_in_url": false,
     "w5_transport_changed": false,
-    "resource_reference": "opaque profile-scoped ovr_... signed capability"
+    "resource_reference": "opaque profile-scoped ovr_... signed capability",
+    "browser_display_uri": false,
+    "browser_filename_in_url": false
+    ,"delegation": "opaque dlg_ ref; encrypted short-lived token; tenant/audience/issuer/UserPool bound; single-use; service-authenticated resolve only"
   },
   "browser_evidence": {
     "openviking_e2e": "passed: profile, resource preview, retrieval, tasks, watches, handoff, refresh, responsive screenshots",
@@ -70,7 +74,7 @@
   },
   "verification": {
     "python_compile": "passed",
-    "backend_focused": "101 passed",
+    "backend_focused": "62 passed (W6/W7/OpenViking/Broker/migration)",
     "openviking_frontend": "31 files, 131 tests passed",
     "frontend_typecheck": "passed",
     "frontend_production_build": "passed with existing donor CSS/chunk warnings",
@@ -78,10 +82,19 @@
     "migration_fresh_upgrade_downgrade": "passed: fresh upgrade, full downgrade, upgrade, and add_feishu_oauth_flows -> add_dw_skill_workbench",
     "bff_restart_persistence": "passed: encrypted Profile/ResourceRef and W7 Skill/Session context refs restored after fresh repository/database sessions",
     "revocation_fail_closed": "passed: revoked ResourceRef sets blocked_auth and never invokes W5 adapter",
-    "alembic_heads": [
-      "add_dw_skill_workbench"
-    ],
+    "alembic_heads": ["add_dw_skill_workbench"],
+    "delegation_broker": "implemented; 8 security tests passed; external UserPool JWKS bridge intentionally required and absent",
+    "https_deployment": "blocked: no approved I4-A KMS/service credential, shared PostgreSQL Profile Store, or dedicated VeFaaS/APIG deployment reference; W4.1 resources untouched",
+    "blocker_root_cause": "No approved I4-A deployment references are available. Creating or reusing a secret/database/gateway would violate scope and secret policy; local SQLite/127.0.0.1 cannot be represented as AgentKit HTTPS.",
+    "pending_w41": "dynamic subject/groups A/B binding requires W4.1 frozen identity bridge",
     "git_diff_check": "passed",
-    "remote_inputs": "local SHA matched origin SHA for both W6.1 and W7.1; both source worktrees clean before integration"
+    "remote_inputs": "local SHA matched origin SHA for both W6.1 and W7.1; both source worktrees clean before integration",
+    "backend_full": "Repository-wide run remains blocked by pre-existing async-test collection/config failures; I4-A focused gate passed 64",
+    "frontend_typecheck_build": "passed",
+    "frontend_lint": "0 errors, existing warnings",
+    "ruff_integration_owned": "passed",
+    "kb_to_skill_e2e": "passed with real hosted profile; opaque URL, safe display metadata, session reload, PATCH removal, BLOCKED_CONFIG, no Artifact/download",
+    "openviking_hosted_browser_e2e": "passed",
+    "secret_scan": "passed; no credential values or reversible ResourceRef payloads in evidence"
   }
 }

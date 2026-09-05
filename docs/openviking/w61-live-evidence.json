@@ -3,10 +3,9 @@
   "frozen_input_sha": "db3b1f9da5ef045d1d19901e187e5a07535737c3",
   "integrated_w6_sha": "1ae0abf6a9455d6419dd875bd276b0737fa64f42",
   "provider": "hosted_openviking",
-  "base_url": "https://api.vikingdb.cn-beijing.volces.com/openviking",
+  "provider_endpoint": "configured hosted OpenViking endpoint",
   "secret_sources": [
-    "OPENVIKING_E2E_API_KEY",
-    "OPENVIKING_PROFILE_ENCRYPTION_KEY"
+    "approved server-side secret references"
   ],
   "profile": {
     "profile_id": "ov_390e70a35beca11eb4eb7d5f",
@@ -26,27 +25,21 @@
       "profile_id": "ov_390e70a35beca11eb4eb7d5f",
       "task_id": "4153f482-a10d-454a-b99d-c48289869e86",
       "status": "completed",
-      "parent": "viking://workspace/",
-      "resource_ref": "ovr_<opaque-ref-1>",
-      "display_uri": "viking://workspace/w61-live-note"
+      "resource_ref": "ovr_<opaque-ref-1>"
     },
     {
       "type": "url",
       "profile_id": "ov_390e70a35beca11eb4eb7d5f",
       "task_id": "eb8fc559-39ef-4201-a751-7b6cee77ba2b",
       "status": "completed",
-      "parent": "viking://workspace/",
-      "resource_ref": "ovr_<opaque-ref-2>",
-      "display_uri": "viking://workspace/W6.1_Example"
+      "resource_ref": "ovr_<opaque-ref-2>"
     },
     {
       "type": "markdown_file",
       "profile_id": "ov_390e70a35beca11eb4eb7d5f",
       "task_id": "4e2db45c-4d3b-4c23-baf7-297a7a9e1937",
       "status": "completed",
-      "parent": "viking://workspace/",
-      "resource_ref": "ovr_<opaque-ref-3>",
-      "display_uri": "viking://workspace/skill_prompt"
+      "resource_ref": "ovr_<opaque-ref-3>"
     },
     {
       "type": "connection_resource",
@@ -54,9 +47,7 @@
       "source_resource_id": "e5286ca8-9f04-4136-87d4-2b89e16fd6f3",
       "task_id": "4e355de8-3d76-4b55-b324-6bcc83115bb1",
       "status": "completed",
-      "parent": "viking://workspace/",
-      "resource_ref": "ovr_<opaque-ref-4>",
-      "display_uri": "viking://workspace/w61-connection-source"
+      "resource_ref": "ovr_<opaque-ref-4>"
     }
   ],
   "workspace": {
@@ -126,7 +117,8 @@
     "api_key_in_browser": false,
     "api_key_in_repository_evidence": false,
     "api_key_in_plaintext_database_columns": false,
-    "recursive_response_redaction": true
+    "recursive_response_redaction": true,
+    "upstream_uri_in_repository_evidence": false
   },
   "verification": {
     "backend_tests": "26 passed",

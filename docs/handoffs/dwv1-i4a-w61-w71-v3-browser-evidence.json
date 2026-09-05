@@ -1,8 +1,8 @@
 {
   "ok": true,
   "preview_url": "http://127.0.0.1:4184",
-  "profile_id": "ov_20d57bd006f300c4d9ff56d1",
-  "leaf_name": "Build_a_Data-Agent_Skill_for_This_Codebase.md",
+  "profile_id": "ov_647a56c8bde92eb51fc2aac2",
+  "display_name_visible": true,
   "handoff_url_safe": true,
   "resource_ref_opaque": true,
   "imported_metadata_visible": true,
@@ -18,7 +18,7 @@
       "390x844": "/Users/bytedance/worktrees/dwv1-i4a-w61-w71-v3/docs/handoffs/screenshots/dwv1-i4a-w61-w71-v3/skill-imported-390x844.png"
     }
   },
-  "created_session_url": "http://127.0.0.1:4184/skill?skillId=05cc485c-d9b7-45e8-a7a2-979ce76e3115&sessionId=c355b2c7-8a9b-4298-9a3c-60c06de4e90c",
+  "created_session_url": "http://127.0.0.1:4184/skill?skillId=b74f988c-008f-4a9a-a823-fa8892b16929&sessionId=5ca893ca-bf8f-4d02-bfe9-257e09302519",
   "restored_after_reload": true,
   "primary_navigation": [
     "首页",

@@ -18,6 +18,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+function resourceRefFromItem(item: Record<string, unknown>): string | undefined {
+  const candidate = item.resource_ref ?? item.resourceRef ?? item.ref
+  return typeof candidate === 'string' && /^ovr_[A-Za-z0-9_-]+\.[0-9a-f]{64}$/.test(candidate)
+    ? candidate
+    : undefined
+}
+
 const SIZE_REGEX = /^([\d.]+)\s*([kmgtp]?i?b?)$/
 
 const SIZE_MULTIPLIERS: Record<string, number> = {
@@ -345,6 +352,7 @@ export function normalizeFsEntry(
     const normalizedUri = isDir
       ? normalizeDirUri(joinedUri)
       : normalizeFileUri(joinedUri)
+    const resourceRef = resourceRefFromItem(item)
 
     const sizeRaw = pickFirstNonEmpty([
       item.size,
@@ -363,6 +371,7 @@ export function normalizeFsEntry(
 
     return {
       uri: normalizedUri,
+      resourceRef,
       name: String(
         pickFirstNonEmpty([item.name, fileNameFromUri(normalizedUri)]),
       ),

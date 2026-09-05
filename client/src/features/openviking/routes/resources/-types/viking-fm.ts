@@ -9,6 +9,7 @@ export type VikingFileType =
 
 export interface VikingFsEntry {
   uri: string
+  resourceRef?: string
   name: string
   isDir: boolean
   size: string

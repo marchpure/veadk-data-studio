@@ -63,6 +63,7 @@ from server.routers import datasets as datasets_router  # Dataset management
 from server.routers import (
     datasources as datasources_router,
 )  # Unified datasources (connections + datasets)
+from server.routers import delegations as delegations_router
 from server.routers import exports as exports_router
 from server.routers import (
     file_upload as file_upload_router,
@@ -636,6 +637,7 @@ app.mount("/api/mcp", mcp_app)
 async def redirect_root_mcp():
     return RedirectResponse(url="/api/mcp/", status_code=307)
 
+
 if not is_self_hosted():
     app.include_router(waitlist_router.router, prefix="/api", tags=["waitlist"])
 
@@ -650,6 +652,7 @@ app.include_router(databricks_oauth_router.router, prefix="/api", tags=["databri
 
 app.include_router(local_repos_router.router, prefix="/api", tags=["local-repos"])
 app.include_router(openviking_router.router, prefix="/api", tags=["openviking"])
+app.include_router(delegations_router.router, tags=["internal-delegations"])
 
 app.include_router(auth_router.router, prefix="/api", tags=["auth"])
 

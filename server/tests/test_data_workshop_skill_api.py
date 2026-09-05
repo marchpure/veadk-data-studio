@@ -235,7 +235,9 @@ async def test_session_context_update_persists_and_removes_knowledge_ref(skill_a
 
 
 @pytest.mark.asyncio
-async def test_revoked_openviking_ref_blocks_w5_before_adapter_invocation(skill_app, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_revoked_openviking_ref_blocks_w5_before_adapter_invocation(
+    skill_app, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client, factory, _, identities = skill_app
     tenant_id, owner_id, _, _ = identities
 
@@ -324,7 +326,7 @@ async def test_w6_provider_accepts_only_openviking_resource_refs(skill_app, monk
     async def provider(**_kwargs):
         return [
             {
-                "id": "viking://resources/approved",
+                "id": "ovr_abcdefghijklmnopqrstuvwxyz123456.0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                 "kind": "knowledge_resource",
                 "name": "已授权知识",
                 "source": "OpenViking ResourceRef",
@@ -336,7 +338,9 @@ async def test_w6_provider_accepts_only_openviking_resource_refs(skill_app, monk
     monkeypatch.setenv("W6_RESOURCE_REF_PROVIDER", "w6_provider:list_refs")
     async with factory() as db:
         refs = await service.visible_knowledge_refs(db, tenant_id, owner_id)
-    assert [item["id"] for item in refs] == ["viking://resources/approved"]
+    assert [item["id"] for item in refs] == [
+        "ovr_abcdefghijklmnopqrstuvwxyz123456.0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    ]
 
     async def invalid_provider(**_kwargs):
         return [
@@ -394,7 +398,9 @@ async def test_cancel_and_retry_keep_the_same_session(skill_app) -> None:
     )
     assert retried.status_code == 202
     assert retried.json()["data"]["id"] == session_id
-    assert retried.json()["data"]["status"] == "running"
+    # Local fixtures have no verified UserPool subject/token; production must
+    # fail closed instead of substituting the local UUID as a delegated sub.
+    assert retried.json()["data"]["status"] == "blocked_auth"
     repeated = await client.post(
         f"/api/v1/sessions/{session_id}/retry",
         json={"client_invocation_id": "retry-1"},

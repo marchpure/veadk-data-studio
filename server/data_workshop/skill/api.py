@@ -36,9 +36,11 @@ from server.data_workshop.skill.service import (
     run_invocation,
     session_payload,
     skill_payload,
+    status_from_error,
     validate_requested_refs,
     visible_catalog,
 )
+from server.data_workshop.skill.w5_adapter import W5AdapterError
 from server.db.session import AsyncSessionFactory, get_async_session
 from server.schemas.standard_response import success_response
 
@@ -324,8 +326,25 @@ async def invoke(
     await db.refresh(item)
     await db.refresh(skill)
     try:
-        auth_ref = delegated_auth_ref(auth)
-    except Exception as exc:
+        auth_ref = await delegated_auth_ref(auth, db)
+    except W5AdapterError as exc:
+        item.status = status_from_error(exc)
+        append_json(
+            item,
+            "events_json",
+            {
+                "id": str(uuid4()),
+                "type": item.status,
+                "code": exc.code,
+                "message": "委托身份不可用。" if exc.code == "BLOCKED_AUTH" else "委托身份尚未配置或不可用。",
+                "at": now_iso(),
+            },
+        )
+        await db.commit()
+        await db.refresh(item)
+        await db.refresh(skill)
+        return success_response(data=session_payload(item, skill), message="Invocation blocked")
+    except Exception:
         item.status = "blocked_config"
         append_json(
             item,
@@ -334,7 +353,7 @@ async def invoke(
                 "id": str(uuid4()),
                 "type": "blocked_config",
                 "code": "BLOCKED_CONFIG",
-                "message": str(exc),
+                "message": "委托身份尚未配置或不可用。",
                 "at": now_iso(),
             },
         )
@@ -459,8 +478,25 @@ async def retry(
     await db.refresh(item)
     await db.refresh(skill)
     try:
-        auth_ref = delegated_auth_ref(auth)
-    except Exception as exc:
+        auth_ref = await delegated_auth_ref(auth, db)
+    except W5AdapterError as exc:
+        item.status = status_from_error(exc)
+        append_json(
+            item,
+            "events_json",
+            {
+                "id": str(uuid4()),
+                "type": item.status,
+                "code": exc.code,
+                "message": "委托身份不可用。" if exc.code == "BLOCKED_AUTH" else "委托身份尚未配置或不可用。",
+                "at": now_iso(),
+            },
+        )
+        await db.commit()
+        await db.refresh(item)
+        await db.refresh(skill)
+        return success_response(data=session_payload(item, skill), message="Invocation blocked")
+    except Exception:
         item.status = "blocked_config"
         append_json(
             item,
@@ -469,7 +505,7 @@ async def retry(
                 "id": str(uuid4()),
                 "type": "blocked_config",
                 "code": "BLOCKED_CONFIG",
-                "message": str(exc),
+                "message": "委托身份尚未配置或不可用。",
                 "at": now_iso(),
             },
         )

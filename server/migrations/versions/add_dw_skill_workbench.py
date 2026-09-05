@@ -96,8 +96,34 @@ def upgrade() -> None:
         ["tenant_id", "owner_id", "skill_id", "created_at"],
     )
 
+    op.create_table(
+        "i4a_delegations",
+        sa.Column("id", GUID(), nullable=False),
+        sa.Column("ref_hash", sa.String(64), nullable=False),
+        sa.Column("tenant_id", GUID(), nullable=False),
+        sa.Column("subject", sa.String(255), nullable=False),
+        sa.Column("groups", sa.JSON(), nullable=False),
+        sa.Column("audience", sa.String(255), nullable=False),
+        sa.Column("issuer", sa.Text(), nullable=False),
+        sa.Column("user_pool", sa.String(255), nullable=False),
+        sa.Column("encrypted_access_token", sa.Text(), nullable=False),
+        sa.Column("expires_at", sa.TIMESTAMP(timezone=True), nullable=False),
+        sa.Column("max_uses", sa.Integer(), nullable=False, server_default="1"),
+        sa.Column("uses", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("revoked_at", sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("ref_hash", name="uq_i4a_delegations_ref_hash"),
+    )
+    op.create_index("ix_i4a_delegations_tenant_id", "i4a_delegations", ["tenant_id"])
+    op.create_index("ix_i4a_delegations_expires_at", "i4a_delegations", ["expires_at"])
+
 
 def downgrade() -> None:
+    op.drop_index("ix_i4a_delegations_expires_at", table_name="i4a_delegations")
+    op.drop_index("ix_i4a_delegations_tenant_id", table_name="i4a_delegations")
+    op.drop_table("i4a_delegations")
     op.drop_index("ix_dw_skill_revisions_scope", table_name="data_workshop_skill_revisions")
     op.drop_table("data_workshop_skill_revisions")
     op.drop_index("ix_data_workshop_skill_sessions_status", table_name="data_workshop_skill_sessions")

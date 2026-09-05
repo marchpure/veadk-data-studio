@@ -12,7 +12,7 @@ from collections.abc import Callable
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,11 +43,26 @@ class AuthContext:
     - scopes: List of permission scopes the user has
     """
 
-    def __init__(self, user: User, tenant_id: UUID, role: TenantRole, scopes: list[str]):
+    def __init__(
+        self,
+        user: User,
+        tenant_id: UUID,
+        role: TenantRole,
+        scopes: list[str],
+        *,
+        external_subject: str | None = None,
+        external_groups: list[str] | None = None,
+        access_token: str | None = None,
+    ):
         self.user = user
         self.tenant_id = tenant_id
         self.role = role
         self.scopes = scopes
+        # These fields are populated only by an approved external identity
+        # bridge. Local UUIDs are intentionally never used as UserPool subs.
+        self.external_subject = external_subject
+        self.external_groups = tuple(external_groups or ())
+        self.access_token = access_token
 
     def has_scope(self, scope: Scope | str) -> bool:
         """Check if user has a specific scope."""
@@ -72,6 +87,45 @@ class AuthContext:
     def is_viewer(self) -> bool:
         """Check if user is a viewer."""
         return self.role == TenantRole.VIEWER
+
+
+def _verified_external_identity(request: Request) -> tuple[str, list[str], str] | None:
+    """Read identity only from a cryptographically verified bridge.
+
+    The BFF's local FastAPI-Users JWT is not a UserPool access token.  Decoding
+    its payload (even with issuer/audience checks) would allow an attacker to
+    mint claims and impersonate a UserPool subject.  An approved identity
+    middleware must verify the upstream token with JWKS and place the resulting
+    values in ``request.state.i4a_external_identity``.  Until that bridge is
+    installed, delegation issuance remains fail-closed (BLOCKED_AUTH).
+    """
+    identity = getattr(request.state, "i4a_external_identity", None)
+    if not isinstance(identity, dict):
+        return None
+    subject = identity.get("subject")
+    groups = identity.get("groups")
+    token = identity.get("access_token")
+    issuer = identity.get("issuer")
+    user_pool = identity.get("user_pool")
+    expected_issuer = os.getenv("I4A_DELEGATION_ISSUER", "").strip()
+    expected_pool = os.getenv("I4A_DELEGATION_USER_POOL", "").strip()
+    required_group = os.getenv("I4A_DELEGATION_GROUP_UID", "").strip()
+    if (
+        not isinstance(subject, str)
+        or not subject
+        or not isinstance(groups, (list, tuple))
+        or not all(isinstance(group, str) and group for group in groups)
+        or not isinstance(token, str)
+        or not token
+        or not expected_issuer
+        or issuer != expected_issuer
+        or not expected_pool
+        or user_pool != expected_pool
+        or not required_group
+        or required_group not in groups
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="External identity unavailable")
+    return subject, list(groups), token
 
 
 async def _get_auth_context_local(
@@ -297,11 +351,18 @@ async def get_auth_context_hosted(
     user: User = Depends(current_verified_user),
     session: AsyncSession = Depends(get_async_session),
     x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
+    request: Request | None = None,
 ) -> AuthContext:
     """
     Auth context dependency for hosted mode. Requires JWT authentication.
     """
-    return await _get_auth_context_hosted(user, session, x_tenant_id)
+    auth = await _get_auth_context_hosted(user, session, x_tenant_id)
+    if request is None:
+        return auth
+    external = _verified_external_identity(request)
+    if external:
+        auth.external_subject, auth.external_groups, auth.access_token = external
+    return auth
 
 
 # Create the appropriate dependency based on mode at import time

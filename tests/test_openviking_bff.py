@@ -28,7 +28,9 @@ def service(tmp_path, monkeypatch):
 
 def test_profile_secret_is_encrypted_and_masked(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    profile = value.create(
+        "tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
     public = value.public(profile)
     assert public["api_key_masked"]
     assert "secret-key" not in str(public)
@@ -39,24 +41,31 @@ def test_profile_secret_is_encrypted_and_masked(tmp_path, monkeypatch):
 
 def test_operation_allowlist_rejects_untrusted_operation(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    profile = value.create(
+        "tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
     with pytest.raises(OpenVikingError, match="not allowed"):
         asyncio.run(value.request(profile, "arbitrary", {}))
 
 
 def test_refs_are_validated_and_nested_secrets_are_redacted(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    profile = value.create(
+        "tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
     with pytest.raises(OpenVikingError, match="signed Viking"):
         asyncio.run(value.request(profile, "fs_stat", {"resource_ref": "https://outside.example/item"}))
     assert _sanitize({"nested": {"token": "secret", "ok": 1}, "items": [{"api_key": "secret"}]}) == {
-        "nested": {"ok": 1}, "items": [{}]
+        "nested": {"ok": 1},
+        "items": [{}],
     }
 
 
 def test_operation_payload_allowlist_and_idempotency_store(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    profile = value.create(
+        "tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
     with pytest.raises(OpenVikingError, match="Unsupported"):
         asyncio.run(value.request(profile, "fs_stat", {"resource_ref": "viking://resources/", "arbitrary": True}))
     value.repository.save_idempotent("k", {"status": "submitted"})
@@ -65,7 +74,9 @@ def test_operation_payload_allowlist_and_idempotency_store(tmp_path, monkeypatch
 
 def test_donor_retrieval_fields_are_forwarded(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    profile = value.create(
+        "tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
     calls = []
 
     def handler(request):
@@ -91,7 +102,9 @@ def test_donor_retrieval_fields_are_forwarded(tmp_path, monkeypatch):
 
 def test_profile_repository_is_tenant_and_owner_scoped(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner-a", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    profile = value.create(
+        "tenant", "workspace", "owner-a", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
     assert value.repository.get(profile.profile_id, "tenant", "workspace", "owner-a") == profile
     assert value.repository.get(profile.profile_id, "tenant", "workspace", "owner-b") is None
     assert value.repository.get(profile.profile_id, "other", "workspace", "owner-a") is None
@@ -100,15 +113,21 @@ def test_profile_repository_is_tenant_and_owner_scoped(tmp_path, monkeypatch):
 
 def test_resource_refs_are_opaque_and_profile_scoped(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    first = value.create("tenant", "workspace", "owner", "First", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
-    second = value.create("tenant", "workspace", "owner", "Second", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    first = value.create(
+        "tenant", "workspace", "owner", "First", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
+    second = value.create(
+        "tenant", "workspace", "owner", "Second", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
     ref = value.resource_ref(first, "viking://resources/docs/readme.md")
     assert ref.startswith("ovr_")
     assert "viking://resources" not in ref
     assert "readme" not in ref
+    assert value.resource_ref(first, "viking://resources/docs/readme.md") == ref
     assert value.resolve_ref(first, ref) == "viking://resources/docs/readme.md"
-    with pytest.raises(OpenVikingError, match="invalid"):
+    with pytest.raises(OpenVikingError, match="no longer available") as scoped:
         value.resolve_ref(second, ref)
+    assert scoped.value.status_code == 404
     with pytest.raises(OpenVikingError, match="invalid"):
         value.resolve_ref(first, ref[:-1] + ("0" if ref[-1] != "0" else "1"))
 
@@ -135,25 +154,38 @@ def test_resource_refs_survive_bff_repository_restart(tmp_path, monkeypatch):
 
 def test_upstream_refs_and_sensitive_fields_are_recursively_sanitized(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
-    safe = value._sanitize_upstream(profile, {
-        "result": [{"uri": "viking://resources/docs/readme.md", "owner": "hidden"}],
-        "nested": {"token": "hidden", "path": "/tmp/upstream-secret/file.txt"},
-    })
+    profile = value.create(
+        "tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
+    safe = value._sanitize_upstream(
+        profile,
+        {
+            "result": [{"uri": "viking://resources/docs/readme.md", "owner": "hidden"}],
+            "nested": {"token": "hidden", "path": "/tmp/upstream-secret/file.txt"},
+        },
+    )
     serialized = json.dumps(safe)
     assert safe["result"][0]["resource_ref"].startswith("ovr_")
-    assert safe["result"][0]["uri"] == "viking://workspace/docs/readme.md"
+    assert safe["result"][0]["name"] == "readme.md"
+    assert safe["result"][0]["is_dir"] is False
+    assert "uri" not in safe["result"][0]
+    assert "display_uri" not in serialized
     assert safe["nested"]["path"] == "file.txt"
     assert all(word not in serialized for word in ("hidden", "/tmp/upstream-secret"))
 
 
 def test_upstream_global_context_is_an_opaque_profile_capability(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
-    safe = value._sanitize_upstream(profile, {
-        "uri": "viking://user/memories/preference-1",
-        "abstract": "Preferred output format",
-    })
+    profile = value.create(
+        "tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
+    safe = value._sanitize_upstream(
+        profile,
+        {
+            "uri": "viking://user/memories/preference-1",
+            "abstract": "Preferred output format",
+        },
+    )
 
     assert safe["resource_ref"].startswith("ovr_")
     assert value.resolve_ref(profile, safe["resource_ref"]) == "viking://user/memories/preference-1"
@@ -163,20 +195,27 @@ def test_upstream_global_context_is_an_opaque_profile_capability(tmp_path, monke
 
 def test_watch_and_task_display_uris_keep_their_original_field(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
-    safe = value._sanitize_upstream(profile, {
-        "to_uri": "viking://resources/watch",
-        "resource_id": "viking://resources/task.md",
-    })
-    assert safe["to_uri"] == "viking://workspace/watch"
+    profile = value.create(
+        "tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
+    safe = value._sanitize_upstream(
+        profile,
+        {
+            "to_uri": "viking://resources/watch",
+            "resource_id": "viking://resources/task.md",
+        },
+    )
+    assert "to_uri" not in safe
     assert safe["to_ref"].startswith("ovr_")
-    assert safe["resource_id"] == "viking://workspace/task.md"
+    assert "resource_id" not in safe
     assert safe["resource_id_ref"].startswith("ovr_")
 
 
 def test_file_and_url_validation_fail_closed(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    profile = value.create(
+        "tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
     root = value.resource_ref(profile, profile.workspace_uri)
     with pytest.raises(OpenVikingError, match="HTTPS"):
         value.validate_import_url("http://example.com")
@@ -207,7 +246,9 @@ def test_import_url_rejects_private_network_resolution(tmp_path, monkeypatch):
 
 def test_upload_rejects_unsupported_and_oversized_files(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    profile = value.create(
+        "tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
     root = value.resource_ref(profile, profile.workspace_uri)
 
     with pytest.raises(OpenVikingError) as unsupported:
@@ -243,7 +284,9 @@ def _mock_client(monkeypatch, handler):
 )
 def test_upstream_status_mapping(tmp_path, monkeypatch, status_code, expected_code, expected_status):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    profile = value.create(
+        "tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
     root = value.resource_ref(profile, profile.workspace_uri)
     _mock_client(monkeypatch, lambda request: httpx.Response(status_code, json={"detail": "must not leak"}))
     with pytest.raises(OpenVikingError) as raised:
@@ -255,7 +298,9 @@ def test_upstream_status_mapping(tmp_path, monkeypatch, status_code, expected_co
 
 def test_timeout_and_two_stage_import_are_stable(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    profile = value.create(
+        "tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
     root = value.resource_ref(profile, profile.workspace_uri)
     calls = []
 
@@ -285,7 +330,9 @@ def test_timeout_and_two_stage_import_are_stable(tmp_path, monkeypatch):
 
 def test_idempotent_write_only_calls_upstream_once(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
-    profile = value.create("tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/")
+    profile = value.create(
+        "tenant", "workspace", "owner", "Hosted", "http://127.0.0.1:9000", "secret-key", "viking://resources/"
+    )
     root = value.resource_ref(profile, profile.workspace_uri)
     calls = 0
 

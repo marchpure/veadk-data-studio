@@ -60,6 +60,29 @@ async def test_profile_routes_use_standard_envelope_and_owner_scope(tmp_path, mo
 
 
 @pytest.mark.asyncio
+async def test_public_profile_and_upstream_payload_never_expose_viking_uri(tmp_path, monkeypatch):
+    service = _service(tmp_path)
+    profile = service.create(
+        "tenant-a",
+        "tenant:tenant-a",
+        "owner-a",
+        "Hosted",
+        "https://api.vikingdb.cn-beijing.volces.com/openviking",
+        "secret-key",
+        "viking://resources/",
+    )
+    public = service.public(profile)
+    assert public["workspace_uri"] == "opaque-workspace"
+    assert "viking://" not in str(public)
+    sanitized = service._sanitize_upstream(
+        profile,
+        {"uri": "viking://resources/readme.md", "display_uri": "viking://resources/readme.md"},
+    )
+    assert "viking://" not in str(sanitized)
+    assert "display_uri" not in sanitized
+
+
+@pytest.mark.asyncio
 async def test_skill_context_rejects_unsigned_resource_ref(tmp_path, monkeypatch):
     service = _service(tmp_path)
     monkeypatch.setattr(routes, "_service", lambda: service)
@@ -73,9 +96,7 @@ async def test_skill_context_rejects_unsigned_resource_ref(tmp_path, monkeypatch
         "secret-key",
         "viking://resources/",
     )
-    service.repository.save(
-        type(profile)(**{**profile.__dict__, "status": "ready"})
-    )
+    service.repository.save(type(profile)(**{**profile.__dict__, "status": "ready"}))
 
     with pytest.raises(HTTPException) as rejected:
         await routes.skill_context(
@@ -132,9 +153,7 @@ async def test_write_operation_requires_write_scope(tmp_path, monkeypatch):
         "secret-key",
         "viking://resources/",
     )
-    service.repository.save(
-        type(profile)(**{**profile.__dict__, "status": "ready"})
-    )
+    service.repository.save(type(profile)(**{**profile.__dict__, "status": "ready"}))
 
     with pytest.raises(HTTPException) as rejected:
         await routes.operation(

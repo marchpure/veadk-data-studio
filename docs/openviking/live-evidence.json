@@ -1,7 +1,7 @@
 {
   "provider": "hosted_openviking",
-  "base_url": "https://api.vikingdb.cn-beijing.volces.com/openviking",
-  "api_key_source": "OPENVIKING_E2E_API_KEY",
+  "provider_endpoint": "configured hosted OpenViking endpoint",
+  "api_key_source": "approved server-side secret reference",
   "api_key_exposed_to_browser": false,
   "bff_port": 18435,
   "preview_url": "http://127.0.0.1:5183/kb",

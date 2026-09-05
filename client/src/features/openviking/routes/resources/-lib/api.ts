@@ -28,6 +28,7 @@ import {
   normalizeFsEntries,
   normalizeReadContent,
 } from './normalize'
+import { registerOpenVikingRoot } from '../../../lib/ov-client/resource-ref-registry'
 import type {
   VikingApiError,
   VikingFsEntry,
@@ -73,9 +74,13 @@ export async function fetchFsList(
       }),
     )
 
+    const entries = normalizeFsEntries(result, normalizedUri)
+    for (const entry of entries) {
+      if (entry.resourceRef) registerOpenVikingRoot(entry.uri, entry.resourceRef)
+    }
     return {
       uri: normalizedUri,
-      entries: normalizeFsEntries(result, normalizedUri),
+      entries,
     }
   } catch (error) {
     throw toVikingApiError(error)
@@ -173,6 +178,8 @@ export async function fetchFsStat(
     const rawModTime = data.mod_time ?? data.modTime ?? data.modified_at ?? ''
     return {
       uri,
+      resourceRef:
+        typeof data.resource_ref === 'string' ? data.resource_ref : undefined,
       name: fileNameFromUri(uri),
       isDir: Boolean(data.is_dir ?? data.isDir ?? uri.endsWith('/')),
       size: String(data.size ?? ''),

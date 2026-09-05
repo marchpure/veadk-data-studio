@@ -1,4 +1,3 @@
-from server.models.analysis_artifacts import AnalysisArtifact
 from server.collaboration.models import (
     CollaborationConversation,
     CollaborationDeliveryTarget,
@@ -8,17 +7,19 @@ from server.collaboration.models import (
     CollaborationResponseRef,
     ExternalIdentity,
 )
+from server.models.analysis_artifacts import AnalysisArtifact
 from server.models.connections import Connection
 from server.models.conversation_evaluation import ConversationEvaluation
 from server.models.custom_skill import CustomSkill
+from server.models.dashboard import Dashboard
 from server.models.data_workshop_skill import (
     DataWorkshopSkill,
     DataWorkshopSkillRevision,
     DataWorkshopSkillSession,
 )
-from server.models.dashboard import Dashboard
 from server.models.datasets import Dataset
 from server.models.datasource_annotations import DatasourceAnnotation
+from server.models.delegation import Delegation
 from server.models.files import File
 from server.models.folder import Folder
 from server.models.folder_dashboard import FolderDashboard
@@ -87,6 +88,7 @@ __all__ = [
     "DataWorkshopSkillRevision",
     "DataWorkshopSkillSession",
     "Dashboard",
+    "Delegation",
     "DatasourceAnnotation",
     "Dataset",
     "File",

@@ -12,6 +12,10 @@ import type {
   OvClientOptions,
   OvErrorEnvelope,
 } from './types'
+import {
+  getOpenVikingResourceRef,
+  registerOpenVikingRoot,
+} from './resource-ref-registry'
 
 const DEFAULT_TELEMETRY_PATHS = new Set([
   '/api/v1/search/find',
@@ -20,16 +24,7 @@ const DEFAULT_TELEMETRY_PATHS = new Set([
 ])
 const SESSION_COMMIT_PATH = /^\/api\/v1\/sessions\/[^/]+\/commit$/
 const BFF_ROOT = '/api/knowledge/openviking'
-const resourceRefs = new Map<string, string>()
 const preserveTypedQueryParams = () => ''
-
-export function getOpenVikingResourceRef(uri: string): string | undefined {
-  const value = uri.trim()
-  return (
-    resourceRefs.get(value) ??
-    resourceRefs.get(value.endsWith('/') ? value.slice(0, -1) : `${value}/`)
-  )
-}
 const OPERATION_PATHS = new Map<string, string>([
   ['/api/v1/fs/ls', 'fs_list'],
   ['/api/v1/fs/tree', 'fs_tree'],
@@ -103,12 +98,7 @@ function rememberResourceRefs(value: unknown): void {
     const uri = typeof value[uriKey] === 'string' ? value[uriKey] : undefined
     const ref = typeof value[refKey] === 'string' ? value[refKey] : undefined
     if (uri && ref) {
-      resourceRefs.set(uri, ref)
-      if (uri.startsWith('viking://') && uri !== 'viking://') {
-        const withoutSlash = uri.endsWith('/') ? uri.slice(0, -1) : uri
-        resourceRefs.set(withoutSlash, ref)
-        resourceRefs.set(`${withoutSlash}/`, ref)
-      }
+      registerOpenVikingRoot(uri, ref)
     }
   }
   Object.values(value).forEach(rememberResourceRefs)
@@ -134,7 +124,7 @@ function opaquePayload(value: unknown): unknown {
       typeof item === 'string' &&
       item.startsWith('viking://')
     ) {
-      const ref = resourceRefs.get(item)
+      const ref = getOpenVikingResourceRef(item)
       if (!ref) {
         throw new OvClientError({
           code: 'OPENVIKING_RESOURCE_REF_REQUIRED',
@@ -401,11 +391,4 @@ export const ovClient = createOvClient({
   bindSdkClient: true,
 })
 
-export function registerOpenVikingRoot(uri: string, ref: string): void {
-  resourceRefs.set(uri, ref)
-  if (uri.startsWith('viking://') && uri !== 'viking://') {
-    const withoutSlash = uri.endsWith('/') ? uri.slice(0, -1) : uri
-    resourceRefs.set(withoutSlash, ref)
-    resourceRefs.set(`${withoutSlash}/`, ref)
-  }
-}
+export { getOpenVikingResourceRef, registerOpenVikingRoot }

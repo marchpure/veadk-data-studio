@@ -434,7 +434,7 @@ function ResourceWorkspace({ rootUri, profileId }: { rootUri: string; profileId:
 
   const addSelectedToSkill = useCallback(async () => {
     if (selectedFile.isDir || selectedFile.uri === normalizedRoot) return
-    const resourceRef = getOpenVikingResourceRef(selectedFile.uri)
+    const resourceRef = selectedFile.resourceRef || getOpenVikingResourceRef(selectedFile.uri)
     if (!resourceRef) {
       setContextError('请刷新资源树后再加入 Skill 上下文。')
       return
@@ -475,7 +475,7 @@ function ResourceWorkspace({ rootUri, profileId }: { rootUri: string; profileId:
               </button>
             </div>
           </header>
-          <div className="ov-context-scope" title={normalizedRoot}>{normalizedRoot}</div>
+          <div className="ov-context-scope" title="Workspace">Workspace</div>
           <div className="ov-context-tree-scroll">
             <ResourceContextTree
               expandedUris={expandedUris}
@@ -570,12 +570,8 @@ export function OpenVikingWorkspace({
 
   useEffect(() => {
     if (!activeProfile) return
-    registerOpenVikingRoot(
-      activeProfile.workspace_uri,
-      activeProfile.root_resource_ref,
-    )
     registerOpenVikingRoot('viking://', activeProfile.root_resource_ref)
-    registerOpenVikingRoot('viking://resources/', activeProfile.root_resource_ref)
+    registerOpenVikingRoot('viking://workspace/', activeProfile.root_resource_ref)
   }, [activeProfile])
 
   const load = useCallback(async () => {
@@ -727,7 +723,7 @@ export function OpenVikingWorkspace({
                     <button type="button" onClick={() => setPage('connection')}>Open connection settings</button>
                   </div>
                 ) : page === 'resources' && activeProfile ? (
-                <ResourceWorkspace rootUri={activeProfile.workspace_uri} profileId={activeProfile.profile_id} />
+                <ResourceWorkspace rootUri="viking://workspace/" profileId={activeProfile.profile_id} />
                 ) : page === 'retrieval' ? (
                   <div className="ov-page-scroll"><div className="ov-page-content"><RetrievalPage /></div></div>
                 ) : page === 'tasks' ? (

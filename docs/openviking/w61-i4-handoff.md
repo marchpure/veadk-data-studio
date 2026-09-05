@@ -2,7 +2,7 @@
 
 ## Provider
 
-- Hosted base URL: `https://api.vikingdb.cn-beijing.volces.com/openviking`
+- Hosted provider: configured hosted OpenViking endpoint (runtime-only)
 - API key source: runtime environment/approved secret source only.
 - Browser never receives or stores the API key.
 - OpenViking is not self-deployed and is not registered as a Connection or MCP.
@@ -31,7 +31,11 @@ All endpoints are under `/api/knowledge/openviking`, authenticated by the existi
 - `GET /api/datasources`: discover `source_type=source_resource` records for Connection-source import.
 - `POST /profiles/{profile_id}/connection-resource`: import a ready Source Resource by server-side `resource_id`; caller-supplied connection documents are not accepted.
 
-Browser calls use the normal Data Studio session or `Authorization: Bearer <DATA_STUDIO_TOKEN>` plus `X-Tenant-ID` when selecting a tenant. Server-to-server I4 callers use the same Data Studio authentication. The BFF resolves opaque refs to upstream `uri`, adds the OpenViking `X-API-Key` server-side, and recursively redacts credential, token, owner, account, and internal URI fields from responses.
+Browser calls use the normal Data Studio session or a server-managed session plus
+`X-Tenant-ID` when selecting a tenant. The BFF resolves opaque refs to the
+upstream URI only inside the server adapter, adds the provider credential
+server-side, and recursively redacts credential, token, owner, account, and
+internal URI fields from responses.
 
 ## Response and errors
 

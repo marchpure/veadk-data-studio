@@ -22,6 +22,7 @@ from server.db.session import AsyncSessionFactory
 from server.models.data_workshop_skill import DataWorkshopSkill, DataWorkshopSkillSession
 from server.models.knowledge_resources import KnowledgeResource
 from server.models.source_resources import SourceResource
+from server.services.openviking_service import OPAQUE_RESOURCE_REF
 
 ACTIVE_TASKS: dict[str, asyncio.Task[None]] = {}
 BEARER_PATTERN = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
@@ -278,7 +279,7 @@ async def visible_knowledge_refs(session: AsyncSession, tenant_id: UUID, owner_i
             if inspect.isawaitable(value):
                 value = await value
             refs = [ContextRef.model_validate(item) for item in value]
-            if any(item.kind != "knowledge_resource" or not item.id.startswith("viking://") for item in refs):
+            if any(item.kind != "knowledge_resource" or not OPAQUE_RESOURCE_REF.fullmatch(item.id) for item in refs):
                 return []
             return [item.model_dump() for item in refs]
         except Exception:
@@ -298,7 +299,7 @@ async def visible_knowledge_refs(session: AsyncSession, tenant_id: UUID, owner_i
             continue
         selection = resource.selection_config_json or {}
         resource_ref = selection.get("openviking_resource_ref")
-        if not isinstance(resource_ref, str) or not resource_ref.startswith("viking://"):
+        if not isinstance(resource_ref, str) or not OPAQUE_RESOURCE_REF.fullmatch(resource_ref):
             continue
         knowledge_refs.append(
             ContextRef(
@@ -336,7 +337,7 @@ async def resolve_requested_openviking_refs(
     owner_id: UUID,
 ) -> list[dict[str, Any]]:
     """Validate opaque W6 refs before they enter the durable W7 context."""
-    opaque = [item for item in requested if item.id.startswith("ovr_")]
+    opaque = [item for item in requested if OPAQUE_RESOURCE_REF.fullmatch(item.id)]
     if not opaque:
         return []
     try:
@@ -419,20 +420,22 @@ async def validate_persisted_openviking_refs(
     tenant_id: UUID,
     owner_id: UUID,
 ) -> None:
-    requested = [ContextRef.model_validate(item) for item in refs if str(item.get("id", "")).startswith("ovr_")]
+    requested = [
+        ContextRef.model_validate(item) for item in refs if OPAQUE_RESOURCE_REF.fullmatch(str(item.get("id", "")))
+    ]
     if requested:
         await resolve_requested_openviking_refs(requested, tenant_id=tenant_id, owner_id=owner_id)
 
 
-def delegated_auth_ref(auth: Any) -> str | None:
-    provider = os.getenv("W5_DELEGATED_AUTH_PROVIDER", "").strip()
-    if not provider:
-        return None
-    module_name, separator, function_name = provider.partition(":")
-    if not separator:
-        raise W5AdapterError("BLOCKED_CONFIG", "W5_DELEGATED_AUTH_PROVIDER 必须是 module:function。")
-    value = getattr(importlib.import_module(module_name), function_name)(auth)
-    return value if isinstance(value, str) and value else None
+async def delegated_auth_ref(auth: Any, session: AsyncSession) -> str:
+    """Issue a server-side I4-A delegation; never import arbitrary providers."""
+    from server.services.delegation_broker import DelegationBrokerError, issue_from_auth
+
+    try:
+        return await issue_from_auth(auth, session)
+    except DelegationBrokerError as exc:
+        message = "委托身份尚未配置或不可用。" if exc.code == "BLOCKED_CONFIG" else "委托身份不可用。"
+        raise W5AdapterError(exc.code, message) from exc
 
 
 def status_from_error(error: W5AdapterError) -> str:
@@ -559,6 +562,13 @@ async def run_invocation(
                 },
             )
         finally:
+            if delegated_auth:
+                try:
+                    from server.services.delegation_broker import revoke
+
+                    await revoke(delegated_auth, tenant_id, db)
+                except Exception:
+                    pass
             item.current_invocation_id = None
             skill.status = item.status
             skill.updated_at = datetime.now(UTC).replace(tzinfo=None)

@@ -127,7 +127,7 @@ function TreeLevel({
               role="treeitem"
               aria-expanded={entry.isDir ? open : undefined}
               aria-selected={selected}
-              title={entry.uri}
+              title={entry.name}
               onClick={() => {
                 onSelect(entry)
                 if (!entry.isDir) return
