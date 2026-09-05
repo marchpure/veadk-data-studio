@@ -30,7 +30,39 @@ def configured_database_url() -> str | None:
 
 
 def sync_database_url(url: str) -> str:
-    return url.replace("postgresql+asyncpg://", "postgresql://").replace("postgresql+psycopg2://", "postgresql://")
+    """Convert an async SQLAlchemy URL to a libpq-compatible sync URL.
+
+    Some managed PostgreSQL connection strings use ``ssl=true``.  asyncpg
+    accepts that spelling, while psycopg2/libpq rejects it and requires the
+    ``sslmode`` option instead.  Keep an explicit ``sslmode`` untouched and
+    translate the common boolean form only for the synchronous migration path.
+    """
+    converted = url.replace("postgresql+asyncpg://", "postgresql://").replace(
+        "postgresql+psycopg2://", "postgresql://"
+    )
+    if "postgresql" not in converted:
+        return converted
+
+    parts = urlsplit(converted)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if any(key == "sslmode" for key, _ in query):
+        return converted
+
+    translated: list[tuple[str, str]] = []
+    for key, value in query:
+        if key != "ssl":
+            translated.append((key, value))
+            continue
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            translated.append(("sslmode", "require"))
+        elif normalized in {"0", "false", "no", "off"}:
+            translated.append(("sslmode", "disable"))
+        elif normalized:
+            translated.append(("sslmode", value))
+    return urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urlencode(translated), parts.fragment)
+    )
 
 
 def async_connect_args() -> dict[str, object]:
