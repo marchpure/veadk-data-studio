@@ -59,6 +59,13 @@ def _audience() -> str:
     return value
 
 
+def _user_pool() -> str:
+    value = os.getenv("DWV1_OIDC_USER_POOL", "").strip()
+    if not value:
+        raise ExternalOIDCError("OIDC UserPool is not configured")
+    return value
+
+
 def _client_id() -> str:
     value = os.getenv("DWV1_OIDC_CLIENT_ID", "").strip()
     if not value:
@@ -295,7 +302,7 @@ async def complete_login(code: str, state: str, db: AsyncSession) -> str:
             encrypted_tokens=encrypted_tokens,
             issuer=_issuer(),
             audience=_audience(),
-            user_pool=os.getenv("DWV1_OIDC_USER_POOL", "").strip(),
+            user_pool=_user_pool(),
             expires_at=expires_at,
         )
     )
@@ -323,6 +330,12 @@ async def auth_context_from_cookie(
     external, user = row
     if external.revoked_at is not None or external.expires_at <= now:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OIDC session expired")
+    try:
+        configured_identity = (_issuer(), _audience(), _user_pool())
+    except ExternalOIDCError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="OIDC unavailable") from exc
+    if (external.issuer, external.audience, external.user_pool) != configured_identity:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OIDC session configuration changed")
     auth = await _get_auth_context_hosted(user, db, x_tenant_id)
     try:
         groups = json.loads(external.groups)
@@ -332,6 +345,9 @@ async def auth_context_from_cookie(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="OIDC groups unavailable")
     auth.external_subject = external.subject
     auth.external_groups = tuple(groups)
+    auth.external_issuer = external.issuer
+    auth.external_audience = external.audience
+    auth.external_user_pool = external.user_pool
     tokens = await CryptoService.decrypt_config(external.encrypted_tokens, db)
     access_token = tokens.get("access_token")
     if not isinstance(access_token, str) or not access_token:

@@ -79,16 +79,26 @@ async def issue_from_auth(auth: AuthContext, session: AsyncSession) -> str:
     """Issue a delegation only from an externally verified identity subject."""
     subject = _configured(getattr(auth, "external_subject", None))
     access_token = _configured(getattr(auth, "access_token", None))
+    verified_issuer = _configured(getattr(auth, "external_issuer", None))
+    verified_audience = _configured(getattr(auth, "external_audience", None))
+    verified_user_pool = _configured(getattr(auth, "external_user_pool", None))
     tenant_id = auth.tenant_id
     audience = _configured(os.getenv("I4A_DELEGATION_AUDIENCE")) or DEFAULT_AUDIENCE
     issuer = _configured(os.getenv("I4A_DELEGATION_ISSUER"))
     user_pool = _configured(os.getenv("I4A_DELEGATION_USER_POOL"))
     required_group = _configured(os.getenv("I4A_DELEGATION_GROUP_UID"))
     groups = list(getattr(auth, "external_groups", ()) or ())
-    if not subject or not access_token:
+    if not subject or not access_token or not verified_issuer or not verified_audience or not verified_user_pool:
         raise DelegationBrokerError("BLOCKED_AUTH")
-    if not issuer or not user_pool or not required_group or required_group not in groups:
+    if not issuer or not user_pool or not required_group:
         raise DelegationBrokerError("BLOCKED_CONFIG")
+    if (
+        verified_issuer != issuer
+        or verified_audience != audience
+        or verified_user_pool != user_pool
+        or required_group not in groups
+    ):
+        raise DelegationBrokerError("BLOCKED_AUTH")
     now = datetime.now(UTC)
     expires = now + timedelta(seconds=MAX_TTL_SECONDS)
     ref = f"dlg_{secrets.token_urlsafe(32)}"

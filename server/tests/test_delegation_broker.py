@@ -59,6 +59,43 @@ async def test_broker_issue_requires_verified_external_identity(broker_db):
         external_subject=None,
         external_groups=(),
         access_token=None,
+        external_issuer=None,
+        external_audience=None,
+        external_user_pool=None,
+    )
+    async with broker_db() as db:
+        with pytest.raises(delegation_broker.DelegationBrokerError) as error:
+            await delegation_broker.issue_from_auth(owner, db)
+        assert error.value.code == "BLOCKED_AUTH"
+
+
+@pytest.mark.asyncio
+async def test_broker_issue_rejects_identity_binding_drift(broker_db):
+    owner = SimpleNamespace(
+        tenant_id=uuid4(),
+        external_subject="subject-a",
+        external_groups=("group-a",),
+        access_token="short-lived-token",
+        external_issuer="https://other-issuer.example",
+        external_audience="dwv1-skill-agent",
+        external_user_pool="pool-a",
+    )
+    async with broker_db() as db:
+        with pytest.raises(delegation_broker.DelegationBrokerError) as error:
+            await delegation_broker.issue_from_auth(owner, db)
+        assert error.value.code == "BLOCKED_AUTH"
+
+
+@pytest.mark.asyncio
+async def test_broker_issue_rejects_missing_required_group_as_auth_failure(broker_db):
+    owner = SimpleNamespace(
+        tenant_id=uuid4(),
+        external_subject="subject-a",
+        external_groups=("different-group",),
+        access_token="short-lived-token",
+        external_issuer="https://issuer.example",
+        external_audience="dwv1-skill-agent",
+        external_user_pool="pool-a",
     )
     async with broker_db() as db:
         with pytest.raises(delegation_broker.DelegationBrokerError) as error:
@@ -74,6 +111,9 @@ async def test_broker_resolve_is_single_use_and_scope_bound(broker_db, monkeypat
         external_subject="subject-a",
         external_groups=("group-a",),
         access_token="short-lived-token",
+        external_issuer="https://issuer.example",
+        external_audience="dwv1-skill-agent",
+        external_user_pool="pool-a",
     )
     async with broker_db() as db:
         ref = await delegation_broker.issue_from_auth(owner, db)
@@ -106,6 +146,9 @@ async def test_broker_resolve_rejects_origin_credentials_scope_and_ref_shape(bro
         external_subject="subject-a",
         external_groups=("group-a",),
         access_token="short-lived-token",
+        external_issuer="https://issuer.example",
+        external_audience="dwv1-skill-agent",
+        external_user_pool="pool-a",
     )
     async with broker_db() as db:
         ref = await delegation_broker.issue_from_auth(owner, db)
@@ -162,6 +205,9 @@ async def test_broker_expiry_and_revoke_fail_closed(broker_db, monkeypatch):
         external_subject="subject-a",
         external_groups=("group-a",),
         access_token="short-lived-token",
+        external_issuer="https://issuer.example",
+        external_audience="dwv1-skill-agent",
+        external_user_pool="pool-a",
     )
 
     async def service_credential():
