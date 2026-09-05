@@ -23,7 +23,10 @@ def test_sync_database_url_preserves_explicit_sslmode() -> None:
 
 
 def test_async_database_url_moves_disable_ssl_to_connect_args() -> None:
-    url = "postgresql+asyncpg://user:pass@db.example.test/app?sslmode=disable"
+    url = (
+        "postgresql+asyncpg://user:pass@db.example.test/app?"
+        "sslmode=disable&options=-csearch_path%3Ddata_studio"
+    )
 
     assert async_database_url(url) == "postgresql+asyncpg://user:pass@db.example.test/app"
     assert async_connect_args(url)["ssl"] is False

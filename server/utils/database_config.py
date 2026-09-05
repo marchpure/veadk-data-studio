@@ -73,7 +73,7 @@ def async_database_url(url: str) -> str:
     query = [
         (key, value)
         for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if key not in {"ssl", "sslmode"}
+        if key not in {"ssl", "sslmode", "options"}
     ]
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
