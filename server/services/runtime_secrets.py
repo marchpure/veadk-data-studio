@@ -32,6 +32,11 @@ def _load_secret_document(secret_name: str) -> dict[str, Any]:
         configuration.region = os.getenv("REGION", "cn-beijing")
         configuration.connect_timeout = 5
         configuration.read_timeout = 10
+        from server.services.faas_runtime import get_faas_credentials
+
+        credentials = get_faas_credentials()
+        if credentials is not None:
+            configuration.credential_provider = credentials.credential_provider()
         response = KMSApi(ApiClient(configuration)).get_secret_value(GetSecretValueRequest(secret_name=secret_name))
         value = getattr(response, "secret_value", None)
     except Exception as exc:

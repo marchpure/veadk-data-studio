@@ -5,10 +5,13 @@ import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from threading import Lock
+from typing import Any
 
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
+from server.services.faas_runtime import deferred_runtime_enabled
 from server.utils.config_loader import is_self_hosted
 from server.utils.custom_logger import get_logger
 from server.utils.database_config import async_connect_args, configured_database_url
@@ -42,16 +45,70 @@ def get_database_url() -> str:
         return f"sqlite+aiosqlite:///{BASE_DIR / '.data' / 'app.db'}"
 
 
-DATABASE_URL = get_database_url()
+_engine_lock = Lock()
+_session_factory: async_sessionmaker[AsyncSession] | None = None
+DATABASE_URL: str | None = None
+async_engine: AsyncEngine | None = None
 
 
-async_engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,
-    future=True,
-    pool_pre_ping=True,
-    connect_args=async_connect_args(),
-)
+def _initialize_engine() -> async_sessionmaker[AsyncSession]:
+    global DATABASE_URL, async_engine, _session_factory
+
+    if _session_factory is not None:
+        return _session_factory
+
+    with _engine_lock:
+        if _session_factory is not None:
+            return _session_factory
+
+        DATABASE_URL = get_database_url()
+        async_engine = create_async_engine(
+            DATABASE_URL,
+            echo=False,
+            future=True,
+            pool_pre_ping=True,
+            connect_args=async_connect_args(),
+        )
+
+        if async_engine.dialect.name == "sqlite":
+
+            @event.listens_for(async_engine.sync_engine, "connect")
+            def _set_sqlite_pragma(dbapi_connection, connection_record):  # type: ignore[no-untyped-def]
+                cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.close()
+
+        _session_factory = async_sessionmaker(
+            bind=async_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+        return _session_factory
+
+
+def get_async_engine() -> AsyncEngine:
+    """Create the shared engine only after request-scoped cloud credentials exist."""
+
+    engine = async_engine
+    if engine is None:
+        _initialize_engine()
+        engine = async_engine
+    if engine is None:  # pragma: no cover
+        raise RuntimeError("database engine is unavailable")
+    return engine
+
+
+class _LazyAsyncSessionFactory:
+    """Callable facade preserving the existing ``AsyncSessionFactory()`` API."""
+
+    def __call__(self, *args: Any, **kwargs: Any) -> AsyncSession:
+        return _initialize_engine()(*args, **kwargs)
+
+
+if not (is_self_hosted() and deferred_runtime_enabled()):
+    _initialize_engine()
+
+AsyncSessionFactory = _LazyAsyncSessionFactory()
 
 
 async def ensure_database_schema() -> None:
@@ -69,8 +126,8 @@ async def ensure_database_schema() -> None:
 
     from server.utils.migrations import run_migrations
 
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, run_migrations)
+    # ``to_thread`` propagates the ContextVar carrying VeFaaS credentials.
+    await asyncio.to_thread(run_migrations)
 
 
 async def ensure_database_encoding() -> None:
@@ -105,24 +162,6 @@ async def ensure_database_encoding() -> None:
                     logger.info(f"PostgreSQL database encoding: {encoding}")
     except Exception as e:
         logger.warning(f"Could not check database encoding (non-fatal): {e}")
-
-
-# SQLite needs this to enforce foreign key constraints (disabled by default)
-# PostgreSQL enforces foreign keys by default, so gate on dialect not deployment mode
-if async_engine.dialect.name == "sqlite":
-
-    @event.listens_for(async_engine.sync_engine, "connect")
-    def _set_sqlite_pragma(dbapi_connection, connection_record):  # type: ignore[no-untyped-def]
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-
-
-AsyncSessionFactory = async_sessionmaker(
-    bind=async_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
 
 
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:

@@ -100,6 +100,7 @@ from server.services.conversation_evaluation_service import skill_loop_service
 from server.services.credit_sync_service import credit_sync_service
 from server.services.dashboard_refresh_service import dashboard_refresh_service
 from server.services.external_oidc import enabled as external_oidc_enabled
+from server.services.faas_runtime import deferred_runtime_enabled, request_faas_credentials
 from server.services.posthog_service import PostHogService
 from server.services.schedule_runner_service import schedule_runner_service
 from server.utils.config_loader import get_skill_loop_config, is_community_mode, is_self_hosted
@@ -122,6 +123,8 @@ logger = get_logger(__name__)
 
 # Global migration status tracking
 migration_status = {"completed": False, "error": None, "message": "Migrations pending"}
+_deferred_runtime_ready = False
+_deferred_runtime_lock: asyncio.Lock | None = None
 
 
 async def init_posthog_background():
@@ -140,6 +143,12 @@ async def app_lifespan(app: FastAPI):
     try:
         total_start = time.perf_counter()
         logger.info("🚀 Starting backend initialization...")
+
+        if deferred_runtime_enabled():
+            migration_status["message"] = "Waiting for VeFaaS request credentials"
+            logger.info("⏸️  Cloud runtime initialization deferred until VeFaaS injects request STS credentials")
+            yield
+            return
 
         # Start PostHog in background (non-blocking)
         start = time.perf_counter()
@@ -316,6 +325,51 @@ if get_security_flags()["proxy_headers_enabled"]:
     from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
+
+
+async def _ensure_deferred_runtime_ready() -> None:
+    global _deferred_runtime_ready, _deferred_runtime_lock
+
+    if _deferred_runtime_ready:
+        return
+    if _deferred_runtime_lock is None:
+        _deferred_runtime_lock = asyncio.Lock()
+    async with _deferred_runtime_lock:
+        if _deferred_runtime_ready:
+            return
+        logger.info("📦 Initializing deferred cloud runtime from request-scoped VeFaaS credentials")
+        migration_status["message"] = "Running database migrations..."
+        await ensure_database_schema()
+        await ensure_database_encoding()
+        migration_status["completed"] = True
+        migration_status["error"] = None
+        migration_status["message"] = "Backend ready"
+        _deferred_runtime_ready = True
+
+
+@app.middleware("http")
+async def faas_runtime_middleware(request: Request, call_next):
+    """Bind VeFaaS STS headers before any KMS-backed dependency executes."""
+
+    if not deferred_runtime_enabled():
+        return await call_next(request)
+
+    with request_faas_credentials(request):
+        try:
+            await _ensure_deferred_runtime_ready()
+        except Exception:
+            migration_status["completed"] = False
+            migration_status["error"] = "RuntimeCredentialsUnavailable"
+            migration_status["message"] = "Cloud runtime credentials are unavailable"
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "success": False,
+                    "message": "Cloud runtime credentials are unavailable",
+                    "data": {"status": "BLOCKED_CONFIG"},
+                },
+            )
+        return await call_next(request)
 
 EXCLUDED_PATHS = [
     "/api/unified-agent/stream",
