@@ -290,7 +290,15 @@ async def complete_login(code: str, state: str, db: AsyncSession) -> str:
         )
         db.add(tenant)
         await db.flush()
-        db.add(TenantMember(user_id=user.id, tenant_id=tenant.id, role=TenantRole.OWNER.value, joined_at=now))
+        # tenant_members.joined_at is a PostgreSQL TIMESTAMP WITHOUT TIME ZONE.
+        db.add(
+            TenantMember(
+                user_id=user.id,
+                tenant_id=tenant.id,
+                role=TenantRole.OWNER.value,
+                joined_at=now.replace(tzinfo=None),
+            )
+        )
     else:
         tenant = (
             await db.execute(select(Tenant).where(Tenant.owner_id == user.id).order_by(Tenant.created_at).limit(1))

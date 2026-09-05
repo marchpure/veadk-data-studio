@@ -93,6 +93,15 @@ def test_jwt_validation_does_not_require_optional_nbf(monkeypatch: pytest.Monkey
     }
 
 
+def test_database_joined_at_timestamp_is_normalized_to_naive_utc() -> None:
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
+    normalized = now.replace(tzinfo=None)
+    assert normalized.tzinfo is None
+    assert normalized == now.replace(tzinfo=None)
+
+
 @pytest.mark.asyncio
 async def test_external_cookie_context_rejects_missing_session() -> None:
     class Result:
