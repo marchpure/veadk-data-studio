@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from server.services.faas_runtime import (
@@ -39,3 +40,27 @@ def test_incomplete_faas_headers_fail_closed():
 
     with request_faas_credentials(request):
         assert get_faas_credentials() is None
+
+
+def test_request_faas_credentials_reads_vefaas_iam_file(tmp_path):
+    from server.services import faas_runtime
+
+    path = tmp_path / "credential"
+    path.write_text(
+        json.dumps(
+            {
+                "access_key_id": "file-ak",
+                "secret_access_key": "file-sk",
+                "session_token": "file-session",
+            }
+        )
+    )
+
+    original = faas_runtime._VEFAAS_IAM_CREDENTIAL_PATH
+    faas_runtime._VEFAAS_IAM_CREDENTIAL_PATH = path
+    try:
+        request = SimpleNamespace(headers={})
+        with request_faas_credentials(request):
+            assert get_faas_credentials() == FaaSCredentials("file-ak", "file-sk", "file-session")
+    finally:
+        faas_runtime._VEFAAS_IAM_CREDENTIAL_PATH = original

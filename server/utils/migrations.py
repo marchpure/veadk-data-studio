@@ -122,7 +122,7 @@ def check_database_has_tables(database_url: str) -> bool:
         if "sqlite+aiosqlite://" in sync_url:
             sync_url = sync_url.replace("sqlite+aiosqlite://", "sqlite:///")
         elif "postgresql+asyncpg://" in sync_url:
-            sync_url = sync_url.replace("postgresql+asyncpg://", "postgresql://")
+            sync_url = sync_database_url(sync_url)
 
         # Create a sync engine for checking
         engine = create_engine(sync_url, echo=False, connect_args=sync_connect_args())
@@ -165,7 +165,7 @@ def _ensure_wide_alembic_version_column(database_url: str) -> None:
     if "postgresql" not in database_url:
         return
 
-    sync_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+    sync_url = sync_database_url(database_url)
     engine = create_engine(sync_url, echo=False, connect_args=sync_connect_args())
     try:
         with engine.begin() as conn:
