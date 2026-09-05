@@ -23,6 +23,11 @@ from server.utils.database_config import add_schema_query, configured_database_u
 logger = get_logger(__name__)
 
 
+def _alembic_config_value(value: str) -> str:
+    """Escape percent signs before passing a URL to ConfigParser-backed Alembic."""
+    return value.replace("%", "%%")
+
+
 def get_alembic_config() -> Config:
     """
     Get Alembic configuration with proper paths for both development and frozen (PyInstaller) environments.
@@ -89,7 +94,7 @@ def get_alembic_config() -> Config:
         # Alembic expects sync URLs, convert asyncpg to psycopg2
         sync_url = add_schema_query(sync_database_url(database_url))
         logger.info("🔧 Hosted mode: Database URL configured (PostgreSQL)")
-        alembic_cfg.set_main_option("sqlalchemy.url", sync_url)
+        alembic_cfg.set_main_option("sqlalchemy.url", _alembic_config_value(sync_url))
     else:
         # Local mode: use DATABASE_URL if provided (Tauri sets this), otherwise fallback to local path
         database_url = os.getenv("DATABASE_URL")
@@ -101,7 +106,7 @@ def get_alembic_config() -> Config:
             sqlite_path = base_dir / ".data" / "app.db"
             sync_url = f"sqlite:///{sqlite_path}"
             logger.info(f"🔧 Local mode: Using default path (SQLite): {sync_url}")
-        alembic_cfg.set_main_option("sqlalchemy.url", sync_url)
+        alembic_cfg.set_main_option("sqlalchemy.url", _alembic_config_value(sync_url))
 
     return alembic_cfg
 
