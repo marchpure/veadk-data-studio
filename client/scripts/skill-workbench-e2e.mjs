@@ -11,6 +11,7 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const consoleErrors = []
 const networkFailures = []
 const browserRequests = []
+const invocationRequests = []
 page.on('console', message => {
   if (message.type() === 'error') consoleErrors.push(message.text())
 })
@@ -21,6 +22,9 @@ page.on('response', response => {
 })
 page.on('request', request => {
   browserRequests.push({ url: request.url(), authorization: request.headers().authorization || '' })
+  if (/\/sessions\/[^/]+\/invocations$/.test(new URL(request.url()).pathname)) {
+    invocationRequests.push(request.url())
+  }
 })
 
 await page.goto(`${baseUrl}/skill`, { waitUntil: 'networkidle' })
@@ -29,10 +33,17 @@ const suffix = Date.now().toString(36)
 const firstTitle = `周度营收复盘 ${suffix}`
 await page.getByRole('button', { name: /新建 Skill/ }).first().click()
 await page.getByPlaceholder('例如：周度营收复盘').fill(firstTitle)
-await page.getByPlaceholder('weekly-revenue-review').fill(`weekly-revenue-${suffix}`)
 await page.getByPlaceholder('这个 Skill 将帮助团队…').fill('汇总数据、核对口径并生成可复用的营收复盘。')
-await page.getByRole('button', { name: /创建并进入工作台/ }).click()
+const emptyGenerate = page.getByRole('button', { name: '保存并开始生成' })
+if (await emptyGenerate.isEnabled()) throw new Error('Empty context unexpectedly enabled generation')
+await page.getByRole('button', { name: '保存草稿' }).click()
 await page.getByRole('heading', { name: firstTitle }).waitFor()
+if (invocationRequests.length) throw new Error('Saving an empty-context draft requested /invocations')
+
+await page.getByLabel('Skill 消息').fill('你可以做什么')
+await page.getByRole('button', { name: '开始生成' }).click()
+await page.getByText('请先添加至少一个 Action 或知识资源，再开始生成。').waitFor()
+if (invocationRequests.length) throw new Error('Empty draft guidance requested /invocations')
 
 const sessionUrl = page.url()
 const selected = new URL(sessionUrl)
@@ -52,21 +63,30 @@ await page.getByRole('heading', { name: firstTitle }).waitFor()
 await page.getByPlaceholder('搜索 Skill').fill('')
 await page.getByRole('button', { name: /新建 Skill/ }).first().click()
 await page.getByPlaceholder('例如：周度营收复盘').fill('客户留存分析')
-await page.getByPlaceholder('weekly-revenue-review').fill(`retention-${Date.now().toString(36)}`)
 await page.getByPlaceholder('这个 Skill 将帮助团队…').fill('分析客户留存趋势。')
-await page.getByRole('button', { name: /创建并进入工作台/ }).click()
+const actionSelector = page.locator('.dw-context-picker details').first()
+await actionSelector.locator('summary').click()
+const availableAction = actionSelector.locator('input[type="checkbox"]').first()
+if (!await availableAction.count()) throw new Error('No visible Catalog Action is available for generation E2E')
+await availableAction.check()
+await page.getByRole('button', { name: '保存并开始生成' }).click()
 await page.getByRole('heading', { name: '客户留存分析' }).waitFor()
+await page.locator('.dw-skill-status-notice, .dw-artifact-panel').first().waitFor({ timeout: 120000 })
+if (await page.locator('.dw-skill-status-notice').count() && await page.locator('.dw-artifact-panel').count()) {
+  throw new Error('Failed generation mounted a fabricated Artifact')
+}
 await page.locator('.dw-skill-list > button').filter({ hasText: firstTitle }).click()
 await page.waitForURL(url => url.searchParams.get('skillId') === firstSkillId && Boolean(url.searchParams.get('sessionId')))
 const activeSessionId = new URL(page.url()).searchParams.get('sessionId')
 if (!activeSessionId) throw new Error(`Selected Skill did not restore a Session: ${page.url()}`)
+const invocationCount = invocationRequests.length
 await page.getByLabel('Skill 消息').fill('继续修改这个 Skill，并保留原有 Revision。')
-await page.getByRole('button', { name: '发送' }).click()
-await page.locator('.dw-skill-status-notice').waitFor({ timeout: 120000 })
-if (await page.locator('.dw-artifact-panel').count()) {
-  throw new Error('Failed W5 invocation mounted a fabricated Artifact')
+await page.getByRole('button', { name: /开始生成|生成新版本/ }).click()
+await page.getByText('请先添加至少一个 Action 或知识资源，再开始生成。').waitFor()
+if (invocationRequests.length !== invocationCount) {
+  throw new Error('Empty draft requested /invocations after reload')
 }
-if (!browserRequests.some(request => new URL(request.url).pathname.endsWith(`/sessions/${activeSessionId}/events`))) {
+if (!browserRequests.some(request => /\/sessions\/[^/]+\/events/.test(new URL(request.url).pathname))) {
   throw new Error('Incremental events endpoint was not consumed')
 }
 
@@ -112,6 +132,17 @@ const storage = await page.evaluate(() => JSON.stringify({ local: { ...localStor
 if (consoleErrors.length) throw new Error(`Browser console errors: ${JSON.stringify(consoleErrors)}`)
 if (networkFailures.length) throw new Error(`Browser network failures: ${JSON.stringify(networkFailures)}`)
 if (browserRequests.some(request => request.authorization)) throw new Error('Browser sent an unexpected Authorization header')
+for (const forbiddenCopy of ['Skill Workspace', 'Session', 'W5 已接收任务', 'BLOCKED_AUTH', '需要完成 OAuth']) {
+  const visible = await page.getByText(forbiddenCopy, { exact: false }).evaluateAll(nodes =>
+    nodes.some(node => {
+      const style = window.getComputedStyle(node)
+      return style.display !== 'none' && style.visibility !== 'hidden' && node.getClientRects().length > 0
+    }),
+  )
+  if (visible) {
+    throw new Error(`Default UI exposed internal copy: ${forbiddenCopy}`)
+  }
+}
 if (browserRequests.some(request => /\/revisions\/[^/]+\/(preview|download)$/.test(new URL(request.url).pathname))) {
   throw new Error('Artifact preview/download was requested before an Artifact existed')
 }

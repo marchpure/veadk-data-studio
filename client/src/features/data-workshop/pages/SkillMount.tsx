@@ -4,9 +4,18 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { ArtifactPanel } from '../skill/ArtifactPanel'
 import { skillApi } from '../skill/api'
 import { Conversation } from '../skill/Conversation'
+import { ContextPicker } from '../skill/ContextPicker'
 import { NewSkill } from '../skill/NewSkill'
 import { SkillRail } from '../skill/SkillRail'
-import type { SkillCatalog, SkillContextRef, SkillRevision, SkillSession, WorkshopSkill } from '../skill/types'
+import '../skill/skill-ux.css'
+import type {
+  SkillCatalog,
+  SkillContextRef,
+  SkillCreateMode,
+  SkillRevision,
+  SkillSession,
+  WorkshopSkill,
+} from '../skill/types'
 import { openVikingApi } from '../../openviking/api'
 
 type MobilePane = 'skills' | 'conversation' | 'artifact'
@@ -19,12 +28,24 @@ function queryFor(skillId?: string, sessionId?: string, mode?: 'new') {
   return `/skill${search.size ? `?${search}` : ''}`
 }
 
-function ContextSummary({ session }: { session: SkillSession }) {
+function ContextSummary({
+  session,
+  onAddAction,
+  onAddKnowledge,
+}: {
+  session: SkillSession
+  onAddAction: () => void
+  onAddKnowledge: () => void
+}) {
   const { mcp_refs: mcp, knowledge_refs: knowledge } = session.context_refs
   return (
     <div className="dw-context-summary">
-      <span><Database size={13} />{mcp.length ? `${mcp.length} 个 Action` : '未选择 Action'}</span>
-      <span><BookOpen size={13} />{knowledge.length ? `${knowledge.length} 个 ResourceRef` : '未选择知识'}</span>
+      {mcp.length
+        ? <span><Database size={13} />{mcp.length} 个 Action</span>
+        : <button type="button" onClick={onAddAction}><Database size={13} />添加 Action</button>}
+      {knowledge.length
+        ? <span><BookOpen size={13} />{knowledge.length} 个知识资源</span>
+        : <button type="button" onClick={onAddKnowledge}><BookOpen size={13} />添加知识</button>}
     </div>
   )
 }
@@ -68,6 +89,7 @@ export function SkillMount() {
   const [mobilePane, setMobilePane] = useState<MobilePane>('conversation')
   const [importedKnowledge, setImportedKnowledge] = useState<SkillContextRef[]>([])
   const [importError, setImportError] = useState('')
+  const [contextEditor, setContextEditor] = useState<'action' | 'knowledge' | null>(null)
 
   const selectedSkill = skills.find(item => item.id === requestedSkillId) || null
   const visibleSkills = useMemo(() => {
@@ -107,7 +129,7 @@ export function SkillMount() {
       .catch(reason => {
         if (!cancelled) {
           setImportedKnowledge([])
-          setImportError(reason instanceof Error ? reason.message : '该 ResourceRef 已失效或无权访问')
+          setImportError(reason instanceof Error ? reason.message : '该知识资源已失效或无权访问')
         }
       })
     return () => { cancelled = true }
@@ -223,27 +245,35 @@ export function SkillMount() {
     }
   }
 
-  const send = async (message: string) => {
-    if (!session) return
+  const invokeSession = async (current: SkillSession, skillId: string, message: string) => {
+    if (!current.context_refs.mcp_refs.length && !current.context_refs.knowledge_refs.length) {
+      setError('请先添加至少一个 Action 或知识资源，再开始生成。')
+      return false
+    }
     try {
-      const accepted = await skillApi.invoke(session.id, message, crypto.randomUUID())
-      const eventPage = await skillApi.events(session.id, accepted.events.length)
+      const accepted = await skillApi.invoke(current.id, message, crypto.randomUUID())
+      const eventPage = await skillApi.events(current.id, accepted.events.length)
       setSession({
         ...accepted,
         events: [...accepted.events, ...eventPage.items],
         status: eventPage.status,
       })
       if (eventPage.done) {
-        setSession(await skillApi.getSession(session.id))
+        setSession(await skillApi.getSession(current.id))
         void loadSkills()
-        if (selectedSkill) {
-          void skillApi.revisions(selectedSkill.id).then(value => setRevisions(value.items))
-        }
+        void skillApi.revisions(skillId).then(value => setRevisions(value.items))
       }
       setError('')
+      return true
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '发送失败')
+      return false
     }
+  }
+
+  const send = async (message: string) => {
+    if (!session || !selectedSkill) return
+    await invokeSession(session, selectedSkill.id, message)
   }
 
   const refreshSession = async (action: 'cancel' | 'retry') => {
@@ -265,11 +295,27 @@ export function SkillMount() {
       }))
       setError('')
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '移除 ResourceRef 失败')
+      setError(reason instanceof Error ? reason.message : '移除知识资源失败')
     }
   }
 
-  const createSkill = async (value: Parameters<typeof skillApi.createSkill>[0]) => {
+  const updateContext = async (mcpRefs: SkillContextRef[], knowledgeRefs: SkillContextRef[]) => {
+    if (!session) return
+    try {
+      setSession(await skillApi.updateContext(session.id, {
+        mcp_refs: mcpRefs,
+        knowledge_refs: knowledgeRefs,
+      }))
+      setError('')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '更新上下文失败')
+    }
+  }
+
+  const createSkill = async (
+    value: Parameters<typeof skillApi.createSkill>[0],
+    mode: SkillCreateMode,
+  ) => {
     setCreating(true)
     try {
       const created = await skillApi.createSkill(value)
@@ -278,6 +324,14 @@ export function SkillMount() {
       setSession(created.session)
       setError('')
       navigate(queryFor(created.skill.id, created.session.id))
+      if (mode === 'generate') {
+        const started = await invokeSession(
+          created.session,
+          created.skill.id,
+          value.description || `生成 ${value.title}`,
+        )
+        if (!started) return
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '创建 Skill 失败')
     } finally {
@@ -311,9 +365,9 @@ export function SkillMount() {
           ) : selectedSkill && session ? (
             <>
               <header className="dw-skill-header">
-                <div><span className="dw-eyebrow">Skill Workspace</span><h1>{selectedSkill.title}</h1><p>{selectedSkill.description || selectedSkill.target_skill}</p></div>
+                <div><span className="dw-eyebrow">Skill 工作台</span><h1>{selectedSkill.title}</h1>{selectedSkill.description && <p>{selectedSkill.description}</p>}</div>
                 <div className="dw-session-control">
-                  <label><span>Session</span><ChevronDown size={13} />
+                  <label><span>会话</span><ChevronDown size={13} />
                     <select
                       value={session.id}
                       onChange={event => {
@@ -329,26 +383,43 @@ export function SkillMount() {
                       }}
                     >
                       {sessions.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
-                      <option value="__new__">＋ 新建 Session</option>
+                      <option value="__new__">＋ 新建会话</option>
                     </select>
                   </label>
                 </div>
               </header>
-              <ContextSummary session={session} />
+              <ContextSummary
+                session={session}
+                onAddAction={() => setContextEditor('action')}
+                onAddKnowledge={() => setContextEditor('knowledge')}
+              />
               <ResourceRefList session={session} onRemove={item => void removeKnowledgeRef(item)} />
+              {contextEditor && (
+                <ContextPicker
+                  key={contextEditor}
+                  catalog={catalog}
+                  selectedMcp={session.context_refs.mcp_refs}
+                  selectedKnowledge={session.context_refs.knowledge_refs}
+                  initialOpen={contextEditor}
+                  onMcpChange={items => void updateContext(items, session.context_refs.knowledge_refs)}
+                  onKnowledgeChange={items => void updateContext(session.context_refs.mcp_refs, items)}
+                />
+              )}
               <Conversation
                 session={session}
                 disabled={creating}
                 onSend={send}
                 onCancel={() => refreshSession('cancel')}
                 onRetry={() => refreshSession('retry')}
+                onAddAction={() => setContextEditor('action')}
+                onAddKnowledge={() => setContextEditor('knowledge')}
               />
             </>
           ) : (
             <div className="dw-skill-empty">
               <span><Sparkles size={25} /></span>
               <h1>{loading ? '正在打开 Skill 工作台' : '把数据能力变成可复用的 Skill'}</h1>
-              <p>{loading ? '正在读取你的 Skill 与 Session…' : '从一个明确目标开始，连接可见的 Actions 与知识资源。'}</p>
+              <p>{loading ? '正在读取你的 Skill 与会话…' : '从一个明确目标开始，连接可见的 Action 与知识资源。'}</p>
               {!loading && <button className="dw-button dw-button-primary" onClick={() => navigate(queryFor(undefined, undefined, 'new'))}><Plus size={15} />新建 Skill</button>}
             </div>
           )}

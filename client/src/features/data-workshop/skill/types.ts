@@ -10,6 +10,8 @@ export type SkillStatus =
   | 'retryable'
   | 'error'
 
+export type SkillCreateMode = 'draft' | 'generate'
+
 export interface SkillContextRef {
   id: string
   kind: 'mcp_action' | 'knowledge_resource'
