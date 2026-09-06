@@ -84,17 +84,18 @@ async def issue_from_auth(auth: AuthContext, session: AsyncSession) -> str:
     verified_user_pool = _configured(getattr(auth, "external_user_pool", None))
     tenant_id = auth.tenant_id
     audience = _configured(os.getenv("I4A_DELEGATION_AUDIENCE")) or DEFAULT_AUDIENCE
+    oidc_audience = _configured(os.getenv("DWV1_OIDC_AUDIENCE"))
     issuer = _configured(os.getenv("I4A_DELEGATION_ISSUER"))
     user_pool = _configured(os.getenv("I4A_DELEGATION_USER_POOL"))
     required_group = _configured(os.getenv("I4A_DELEGATION_GROUP_UID"))
     groups = list(getattr(auth, "external_groups", ()) or ())
     if not subject or not access_token or not verified_issuer or not verified_audience or not verified_user_pool:
         raise DelegationBrokerError("BLOCKED_AUTH")
-    if not issuer or not user_pool or not required_group:
+    if not oidc_audience or not issuer or not user_pool or not required_group:
         raise DelegationBrokerError("BLOCKED_CONFIG")
     if (
         verified_issuer != issuer
-        or verified_audience != audience
+        or verified_audience != oidc_audience
         or verified_user_pool != user_pool
         or required_group not in groups
     ):

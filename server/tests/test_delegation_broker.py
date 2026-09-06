@@ -40,6 +40,7 @@ async def broker_db(tmp_path, monkeypatch):
     monkeypatch.setenv("I4A_DELEGATION_USER_POOL", "pool-a")
     monkeypatch.setenv("I4A_DELEGATION_GROUP_UID", "group-a")
     monkeypatch.setenv("I4A_DELEGATION_AUDIENCE", "dwv1-skill-agent")
+    monkeypatch.setenv("DWV1_OIDC_AUDIENCE", "dwv1-skill-agent")
     yield factory
     await engine.dispose()
 
@@ -84,6 +85,33 @@ async def test_broker_issue_rejects_identity_binding_drift(broker_db):
         with pytest.raises(delegation_broker.DelegationBrokerError) as error:
             await delegation_broker.issue_from_auth(owner, db)
         assert error.value.code == "BLOCKED_AUTH"
+
+
+@pytest.mark.asyncio
+async def test_broker_issue_keeps_oidc_and_delegation_audiences_distinct(broker_db, monkeypatch):
+    monkeypatch.setenv("DWV1_OIDC_AUDIENCE", "data-studio-oauth-client")
+    owner = SimpleNamespace(
+        tenant_id=uuid4(),
+        external_subject="subject-a",
+        external_groups=("group-a",),
+        access_token="short-lived-token",
+        external_issuer="https://issuer.example",
+        external_audience="data-studio-oauth-client",
+        external_user_pool="pool-a",
+    )
+
+    async with broker_db() as db:
+        ref = await delegation_broker.issue_from_auth(owner, db)
+        await db.commit()
+
+        record = (
+            await db.execute(
+                delegation_broker.select(Delegation).where(
+                    Delegation.ref_hash == delegation_broker._ref_hash(ref)
+                )
+            )
+        ).scalar_one()
+        assert record.audience == "dwv1-skill-agent"
 
 
 @pytest.mark.asyncio
