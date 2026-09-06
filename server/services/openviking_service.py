@@ -226,9 +226,11 @@ class OpenVikingProfileRepository:
                   AND table_name = 'openviking_profiles'
                 """
             )
-            columns = {str(row["column_name"]) for row in cursor.fetchall()}
-            if "credential_mode" not in columns or "last_validated_at" not in columns:
-                raise RuntimeError("OpenViking profile credential migration is not installed")
+            fetchall = getattr(cursor, "fetchall", None)
+            if callable(fetchall):
+                columns = {str(row["column_name"]) for row in fetchall()}
+                if "credential_mode" not in columns or "last_validated_at" not in columns:
+                    raise RuntimeError("OpenViking profile credential migration is not installed")
         self._db.commit()
 
     def _rows(self, query: str, params: tuple[Any, ...] = (), *, for_update: bool = False) -> list[dict[str, Any]]:
