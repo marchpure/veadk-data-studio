@@ -3,11 +3,11 @@ from __future__ import annotations
 import os
 import re
 from typing import Any, Literal
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from server.auth.dependencies import AuthContext, get_current_auth_context
 from server.auth.scopes import Scope
@@ -50,9 +50,9 @@ SENSITIVE_KEYS = {
     "secret",
     "token",
 }
-CONSOLE_TEXT_TYPES = ("text/", "application/javascript", "application/json")
+OPENCONNECTOR_SUPPORT_PATHS = {"api", "assets", "docs", "favicon.png", "oauth", "openapi.json"}
 CONSOLE_ROOT_PATH = re.compile(
-    r"""(?P<prefix>["'(=:,\s])/(?P<path>api|assets|docs|oauth|openapi\.json|v1)(?P<suffix>[/?"'])"""
+    r"""(?P<prefix>["'])/(?P<path>assets|docs|favicon\.png)(?P<suffix>[/?"'])"""
 )
 
 
@@ -377,7 +377,7 @@ def _audit_view(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def _rewrite_console_content(content: bytes, content_type: str) -> bytes:
-    if not any(content_type.lower().startswith(prefix) for prefix in CONSOLE_TEXT_TYPES):
+    if not content_type.lower().startswith("text/html"):
         return content
     try:
         text = content.decode("utf-8")
@@ -409,6 +409,52 @@ class ReadOnlyTestPayload(BaseModel):
     operation: Literal["health", "identity", "tools_list", "list_connections"]
 
 
+class OpenConnectorLaunchPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    surface: Literal["overview", "providers", "marketplace", "actions", "runs", "access"]
+    resource_path: str = Field(default="", max_length=1024)
+    search: str = Field(default="", max_length=2048)
+
+
+def _safe_console_search(search: str) -> str:
+    value = search[1:] if search.startswith("?") else search
+    pairs = parse_qsl(value, keep_blank_values=True)
+    if any(key.casefold().replace("-", "_") in SENSITIVE_KEYS | {"embed"} for key, _ in pairs):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "INVALID_CONSOLE_SEARCH", "message": "Console search contains a reserved parameter"},
+        )
+    encoded = urlencode(pairs)
+    return f"?{encoded}" if encoded else ""
+
+
+def _console_path_allowed(path: str, surface: str) -> bool:
+    first = path.strip("/").split("/", 1)[0]
+    if first in OPENCONNECTOR_SUPPORT_PATHS:
+        return True
+    if first != surface:
+        return False
+    segments = path.strip("/").split("/")
+    if surface in {"overview", "marketplace", "runs", "access"}:
+        return len(segments) == 1
+    return all(segment and segment not in {".", ".."} for segment in segments)
+
+
+def _safe_console_resource_path(surface: str, resource_path: str) -> str:
+    if not resource_path:
+        return ""
+    if surface not in {"providers", "actions"} or not re.fullmatch(
+        r"/[A-Za-z0-9][A-Za-z0-9_.~-]{0,255}",
+        resource_path,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "INVALID_CONSOLE_PATH", "message": "Console resource path is not allowed"},
+        )
+    return resource_path
+
+
 @router.get("/bootstrap")
 async def bootstrap(auth: AuthContext = Depends(require_workshop_member)):
     client = get_openconnector_client()
@@ -425,6 +471,7 @@ async def bootstrap(auth: AuthContext = Depends(require_workshop_member)):
 
 @router.post("/openconnector/launch-sessions")
 async def create_launch_session(
+    body: OpenConnectorLaunchPayload,
     response: Response,
     auth: AuthContext = Depends(require_workshop_admin),
 ):
@@ -434,7 +481,9 @@ async def create_launch_session(
             status_code=503,
             detail={"code": "OPENCONNECTOR_NOT_CONFIGURED", "message": "OpenConnector is not configured"},
         )
-    session_id, session = launch_sessions.create(str(auth.tenant_id), str(auth.user_id))
+    safe_search = _safe_console_search(body.search)
+    resource_path = _safe_console_resource_path(body.surface, body.resource_path)
+    session_id, session = launch_sessions.create(str(auth.tenant_id), str(auth.user_id), body.surface)
     response.set_cookie(
         key=LAUNCH_COOKIE,
         value=session_id,
@@ -445,8 +494,12 @@ async def create_launch_session(
         httponly=True,
         samesite="strict",
     )
+    separator = "&" if safe_search else "?"
     return success_response(
-        data={"launch_url": "/oc/?embed=studio", "expires_at": session.expires_at},
+        data={
+            "launch_url": f"/oc/{body.surface}{resource_path}{safe_search}{separator}embed=studio",
+            "expires_at": session.expires_at,
+        },
         message="Launch session created",
     )
 
@@ -875,6 +928,8 @@ async def proxy_openconnector_console(
     session = launch_sessions.get(launch_session)
     if session is None:
         raise HTTPException(status_code=401, detail="A valid Data Workshop launch session is required")
+    if not _console_path_allowed(path, session.surface):
+        raise HTTPException(status_code=403, detail="OpenConnector surface is not allowed for this launch session")
     client = get_openconnector_client()
     try:
         upstream = await client.proxy(

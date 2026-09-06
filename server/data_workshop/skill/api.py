@@ -301,6 +301,15 @@ async def invoke(
     skill = await repo.get_skill(item.skill_id)
     if skill is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    context_refs = item.context_refs_json or {}
+    if not context_refs.get("mcp_refs") and not context_refs.get("knowledge_refs"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "CAPABILITY_REQUIRED",
+                "message": "请先添加至少一个 Action 或知识资源",
+            },
+        )
     prior_ids = {event.get("client_invocation_id") for event in (item.events_json or []) if isinstance(event, dict)}
     if body.client_invocation_id in prior_ids:
         return success_response(data=session_payload(item, skill), message="Invocation already accepted")
@@ -454,6 +463,15 @@ async def retry(
     skill = await repo.get_skill(item.skill_id)
     if skill is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    context_refs = item.context_refs_json or {}
+    if not context_refs.get("mcp_refs") and not context_refs.get("knowledge_refs"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "CAPABILITY_REQUIRED",
+                "message": "请先添加至少一个 Action 或知识资源",
+            },
+        )
     previous = item.last_invocation_json
     if not previous:
         raise HTTPException(status_code=409, detail="No invocation to retry")

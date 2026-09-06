@@ -22,9 +22,10 @@ const primaryNav = [
 
 const connectionNav = [
   ['总览', '/connections/overview'],
-  ['连接器', '/connections/providers/market'],
-  ['Actions', '/connections/actions'],
-  ['Trace', '/connections/trace'],
+  ['提供商', '/connections/providers'],
+  ['市场', '/connections/marketplace'],
+  ['操作', '/connections/actions'],
+  ['运行记录', '/connections/runs'],
   ['访问权限', '/connections/access'],
   ['文档', '/connections/docs'],
 ]

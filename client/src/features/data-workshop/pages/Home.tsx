@@ -2,7 +2,7 @@ import { ArrowRight, BookOpenCheck, Database, KeyRound, Sparkles } from 'lucide-
 import { Link } from 'react-router-dom'
 
 const steps = [
-  { title: '准备数据', body: '创建并验证数据库或 API 连接', to: '/connections/providers/market', icon: Database },
+  { title: '准备数据', body: '创建并验证数据库或 API 连接', to: '/connections/providers', icon: Database },
   { title: '配置访问权限', body: '决定谁可以在连接上执行哪些 Actions', to: '/connections/access', icon: KeyRound },
   { title: '查看接入文档', body: '使用 MCP、HTTP API 或 SDK 接入', to: '/connections/docs', icon: BookOpenCheck },
   { title: '生成 Skill', body: '把已授权的数据能力沉淀为业务技能', to: '/skill', icon: Sparkles },

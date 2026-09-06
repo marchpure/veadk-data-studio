@@ -1,7 +1,7 @@
 import { ExternalLink, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { apiFetch } from '../../../services/api'
+import { workshopApi } from '../api'
 import { AsyncState } from '../components/AsyncState'
 import type { LoadState } from '../types'
 import './openconnector-surface.css'
@@ -21,6 +21,7 @@ interface OpenConnectorRouteChangedMessage {
   type: 'openconnector.route.changed'
   version: 1
   surface: OpenConnectorSurfaceKey
+  resourcePath: string
   search: string
 }
 
@@ -49,9 +50,11 @@ const embedOnlyQueryKeys = new Set(['embed'])
 export function OpenConnectorSurface({
   surface,
   title = surface,
+  resourcePath = '',
 }: {
   surface: OpenConnectorSurfaceKey
   title?: string
+  resourcePath?: string
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const navigate = useNavigate()
@@ -60,16 +63,25 @@ export function OpenConnectorSurface({
   const [launchUrl, setLaunchUrl] = useState('')
   const [frameReady, setFrameReady] = useState(false)
   const safeSearch = sanitizeSearch(location.search)
-  const desiredRoute = useRef({ surface, search: safeSearch })
-  desiredRoute.current = { surface, search: safeSearch }
+  const desiredRoute = useRef({ surface, resourcePath, search: safeSearch })
+  desiredRoute.current = { surface, resourcePath, search: safeSearch }
 
   const load = useCallback(async () => {
     setState('loading')
     setFrameReady(false)
     try {
       const requested = desiredRoute.current
-      const session = await createSurfaceLaunchSession(requested.surface, requested.search)
-      setLaunchUrl(validateSurfaceLaunchUrl(session.launch_url, requested.surface, requested.search))
+      const session = await createSurfaceLaunchSession(
+        requested.surface,
+        requested.search,
+        requested.resourcePath,
+      )
+      setLaunchUrl(validateSurfaceLaunchUrl(
+        session.launch_url,
+        requested.surface,
+        requested.search,
+        requested.resourcePath,
+      ))
       setState('ready')
     } catch {
       setState('error')
@@ -78,7 +90,7 @@ export function OpenConnectorSurface({
 
   useEffect(() => {
     void load()
-  }, [load, surface])
+  }, [load, resourcePath, surface])
 
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
@@ -89,7 +101,7 @@ export function OpenConnectorSurface({
       ) {
         return
       }
-      const nextLocation = `${parentRouteBySurface[event.data.surface]}${event.data.search}`
+      const nextLocation = `${parentRouteBySurface[event.data.surface]}${event.data.resourcePath}${event.data.search}`
       if (`${location.pathname}${location.search}` !== nextLocation) {
         void navigate(nextLocation)
       }
@@ -105,9 +117,10 @@ export function OpenConnectorSurface({
       type: 'openconnector.route.navigate',
       version: 1,
       surface,
+      resourcePath,
       search: safeSearch,
     }, window.location.origin)
-  }, [frameReady, safeSearch, state, surface])
+  }, [frameReady, resourcePath, safeSearch, state, surface])
 
   if (state !== 'ready') {
     return (
@@ -152,24 +165,16 @@ export function OpenConnectorSurface({
 async function createSurfaceLaunchSession(
   surface: OpenConnectorSurfaceKey,
   search: string,
+  resourcePath: string,
 ): Promise<{ launch_url: string; expires_at: number }> {
-  const response = await apiFetch('/api/v1/openconnector/launch-sessions', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ surface, search }),
-  })
-  const payload = await response.json().catch(() => null)
-  if (!response.ok || typeof payload?.data?.launch_url !== 'string') {
-    throw new Error(payload?.detail?.message || payload?.message || '无法建立 OpenConnector Console 会话')
-  }
-  return payload.data
+  return workshopApi.createLaunchSession(surface, search, resourcePath)
 }
 
 function validateSurfaceLaunchUrl(
   launchUrl: string,
   surface: OpenConnectorSurfaceKey,
   search: string,
+  resourcePath: string,
 ): string {
   const url = new URL(launchUrl, window.location.origin)
   const routeSearch = new URLSearchParams(url.search)
@@ -177,7 +182,7 @@ function validateSurfaceLaunchUrl(
   const routeSearchValue = routeSearch.toString()
   if (
     url.origin !== window.location.origin
-    || url.pathname !== `/oc/${surface}`
+    || url.pathname !== `/oc/${surface}${resourcePath}`
     || url.searchParams.get('embed') !== 'studio'
     || sanitizeSearch(routeSearchValue) !== search
     || (routeSearchValue ? `?${routeSearchValue}` : '') !== search
@@ -199,6 +204,8 @@ function isRouteChangedMessage(value: unknown): value is OpenConnectorRouteChang
   return message.type === 'openconnector.route.changed'
     && message.version === 1
     && isSurface(message.surface)
+    && typeof message.resourcePath === 'string'
+    && isSafeResourcePath(message.surface, message.resourcePath)
     && typeof message.search === 'string'
     && sanitizeSearch(message.search) === message.search
 }
@@ -206,6 +213,12 @@ function isRouteChangedMessage(value: unknown): value is OpenConnectorRouteChang
 function isSurface(value: unknown): value is OpenConnectorSurfaceKey {
   return typeof value === 'string'
     && openConnectorSurfaces.some(surface => surface === value)
+}
+
+function isSafeResourcePath(surface: OpenConnectorSurfaceKey, resourcePath: string): boolean {
+  if (!resourcePath) return true
+  return (surface === 'providers' || surface === 'actions')
+    && /^\/[A-Za-z0-9][A-Za-z0-9_.~-]{0,255}$/.test(resourcePath)
 }
 
 function sanitizeSearch(search: string): string {

@@ -110,7 +110,10 @@ class W5SkillAgentAdapter:
                     headers=headers,
                 ) as response:
                     if response.status_code in {401, 403}:
-                        raise W5AdapterError("BLOCKED_AUTH", "W5 拒绝了委托授权，请重新授权。")
+                        raise W5AdapterError(
+                            "W5_SERVICE_AUTH_INVALID",
+                            "Skill 生成服务认证失败，管理员需检查服务配置",
+                        )
                     if response.status_code >= 400:
                         raise W5AdapterError(
                             "RETRYABLE",

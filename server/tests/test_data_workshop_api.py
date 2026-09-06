@@ -255,19 +255,19 @@ def test_console_proxy_rewrites_same_upstream_redirect_and_rejects_other_hosts()
         adapter.public_proxy_location("https://attacker.example/collect")
 
 
-def test_console_proxy_rewrites_root_relative_assets_and_api_paths() -> None:
+def test_console_proxy_rewrites_html_entry_paths_without_mutating_bundled_javascript() -> None:
     source = (
-        b'<script src="/assets/app.js"></script><a href="/docs">Docs</a>'
-        b'<script>fetch("/api/providers");fetch("/v1/actions");location="/oauth/start"</script>'
+        b'<link rel="icon" href="/favicon.png"><script src="/assets/app.js"></script>'
+        b'<a href="/docs">Docs</a>'
     )
 
     rewritten = api._rewrite_console_content(source, "text/html; charset=utf-8").decode()
 
+    assert 'href="/oc/favicon.png"' in rewritten
     assert 'src="/oc/assets/app.js"' in rewritten
     assert 'href="/oc/docs"' in rewritten
-    assert 'fetch("/oc/api/providers")' in rewritten
-    assert 'fetch("/oc/v1/actions")' in rewritten
-    assert 'location="/oc/oauth/start"' in rewritten
+    javascript = b'fetch("/api/providers");fetch("/v1/actions");location="/oauth/start"'
+    assert api._rewrite_console_content(javascript, "application/javascript") == javascript
     assert api._rewrite_console_content(b"\x89PNG", "image/png") == b"\x89PNG"
 
 
@@ -623,11 +623,32 @@ def test_real_mode_uses_server_side_controlled_user_credential(
     assert fake_client.calls[-1][2]["bearer_token"] != "studio-user-jwt"
 
 
+@pytest.mark.asyncio
+async def test_app_config_exposes_only_the_non_secret_openviking_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from server.routers import app_config
+
+    monkeypatch.setenv("OPENVIKING_CREDENTIAL_POLICY", "hybrid")
+    monkeypatch.setattr(app_config, "get_feature_flags", lambda: {})
+    monkeypatch.setattr(app_config, "external_oidc_enabled", lambda: True)
+    monkeypatch.setattr(app_config, "is_self_hosted", lambda: True)
+    monkeypatch.setattr(app_config, "get_self_hosted_config", lambda: {"org_name": "Example"})
+
+    response = await app_config.get_app_config()
+
+    assert response["data"]["openviking_credential_policy"] == "hybrid"
+    assert "api_key" not in str(response).casefold()
+
+
 def test_launch_session_cookie_is_short_lived_http_only_secure_and_strict(
     client: TestClient,
     fake_client: FakeOpenConnector,
 ) -> None:
-    response = client.post("/api/v1/openconnector/launch-sessions")
+    response = client.post(
+        "/api/v1/openconnector/launch-sessions",
+        json={"surface": "runs", "search": "?service=gmail"},
+    )
 
     assert response.status_code == 200
     cookie = response.headers["set-cookie"]
@@ -638,7 +659,65 @@ def test_launch_session_cookie_is_short_lived_http_only_secure_and_strict(
     assert "Path=/oc" in cookie
     assert "max-age=300" in cookie.lower()
     assert "token" not in response.text.lower()
-    assert response.json()["data"]["launch_url"] == "/oc/?embed=studio"
+    assert response.json()["data"]["launch_url"] == "/oc/runs?service=gmail&embed=studio"
+
+
+@pytest.mark.parametrize("surface", ["overview", "providers", "marketplace", "actions", "runs", "access"])
+def test_launch_session_accepts_only_known_console_surfaces(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+    surface: str,
+) -> None:
+    response = client.post(
+        "/api/v1/openconnector/launch-sessions",
+        json={"surface": surface, "search": ""},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["launch_url"] == f"/oc/{surface}?embed=studio"
+
+
+def test_launch_session_accepts_a_safe_provider_detail_path(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+) -> None:
+    response = client.post(
+        "/api/v1/openconnector/launch-sessions",
+        json={"surface": "providers", "resource_path": "/oracle", "search": ""},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["launch_url"] == "/oc/providers/oracle?embed=studio"
+
+
+def test_launch_session_rejects_unknown_surface_and_sensitive_search(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+) -> None:
+    assert client.post(
+        "/api/v1/openconnector/launch-sessions",
+        json={"surface": "traces", "search": ""},
+    ).status_code == 422
+    sensitive = client.post(
+        "/api/v1/openconnector/launch-sessions",
+        json={"surface": "runs", "search": "?token=browser-secret"},
+    )
+    assert sensitive.status_code == 422
+    assert "browser-secret" not in sensitive.text
+    unsafe_path = client.post(
+        "/api/v1/openconnector/launch-sessions",
+        json={"surface": "providers", "resource_path": "/../access", "search": ""},
+    )
+    assert unsafe_path.status_code == 422
+
+
+def test_launch_session_store_binds_the_requested_surface() -> None:
+    store = LaunchSessionStore()
+
+    session_id, session = store.create("tenant-a", "user-admin", "runs")
+
+    assert store.get(session_id) == session
+    assert session.surface == "runs"
 
 
 def test_console_proxy_rejects_missing_launch_session(client: TestClient, fake_client: FakeOpenConnector) -> None:
@@ -665,7 +744,10 @@ def test_console_proxy_uses_secure_launch_cookie_without_exposing_admin_token(
     app.dependency_overrides[api.require_workshop_admin] = lambda: admin
     secure_client = TestClient(app, base_url="https://testserver")
 
-    launch = secure_client.post("/api/v1/openconnector/launch-sessions")
+    launch = secure_client.post(
+        "/api/v1/openconnector/launch-sessions",
+        json={"surface": "actions", "search": ""},
+    )
     response = secure_client.get("/oc/actions?embed=studio")
 
     assert launch.status_code == 200
@@ -677,6 +759,55 @@ def test_console_proxy_uses_secure_launch_cookie_without_exposing_admin_token(
     assert "test-admin-token" not in response.text
     assert "content-encoding" not in response.headers
     assert "set-cookie" not in response.headers
+
+
+def test_console_launch_session_cannot_cross_surface(
+    fake_client: FakeOpenConnector,
+) -> None:
+    app = FastAPI()
+    app.include_router(api.router, prefix="/api")
+    app.include_router(api.console_router)
+    admin = SimpleNamespace(
+        tenant_id="tenant-a",
+        user_id="user-admin",
+        is_admin=True,
+        has_scope=lambda _: True,
+    )
+    app.dependency_overrides[api.require_workshop_admin] = lambda: admin
+    secure_client = TestClient(app, base_url="https://testserver")
+
+    launch = secure_client.post(
+        "/api/v1/openconnector/launch-sessions",
+        json={"surface": "runs", "search": ""},
+    )
+
+    assert launch.status_code == 200
+    assert secure_client.get("/oc/actions?embed=studio").status_code == 403
+    assert secure_client.get("/oc/runs?embed=studio").status_code == 200
+    assert secure_client.get("/oc/assets/app.js").status_code == 200
+
+
+def test_console_launch_session_allows_standalone_view_of_the_bound_surface(
+    fake_client: FakeOpenConnector,
+) -> None:
+    app = FastAPI()
+    app.include_router(api.router, prefix="/api")
+    app.include_router(api.console_router)
+    admin = SimpleNamespace(
+        tenant_id="tenant-a",
+        user_id="user-admin",
+        is_admin=True,
+        has_scope=lambda _: True,
+    )
+    app.dependency_overrides[api.require_workshop_admin] = lambda: admin
+    secure_client = TestClient(app, base_url="https://testserver")
+    launch = secure_client.post(
+        "/api/v1/openconnector/launch-sessions",
+        json={"surface": "runs", "search": ""},
+    )
+
+    assert launch.status_code == 200
+    assert secure_client.get("/oc/runs").status_code == 200
 
 
 @pytest.mark.asyncio

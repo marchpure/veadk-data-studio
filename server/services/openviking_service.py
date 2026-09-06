@@ -20,7 +20,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 import httpx
@@ -32,6 +32,43 @@ from server.utils.database_config import sync_connect_args
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".json", ".md", ".pdf", ".txt", ".xlsx"}
 SAFE_RESOURCE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$")
+OPENVIKING_CREDENTIAL_POLICIES = {"managed", "byok", "hybrid"}
+OpenVikingCredentialPolicy = Literal["managed", "byok", "hybrid"]
+OpenVikingCredentialMode = Literal["managed", "byok"]
+
+
+def openviking_credential_policy() -> OpenVikingCredentialPolicy:
+    configured = os.getenv("OPENVIKING_CREDENTIAL_POLICY", "").strip().casefold()
+    if not configured:
+        managed_runtime = (
+            os.getenv("DWV1_EXTERNAL_OIDC_ENABLED", "").strip().casefold() in {"1", "true", "yes"}
+            or bool(os.getenv("OPENVIKING_MANAGED_BASE_URL", "").strip())
+        )
+        return "managed" if managed_runtime else "byok"
+    if configured not in OPENVIKING_CREDENTIAL_POLICIES:
+        raise OpenVikingError(
+            "OPENVIKING_UNAVAILABLE",
+            "OPENVIKING_CREDENTIAL_POLICY must be managed, byok, or hybrid",
+            503,
+        )
+    if configured == "byok":
+        return "byok"
+    if configured == "hybrid":
+        return "hybrid"
+    return "managed"
+
+
+def legacy_openviking_credential_mode() -> OpenVikingCredentialMode:
+    configured = os.getenv("OPENVIKING_CREDENTIAL_POLICY", "").strip().casefold()
+    if configured == "byok":
+        return "byok"
+    if configured in {"managed", "hybrid"}:
+        return "managed"
+    managed_runtime = (
+        os.getenv("DWV1_EXTERNAL_OIDC_ENABLED", "").strip().casefold() in {"1", "true", "yes"}
+        or bool(os.getenv("OPENVIKING_MANAGED_BASE_URL", "").strip())
+    )
+    return "managed" if managed_runtime else "byok"
 
 
 class OpenVikingError(RuntimeError):
@@ -87,6 +124,8 @@ class OpenVikingProfile:
     status: str
     created_at: float
     updated_at: float
+    credential_mode: OpenVikingCredentialMode = "byok"
+    last_validated_at: float | None = None
 
 
 class OpenVikingProfileRepository:
@@ -119,7 +158,9 @@ class OpenVikingProfileRepository:
               display_name TEXT NOT NULL,
               encrypted_base_url BLOB NOT NULL, encrypted_api_key BLOB NOT NULL,
               workspace_uri TEXT NOT NULL, status TEXT NOT NULL,
-              created_at REAL NOT NULL, updated_at REAL NOT NULL
+              created_at REAL NOT NULL, updated_at REAL NOT NULL,
+              credential_mode TEXT NOT NULL DEFAULT 'managed',
+              last_validated_at REAL
             );
             CREATE INDEX IF NOT EXISTS openviking_profile_scope
               ON openviking_profiles(tenant_id, workspace_id);
@@ -145,6 +186,13 @@ class OpenVikingProfileRepository:
         columns = {str(row["name"]) for row in self._db.execute("PRAGMA table_info(openviking_profiles)").fetchall()}
         if "principal_id" not in columns:
             self._db.execute("ALTER TABLE openviking_profiles ADD COLUMN principal_id TEXT NOT NULL DEFAULT ''")
+        if "credential_mode" not in columns:
+            legacy_mode = legacy_openviking_credential_mode()
+            self._db.execute(
+                f"ALTER TABLE openviking_profiles ADD COLUMN credential_mode TEXT NOT NULL DEFAULT '{legacy_mode}'"
+            )
+        if "last_validated_at" not in columns:
+            self._db.execute("ALTER TABLE openviking_profiles ADD COLUMN last_validated_at REAL")
         ref_columns = {
             str(row["name"]) for row in self._db.execute("PRAGMA table_info(openviking_resource_refs)").fetchall()
         }
@@ -170,6 +218,17 @@ class OpenVikingProfileRepository:
             tables = cursor.fetchone()
             if not tables or any(item is None for item in tables):
                 raise RuntimeError("OpenViking profile store migration is not installed")
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'openviking_profiles'
+                """
+            )
+            columns = {str(row["column_name"]) for row in cursor.fetchall()}
+            if columns and ("credential_mode" not in columns or "last_validated_at" not in columns):
+                raise RuntimeError("OpenViking profile credential migration is not installed")
         self._db.commit()
 
     def _rows(self, query: str, params: tuple[Any, ...] = (), *, for_update: bool = False) -> list[dict[str, Any]]:
@@ -186,7 +245,8 @@ class OpenVikingProfileRepository:
         if self._postgres:
             rows = self._rows(
                 """SELECT profile_id,tenant_id,workspace_id,principal_id,display_name,
-                encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at
+                encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at,
+                credential_mode,last_validated_at
                 FROM openviking_profiles
                 WHERE tenant_id=%s AND workspace_id=%s AND principal_id=%s ORDER BY created_at""",
                 (tenant_id, workspace_id, principal_id),
@@ -194,7 +254,8 @@ class OpenVikingProfileRepository:
             return [OpenVikingProfile(**row) for row in rows]
         rows = self._db.execute(
             """SELECT profile_id,tenant_id,workspace_id,principal_id,display_name,
-            encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at
+            encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at,
+            credential_mode,last_validated_at
             FROM openviking_profiles
             WHERE tenant_id=? AND workspace_id=? AND principal_id=? ORDER BY created_at""",
             (tenant_id, workspace_id, principal_id),
@@ -205,7 +266,8 @@ class OpenVikingProfileRepository:
         if self._postgres:
             rows = self._rows(
                 """SELECT profile_id,tenant_id,workspace_id,principal_id,display_name,
-                encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at
+                encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at,
+                credential_mode,last_validated_at
                 FROM openviking_profiles
                 WHERE profile_id=%s AND tenant_id=%s AND workspace_id=%s AND principal_id=%s""",
                 (profile_id, tenant_id, workspace_id, principal_id),
@@ -213,7 +275,8 @@ class OpenVikingProfileRepository:
             return OpenVikingProfile(**rows[0]) if rows else None
         row = self._db.execute(
             """SELECT profile_id,tenant_id,workspace_id,principal_id,display_name,
-            encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at
+            encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at,
+            credential_mode,last_validated_at
             FROM openviking_profiles
             WHERE profile_id=? AND tenant_id=? AND workspace_id=? AND principal_id=?""",
             (profile_id, tenant_id, workspace_id, principal_id),
@@ -226,26 +289,59 @@ class OpenVikingProfileRepository:
                 cursor.execute(
                     """INSERT INTO openviking_profiles
                     (profile_id,tenant_id,workspace_id,principal_id,display_name,
-                     encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at)
-                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                     encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at,
+                     credential_mode,last_validated_at)
+                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT(profile_id) DO UPDATE SET display_name=EXCLUDED.display_name,
                     encrypted_base_url=EXCLUDED.encrypted_base_url,
                     encrypted_api_key=EXCLUDED.encrypted_api_key,
                     workspace_uri=EXCLUDED.workspace_uri,status=EXCLUDED.status,
-                    updated_at=EXCLUDED.updated_at""",
-                    tuple(profile.__dict__.values()),
+                    updated_at=EXCLUDED.updated_at,
+                    credential_mode=EXCLUDED.credential_mode,
+                    last_validated_at=EXCLUDED.last_validated_at""",
+                    (
+                        profile.profile_id,
+                        profile.tenant_id,
+                        profile.workspace_id,
+                        profile.principal_id,
+                        profile.display_name,
+                        profile.encrypted_base_url,
+                        profile.encrypted_api_key,
+                        profile.workspace_uri,
+                        profile.status,
+                        profile.created_at,
+                        profile.updated_at,
+                        profile.credential_mode,
+                        profile.last_validated_at,
+                    ),
                 )
             self._commit()
             return profile
         self._db.execute(
             """INSERT INTO openviking_profiles
             (profile_id,tenant_id,workspace_id,principal_id,display_name,
-             encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?)
+             encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at,
+             credential_mode,last_validated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(profile_id) DO UPDATE SET display_name=excluded.display_name,
             encrypted_base_url=excluded.encrypted_base_url, encrypted_api_key=excluded.encrypted_api_key,
-            workspace_uri=excluded.workspace_uri, status=excluded.status, updated_at=excluded.updated_at""",
-            tuple(profile.__dict__.values()),
+            workspace_uri=excluded.workspace_uri, status=excluded.status, updated_at=excluded.updated_at,
+            credential_mode=excluded.credential_mode,last_validated_at=excluded.last_validated_at""",
+            (
+                profile.profile_id,
+                profile.tenant_id,
+                profile.workspace_id,
+                profile.principal_id,
+                profile.display_name,
+                profile.encrypted_base_url,
+                profile.encrypted_api_key,
+                profile.workspace_uri,
+                profile.status,
+                profile.created_at,
+                profile.updated_at,
+                profile.credential_mode,
+                profile.last_validated_at,
+            ),
         )
         self._db.commit()
         return profile
@@ -850,8 +946,10 @@ class OpenVikingService:
         return {
             "profile_id": profile.profile_id,
             "display_name": profile.display_name,
-            "workspace_uri": "opaque-workspace",
+            "workspace_uri": f"viking://workspace/{profile.profile_id}/",
             "status": profile.status,
+            "credential_mode": profile.credential_mode,
+            "last_validated_at": profile.last_validated_at,
             "root_resource_ref": self.resource_ref(profile, profile.workspace_uri),
             "base_url_configured": True,
             "api_key_configured": True,
@@ -869,6 +967,7 @@ class OpenVikingService:
         base_url: str,
         api_key: str,
         workspace_uri: str,
+        credential_mode: OpenVikingCredentialMode = "byok",
     ) -> OpenVikingProfile:
         self._validate_url(base_url)
         profile_id = "ov_" + secrets.token_hex(12)
@@ -886,6 +985,8 @@ class OpenVikingService:
                 "pending",
                 now,
                 now,
+                credential_mode,
+                None,
             )
         )
 
@@ -893,6 +994,9 @@ class OpenVikingService:
         base_url = values.get("base_url")
         if base_url:
             self._validate_url(base_url)
+        api_key = values.get("api_key")
+        if api_key is not None and not api_key.strip():
+            api_key = None
         profile = OpenVikingProfile(
             profile.profile_id,
             profile.tenant_id,
@@ -900,13 +1004,15 @@ class OpenVikingService:
             profile.principal_id,
             values.get("display_name", profile.display_name),
             self._crypt(base_url.rstrip("/"), f"url:{profile.profile_id}") if base_url else profile.encrypted_base_url,
-            self._crypt(values["api_key"], f"key:{profile.profile_id}")
-            if values.get("api_key")
+            self._crypt(api_key, f"key:{profile.profile_id}")
+            if api_key
             else profile.encrypted_api_key,
             values.get("workspace_uri", profile.workspace_uri),
             "pending",
             profile.created_at,
             time.time(),
+            profile.credential_mode,
+            None,
         )
         return self.repository.save(profile)
 
@@ -935,16 +1041,25 @@ class OpenVikingService:
             if value is None:
                 raise OpenVikingError("UPSTREAM_REJECTED", "OpenViking validation failed", 502)
         except OpenVikingError:
+            now = time.time()
             self.repository.save(
-                OpenVikingProfile(**{**profile.__dict__, "status": "error", "updated_at": time.time()})
+                OpenVikingProfile(
+                    **{**profile.__dict__, "status": "error", "updated_at": now, "last_validated_at": now}
+                )
             )
             raise
         except httpx.HTTPError as exc:
+            now = time.time()
             self.repository.save(
-                OpenVikingProfile(**{**profile.__dict__, "status": "error", "updated_at": time.time()})
+                OpenVikingProfile(
+                    **{**profile.__dict__, "status": "error", "updated_at": now, "last_validated_at": now}
+                )
             )
             raise OpenVikingError("UPSTREAM_UNREACHABLE", "OpenViking endpoint is unreachable", 502) from exc
-        updated = OpenVikingProfile(**{**profile.__dict__, "status": "ready", "updated_at": time.time()})
+        now = time.time()
+        updated = OpenVikingProfile(
+            **{**profile.__dict__, "status": "ready", "updated_at": now, "last_validated_at": now}
+        )
         return self.repository.save(updated)
 
     async def request(

@@ -42,7 +42,8 @@ async def app_config():
                 "google_oauth_enabled": False,
                 "enterprise_licensed": False,
                 "team_sharing_enabled": False,
-            }
+            },
+            "openviking_credential_policy": "managed",
         }
     )
 

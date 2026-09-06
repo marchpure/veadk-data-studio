@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,6 +20,7 @@ from server.services.openviking_service import (
     OpenVikingProfile,
     OpenVikingProfileRepository,
     OpenVikingService,
+    openviking_credential_policy,
 )
 from server.services.runtime_secrets import RuntimeSecretError, get_runtime_secret
 from server.services.source_resources import SourceResourceService
@@ -52,6 +54,7 @@ class ProfileCreate(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     base_url: str = Field(min_length=1, max_length=2048)
     api_key: str = Field(min_length=1, max_length=4096)
+    credential_mode: Literal["byok"] | None = None
     workspace_uri: str = Field(default="viking://resources/", max_length=2048)
 
 
@@ -60,6 +63,7 @@ class ManagedProfileCreate(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     base_url: str | None = Field(default=None, max_length=2048)
     api_key: str | None = Field(default=None, max_length=4096)
+    credential_mode: Literal["managed"] | None = None
     workspace_uri: str = Field(default="viking://resources/", max_length=2048)
 
 
@@ -68,6 +72,7 @@ class ProfileUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=120)
     base_url: str | None = Field(default=None, max_length=2048)
     api_key: str | None = Field(default=None, max_length=4096)
+    credential_mode: Literal["managed", "byok"] | None = None
     workspace_uri: str | None = Field(default=None, max_length=2048)
 
 
@@ -118,6 +123,43 @@ def _error(exc: OpenVikingError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)})
 
 
+def _managed_credentials() -> tuple[str, str]:
+    base_url = os.getenv("OPENVIKING_MANAGED_BASE_URL", "").strip()
+    try:
+        api_key = get_runtime_secret("openviking_api_key", env_name="OPENVIKING_API_KEY") or ""
+    except RuntimeSecretError as exc:
+        raise OpenVikingError(
+            "OPENVIKING_UNAVAILABLE",
+            "Managed OpenViking credentials are not configured",
+            503,
+        ) from exc
+    if not base_url or not api_key:
+        raise OpenVikingError("OPENVIKING_UNAVAILABLE", "Managed OpenViking credentials are not configured", 503)
+    return base_url, api_key
+
+
+def _profile_credentials(values: dict[str, Any]) -> tuple[str, str, str]:
+    policy = openviking_credential_policy()
+    requested_mode = values.get("credential_mode")
+    if policy == "hybrid" and requested_mode is None:
+        raise HTTPException(status_code=400, detail="credential_mode is required for hybrid policy")
+    mode = policy if policy != "hybrid" else requested_mode
+    if requested_mode is not None and requested_mode != mode:
+        raise HTTPException(status_code=400, detail="Requested credential_mode is not allowed")
+    if mode == "managed":
+        if values.get("base_url") or values.get("api_key"):
+            raise HTTPException(status_code=400, detail="Managed OpenViking credentials are server-controlled")
+        base_url, api_key = _managed_credentials()
+        return base_url, api_key, mode
+    base_url = str(values.get("base_url") or "")
+    api_key = str(values.get("api_key") or "")
+    if not base_url or not api_key:
+        raise HTTPException(status_code=400, detail="BYOK requires Base URL and API Key")
+    if urlsplit(base_url).scheme != "https":
+        raise HTTPException(status_code=400, detail="BYOK Base URL must use HTTPS")
+    return base_url, api_key, mode
+
+
 @router.get("/profiles")
 async def list_profiles(auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))):
     service = _service()
@@ -127,20 +169,14 @@ async def list_profiles(auth: AuthContext = Depends(require_scope(Scope.DATASET_
 
 @router.post("/profiles", status_code=201)
 async def create_profile(
-    body: ProfileCreate | ManagedProfileCreate,
+    body: ManagedProfileCreate | ProfileCreate,
     auth: AuthContext = Depends(require_scope(Scope.DATASET_CREATE)),
 ):
     try:
         service = _service()
         tenant_id, workspace_id, principal_id = _scope(auth)
         values = body.model_dump()
-        if external_oidc_enabled():
-            if values.get("base_url") or values.get("api_key"):
-                raise HTTPException(status_code=400, detail="Managed OpenViking credentials are server-controlled")
-            values["base_url"] = values.get("base_url") or os.getenv("OPENVIKING_MANAGED_BASE_URL")
-            values["api_key"] = values.get("api_key") or get_runtime_secret("openviking_api_key")
-        if not values.get("base_url") or not values.get("api_key"):
-            raise OpenVikingError("OPENVIKING_UNAVAILABLE", "OpenViking profile credentials are required", 503)
+        values["base_url"], values["api_key"], values["credential_mode"] = _profile_credentials(values)
         profile = service.create(tenant_id, workspace_id, principal_id, **values)
         return success_response(data=service.public(profile), message="Profile created")
     except (OpenVikingError, RuntimeSecretError) as exc:
@@ -152,10 +188,17 @@ async def update_profile(profile_id: str, body: ProfileUpdate, auth: AuthContext
     try:
         service = _service()
         values = body.model_dump(exclude_none=True)
-        if external_oidc_enabled():
-            values.pop("base_url", None)
-            values.pop("api_key", None)
-        profile = service.update(_get_profile(service, profile_id, auth), **values)
+        if values.get("api_key") == "":
+            values.pop("api_key")
+        if values.get("base_url") == "":
+            values.pop("base_url")
+        mode = values.pop("credential_mode", None)
+        profile = _get_profile(service, profile_id, auth)
+        if mode is not None and mode != profile.credential_mode:
+            raise HTTPException(status_code=400, detail="Changing credential_mode is not supported")
+        if profile.credential_mode == "managed" and (values.get("base_url") or values.get("api_key")):
+            raise HTTPException(status_code=400, detail="Managed OpenViking credentials are server-controlled")
+        profile = service.update(profile, **values)
         return success_response(data=service.public(profile), message="Profile updated")
     except (OpenVikingError, RuntimeSecretError) as exc:
         raise _error(exc)

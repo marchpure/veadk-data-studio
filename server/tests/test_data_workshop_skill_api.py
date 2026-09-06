@@ -28,6 +28,7 @@ from server.data_workshop.skill.service import (
     safe_event,
     session_payload,
     stable_artifact_url,
+    status_from_error,
     validate_refs,
     visible_catalog,
     w5_capability_ref,
@@ -473,6 +474,82 @@ async def test_invocation_is_idempotent_and_preserves_history(skill_app) -> None
 
 
 @pytest.mark.asyncio
+async def test_empty_context_invocation_is_rejected_without_mutating_draft(skill_app) -> None:
+    client, _, _, _ = skill_app
+    body = skill_body()
+    body["mcp_refs"] = []
+    body["knowledge_refs"] = []
+    created = await client.post("/api/v1/skills", json=body)
+    original = created.json()["data"]["session"]
+    session_id = original["id"]
+
+    response = await client.post(
+        f"/api/v1/sessions/{session_id}/invocations",
+        json={"message": "你可以做什么", "client_invocation_id": "empty-context", "validate": True},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "CAPABILITY_REQUIRED",
+        "message": "请先添加至少一个 Action 或知识资源",
+    }
+    state = (await client.get(f"/api/v1/sessions/{session_id}")).json()["data"]
+    assert state["status"] == original["status"]
+    assert state["messages"] == []
+    assert all(event["type"] != "invocation_started" for event in state["events"])
+
+
+@pytest.mark.asyncio
+async def test_static_generation_does_not_issue_delegated_auth(skill_app, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, _, _, _ = skill_app
+    created = await client.post("/api/v1/skills", json=skill_body())
+    session_id = created.json()["data"]["session"]["id"]
+    monkeypatch.setattr(
+        api,
+        "delegated_auth_ref",
+        lambda *_args, **_kwargs: pytest.fail("delegation must not be created"),
+    )
+    monkeypatch.setenv("W5_STATIC_CAPABILITY_VALIDATION", "true")
+
+    response = await client.post(
+        f"/api/v1/sessions/{session_id}/invocations",
+        json={"message": "生成", "client_invocation_id": "static-generation", "validate": True},
+    )
+
+    assert response.status_code == 202
+
+
+@pytest.mark.asyncio
+async def test_empty_context_retry_is_rejected_without_mutating_session(skill_app) -> None:
+    client, factory, _, _ = skill_app
+    body = skill_body()
+    body["mcp_refs"] = []
+    body["knowledge_refs"] = []
+    created = await client.post("/api/v1/skills", json=body)
+    original = created.json()["data"]["session"]
+    session_id = original["id"]
+    async with factory() as db:
+        item = await db.get(DataWorkshopSkillSession, UUID(session_id))
+        item.last_invocation_json = {
+            "message": "生成",
+            "client_invocation_id": "old-attempt",
+            "validate": True,
+        }
+        await db.commit()
+
+    response = await client.post(
+        f"/api/v1/sessions/{session_id}/retry",
+        json={"client_invocation_id": "empty-retry"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "CAPABILITY_REQUIRED"
+    state = (await client.get(f"/api/v1/sessions/{session_id}")).json()["data"]
+    assert state["status"] == original["status"]
+    assert all(event.get("client_invocation_id") != "empty-retry" for event in state["events"])
+
+
+@pytest.mark.asyncio
 async def test_delegation_is_committed_before_background_invocation(
     skill_app, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -789,6 +866,59 @@ async def test_w5_endpoint_transport_requires_and_uses_server_api_key(monkeypatc
     assert (method, url) == ("POST", "https://w5.example.test/invoke")
     assert kwargs["headers"]["Authorization"] == "Bearer server-only-key"
     assert events[0]["status"] == "BLOCKED_AUTH"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [401, 403])
+async def test_w5_endpoint_auth_failure_is_an_admin_configuration_error(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+) -> None:
+    invocation = W5Invocation(
+        business_goal="Build",
+        mcp_capability_refs=["mcp://read"],
+        knowledge_resource_refs=[],
+        target_skill="report",
+        revision=None,
+        session_id="session-1",
+        delegated_auth_ref=None,
+    )
+
+    class Response:
+        headers = {"content-type": "application/json"}
+
+        def __init__(self) -> None:
+            self.status_code = status_code
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def stream(self, *_args, **_kwargs):
+            return Response()
+
+    monkeypatch.setenv("W5_STATIC_CAPABILITY_VALIDATION", "true")
+    monkeypatch.setattr("server.data_workshop.skill.w5_adapter.httpx.AsyncClient", lambda **_kwargs: Client())
+
+    with pytest.raises(W5AdapterError) as raised:
+        async for _ in W5SkillAgentAdapter(
+            endpoint="https://w5.example.test",
+            api_key="server-only-key",
+        ).invoke(invocation):
+            pass
+
+    assert raised.value.code == "W5_SERVICE_AUTH_INVALID"
+    assert str(raised.value) == "Skill 生成服务认证失败，管理员需检查服务配置"
+    assert status_from_error(raised.value) == "blocked_config"
 
 
 @pytest.mark.asyncio

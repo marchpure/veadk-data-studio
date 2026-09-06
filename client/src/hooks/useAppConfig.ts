@@ -24,6 +24,7 @@ interface CommunityBootstrap {
 interface AppConfig {
   features: FeatureFlags
   external_oidc_enabled?: boolean
+  openviking_credential_policy?: 'managed' | 'byok' | 'hybrid'
   org_name?: string
   local_bootstrap?: CommunityBootstrap
   community_bootstrap?: CommunityBootstrap
@@ -78,5 +79,6 @@ export function useAppConfig() {
     features,
     orgName: config?.org_name,
     externalOIDCEnabled: Boolean(config?.external_oidc_enabled),
+    openVikingCredentialPolicy: config?.openviking_credential_policy ?? 'managed',
   }
 }

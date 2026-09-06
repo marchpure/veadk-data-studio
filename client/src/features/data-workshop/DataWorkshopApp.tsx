@@ -1,17 +1,11 @@
 import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { WorkshopShell } from './components/WorkshopShell'
-import { ConnectionAccess } from './pages/Access'
-import { ConnectionDetail, ConnectionOverview, ProviderMarket } from './pages/Connections'
-import { ConsoleEmbed, NewConnectionEmbed } from './pages/ConsoleEmbed'
 import { ConnectionDocs } from './pages/Docs'
 import { WorkshopHome } from './pages/Home'
+import { OpenConnectorSurface } from './pages/OpenConnectorSurface'
 import { SkillMount } from './pages/SkillMount'
 import OpenVikingPage from '../../pages/OpenVikingPage'
 import './data-workshop.css'
-
-function OwnedElsewhere({ title, owner }: { title: string; owner: string }) {
-  return <div className="dw-page"><div className="dw-page-heading"><span className="dw-eyebrow">Data Workshop</span><h1>{title}</h1><p>此工作区由 {owner} 模块提供，保留在统一 Shell 中。</p></div></div>
-}
 
 function SkillRedirect({ source }: { source: 'new' | 'skill' | 'session' }) {
   const location = useLocation()
@@ -28,22 +22,29 @@ function SkillRedirect({ source }: { source: 'new' | 'skill' | 'session' }) {
   return <Navigate to={{ pathname: '/skill', search: search.toString() }} replace />
 }
 
+function ProviderDetailSurface() {
+  const { id = '' } = useParams()
+  return <OpenConnectorSurface surface="providers" resourcePath={`/${encodeURIComponent(id)}`} title="提供商" />
+}
+
 export function DataWorkshopApp() {
   return <WorkshopShell><Routes>
     <Route path="/" element={<Navigate to="/home" replace />} />
     <Route path="/home" element={<WorkshopHome />} />
-    <Route path="/connections/overview" element={<ConnectionOverview />} />
-    <Route path="/connections/providers" element={<Navigate to="/connections/providers/market" replace />} />
-    <Route path="/connections/providers/market" element={<ProviderMarket />} />
-    <Route path="/connections/providers/new/:providerId" element={<NewConnectionEmbed />} />
-    <Route path="/connections/providers/:id" element={<ConnectionDetail />} />
-    <Route path="/connections/providers/:id/access" element={<ConnectionAccess />} />
-    <Route path="/connections/actions" element={<ConsoleEmbed title="Actions" consolePath="actions" />} />
-    <Route path="/connections/trace" element={<ConsoleEmbed title="Trace" consolePath="traces" />} />
-    <Route path="/connections/access/identity" element={<ConsoleEmbed title="Identity 配置" consolePath="access" />} />
-    <Route path="/connections/access" element={<ConnectionAccess />} />
+    <Route path="/connections/overview" element={<OpenConnectorSurface surface="overview" title="总览" />} />
+    <Route path="/connections/providers" element={<OpenConnectorSurface surface="providers" title="提供商" />} />
+    <Route path="/connections/marketplace" element={<OpenConnectorSurface surface="marketplace" title="市场" />} />
+    <Route path="/connections/actions" element={<OpenConnectorSurface surface="actions" title="操作" />} />
+    <Route path="/connections/runs" element={<OpenConnectorSurface surface="runs" title="运行记录" />} />
+    <Route path="/connections/access" element={<OpenConnectorSurface surface="access" title="访问权限" />} />
+    <Route path="/connections/trace" element={<Navigate to="/connections/runs" replace />} />
+    <Route path="/connections/providers/market" element={<Navigate to="/connections/providers" replace />} />
+    <Route path="/connections/providers/new/:providerId" element={<Navigate to="/connections/providers" replace />} />
+    <Route path="/connections/providers/:id/access" element={<Navigate to="/connections/access" replace />} />
+    <Route path="/connections/providers/:id" element={<ProviderDetailSurface />} />
+    <Route path="/connections/access/identity" element={<Navigate to="/connections/access" replace />} />
     <Route path="/connections/docs" element={<ConnectionDocs />} />
-    <Route path="/kb/connect" element={<OpenVikingPage connectOnly />} />
+    <Route path="/kb/connect" element={<Navigate to="/kb/new" replace />} />
     <Route path="/kb/*" element={<OpenVikingPage />} />
     <Route path="/skill" element={<SkillMount />} />
     <Route path="/skill/new" element={<SkillRedirect source="new" />} />

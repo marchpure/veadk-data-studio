@@ -513,7 +513,7 @@ async def delegated_auth_ref(auth: Any, session: AsyncSession) -> str:
 def status_from_error(error: W5AdapterError) -> str:
     if error.code == "BLOCKED_AUTH":
         return "blocked_auth"
-    if error.code == "BLOCKED_CONFIG":
+    if error.code in {"BLOCKED_CONFIG", "W5_SERVICE_AUTH_INVALID"}:
         return "blocked_config"
     if error.code == "CANCELLED":
         return "cancelled"

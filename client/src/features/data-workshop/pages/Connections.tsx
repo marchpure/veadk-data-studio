@@ -113,10 +113,15 @@ export function ConnectionDetail() {
   }, [id])
   useEffect(() => { void load() }, [load])
   const launchConsole = async () => {
+    if (!connection) return
     setLaunching(true)
     setLaunchError('')
     try {
-      const session = await workshopApi.createLaunchSession()
+      const session = await workshopApi.createLaunchSession(
+        'providers',
+        '',
+        `/${encodeURIComponent(connection.provider)}`,
+      )
       window.location.assign(session.launch_url)
     } catch {
       setLaunchError('无法创建短期 Console 会话，请检查 OpenConnector 配置。')

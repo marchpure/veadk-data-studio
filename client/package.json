@@ -9,6 +9,8 @@
     "build:check": "tsc -b && vite build",
     "lint": "eslint .",
     "test:data-workshop:e2e": "node scripts/data-workshop-e2e.mjs",
+    "test:data-workshop:unit": "vitest run --config vitest.data-workshop.config.ts",
+    "test:data-workshop:connection-embed:e2e": "node scripts/data-workshop-connection-embed-e2e.mjs",
     "test:data-workshop:openviking:e2e": "node scripts/data-workshop-openviking-journey-e2e.mjs",
     "test:skill-workbench:e2e": "node scripts/skill-workbench-e2e.mjs",
     "test:openviking": "vitest run --config vitest.config.ts",

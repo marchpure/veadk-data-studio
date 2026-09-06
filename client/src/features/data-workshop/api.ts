@@ -94,8 +94,15 @@ export const workshopApi = {
         `/access/audit${connectionId ? `?connection_id=${encodeURIComponent(connectionId)}` : ''}`,
       ),
     ),
-  createLaunchSession: () =>
-    request<{ launch_url: string; expires_at: number }>('/openconnector/launch-sessions', { method: 'POST' }),
+  createLaunchSession: (
+    surface: 'overview' | 'providers' | 'marketplace' | 'actions' | 'runs' | 'access',
+    search = '',
+    resource_path = '',
+  ) =>
+    request<{ launch_url: string; expires_at: number }>('/openconnector/launch-sessions', {
+      method: 'POST',
+      body: JSON.stringify({ surface, search, resource_path }),
+    }),
   runReadOnlyTest: (operation: 'health' | 'identity' | 'tools_list' | 'list_connections') =>
     request<unknown>('/connection-docs/read-only-tests', {
       method: 'POST',

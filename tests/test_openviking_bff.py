@@ -39,6 +39,96 @@ def test_profile_secret_is_encrypted_and_masked(tmp_path, monkeypatch):
     assert b"secret-key" not in row.encrypted_api_key
 
 
+def test_profile_public_metadata_includes_mode_safe_workspace_and_health_time(tmp_path, monkeypatch):
+    value = service(tmp_path, monkeypatch)
+    profile = value.create(
+        "tenant",
+        "workspace",
+        "owner",
+        "Hosted",
+        "http://127.0.0.1:9000",
+        "secret-key",
+        "viking://resources/private-team/",
+        credential_mode="byok",
+    )
+
+    public = value.public(profile)
+
+    assert public["credential_mode"] == "byok"
+    assert public["workspace_uri"] == f"viking://workspace/{profile.profile_id}/"
+    assert public["last_validated_at"] is None
+    assert "private-team" not in str(public)
+
+
+def test_existing_sqlite_profiles_are_migrated_with_a_compatible_credential_mode(tmp_path, monkeypatch):
+    database = tmp_path / "legacy-profiles.sqlite3"
+    connection = __import__("sqlite3").connect(database)
+    connection.executescript(
+        """
+        CREATE TABLE openviking_profiles (
+          profile_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL, principal_id TEXT NOT NULL,
+          display_name TEXT NOT NULL,
+          encrypted_base_url BLOB NOT NULL, encrypted_api_key BLOB NOT NULL,
+          workspace_uri TEXT NOT NULL, status TEXT NOT NULL,
+          created_at REAL NOT NULL, updated_at REAL NOT NULL
+        );
+        INSERT INTO openviking_profiles VALUES
+          ('legacy', 'tenant', 'workspace', 'owner', 'Legacy', X'00', X'01',
+           'viking://resources/', 'ready', 1, 2);
+        """
+    )
+    connection.commit()
+    connection.close()
+    monkeypatch.setenv("OPENVIKING_CREDENTIAL_POLICY", "byok")
+    repository = OpenVikingProfileRepository(database)
+    profile = repository.get("legacy", "tenant", "workspace", "owner")
+
+    assert profile is not None
+    assert profile.credential_mode == "byok"
+    assert profile.last_validated_at is None
+
+
+def test_existing_managed_sqlite_profiles_keep_managed_mode(tmp_path, monkeypatch):
+    database = tmp_path / "managed-profiles.sqlite3"
+    connection = __import__("sqlite3").connect(database)
+    connection.executescript(
+        """
+        CREATE TABLE openviking_profiles (
+          profile_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL, principal_id TEXT NOT NULL,
+          display_name TEXT NOT NULL,
+          encrypted_base_url BLOB NOT NULL, encrypted_api_key BLOB NOT NULL,
+          workspace_uri TEXT NOT NULL, status TEXT NOT NULL,
+          created_at REAL NOT NULL, updated_at REAL NOT NULL
+        );
+        INSERT INTO openviking_profiles VALUES
+          ('legacy', 'tenant', 'workspace', 'owner', 'Legacy', X'00', X'01',
+           'viking://resources/', 'ready', 1, 2);
+        """
+    )
+    connection.commit()
+    connection.close()
+    monkeypatch.delenv("OPENVIKING_CREDENTIAL_POLICY", raising=False)
+    monkeypatch.setenv("OPENVIKING_MANAGED_BASE_URL", "https://managed.example.test")
+
+    repository = OpenVikingProfileRepository(database)
+    profile = repository.get("legacy", "tenant", "workspace", "owner")
+
+    assert profile is not None
+    assert profile.credential_mode == "managed"
+
+
+def test_invalid_credential_policy_fails_closed(monkeypatch):
+    monkeypatch.setenv("OPENVIKING_CREDENTIAL_POLICY", "unsupported")
+
+    with pytest.raises(OpenVikingError) as raised:
+        openviking_module.openviking_credential_policy()
+
+    assert raised.value.code == "OPENVIKING_UNAVAILABLE"
+    assert raised.value.status_code == 503
+
+
 def test_operation_allowlist_rejects_untrusted_operation(tmp_path, monkeypatch):
     value = service(tmp_path, monkeypatch)
     profile = value.create(
