@@ -4,6 +4,7 @@ import asyncio
 import base64
 import copy
 import io
+import json
 import os
 import tempfile
 import zipfile
@@ -60,7 +61,14 @@ CATALOG = {
                     "name": "query_rows",
                     "source": "OpenConnector",
                     "connection_id": "connection-1",
-                    "metadata": {"read_only": True},
+                    "metadata": {
+                        "read_only": True,
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {"query": {"type": "string"}},
+                            "required": ["query"],
+                        },
+                    },
                 }
             ],
         }
@@ -625,16 +633,41 @@ def test_context_validation_is_fail_closed() -> None:
 
 
 def test_w5_capability_ref_is_generic_and_preserves_opaque_refs() -> None:
+    schema = {
+        "type": "object",
+        "properties": {"input": {"type": "string"}},
+        "required": ["input"],
+    }
     assert (
         w5_capability_ref(
             {
                 "id": "hackernews.get_max_item_id",
                 "connection_id": "hackernews:default",
+                "metadata": {"input_schema": schema},
             }
         )
-        == "mcp://hackernews:default/hackernews.get_max_item_id"
+        == (
+            '{"action_id":"hackernews.get_max_item_id","connection_id":"hackernews:default",'
+            f'"input_schema":{json.dumps(schema, separators=(",", ":"), sort_keys=True)},'
+            '"ref":"mcp://hackernews:default/hackernews.get_max_item_id"}'
+        )
     )
-    assert w5_capability_ref({"id": "mcp://provider/action", "connection_id": None}) == "mcp://provider/action"
+    assert (
+        w5_capability_ref(
+            {
+                "id": "mcp://provider/action",
+                "connection_id": None,
+                "metadata": {"input_schema": schema},
+            }
+        )
+        == (
+            '{"action_id":"mcp://provider/action","connection_id":null,'
+            f'"input_schema":{json.dumps(schema, separators=(",", ":"), sort_keys=True)},'
+            '"ref":"mcp://provider/action"}'
+        )
+    )
+    with pytest.raises(ValueError, match="input schema"):
+        w5_capability_ref({"id": "provider.action", "connection_id": "provider:default"})
     with pytest.raises(ValueError, match="connection_id"):
         w5_capability_ref({"id": "provider.action"})
 
@@ -760,6 +793,7 @@ async def test_w5_endpoint_transport_requires_and_uses_server_api_key(monkeypatc
 
 @pytest.mark.asyncio
 async def test_background_runner_persists_nested_w5_artifact(skill_app, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("W5_STATIC_CAPABILITY_VALIDATION", raising=False)
     client, factory, _, identities = skill_app
     tenant_id, owner_id, _, _ = identities
     created = await client.post("/api/v1/skills", json=skill_body())

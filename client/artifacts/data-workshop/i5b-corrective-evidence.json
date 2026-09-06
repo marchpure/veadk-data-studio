@@ -39,6 +39,8 @@
     "generation_action_calls": 0,
     "runtime_oauth_required_in_skill": true,
     "tokens_in_artifact": false
+    ,"capability_snapshot": "real action input_schema carried in ContextRef metadata and serialized to W5"
+    ,"empty_input_schema_rejected": true
   },
   "w5_deploy": {
     "target_function_id": "57iz04w8",

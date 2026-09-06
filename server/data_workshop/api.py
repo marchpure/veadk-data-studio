@@ -268,12 +268,15 @@ def _is_read_action(action: dict[str, Any]) -> bool:
 
 def _action_view(action: dict[str, Any]) -> dict[str, Any]:
     read_only = bool(action.get("readOnly", action.get("read_only", _is_read_action(action))))
+    raw_schema = action.get("inputSchema", action.get("input_schema", {}))
+    input_schema = raw_schema if isinstance(raw_schema, dict) else {}
     return {
         "id": str(action.get("id") or ""),
         "name": str(action.get("name") or action.get("id") or ""),
         "description": action.get("description"),
         "risk": str(action.get("risk") or ("low" if read_only else "high")),
         "read_only": read_only,
+        "input_schema": input_schema,
     }
 
 

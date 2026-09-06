@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import inspect
+import json
 import os
 import re
 from datetime import UTC, datetime
@@ -268,7 +269,11 @@ async def visible_catalog(
                         name=str(action["name"]),
                         source="OpenConnector",
                         connection_id=connection_id,
-                        metadata={"risk": action["risk"], "read_only": action["read_only"]},
+                        metadata={
+                            "risk": action["risk"],
+                            "read_only": action["read_only"],
+                            "input_schema": action["input_schema"],
+                        },
                     ).model_dump()
                 )
             if actions:
@@ -361,14 +366,29 @@ def validate_refs(
 
 
 def w5_capability_ref(ref: dict[str, Any]) -> str:
-    """Translate a durable OpenConnector action ref into the unified MCP tool ref."""
+    """Pass a structured, schema-bearing capability snapshot to static W5."""
     value = str(ref.get("id") or "")
     if "://" in value:
-        return value
-    connection_id = str(ref.get("connection_id") or "")
-    if not connection_id:
-        raise ValueError("MCP Action 缺少 connection_id")
-    return f"mcp://{connection_id}/{value}"
+        capability = value
+    else:
+        connection_id = str(ref.get("connection_id") or "")
+        if not connection_id:
+            raise ValueError("MCP Action 缺少 connection_id")
+        capability = f"mcp://{connection_id}/{value}"
+    schema = ref.get("metadata", {}).get("input_schema", {})
+    if not isinstance(schema, dict) or not schema:
+        raise ValueError("MCP Action 缺少真实 input schema snapshot")
+    return json.dumps(
+        {
+            "ref": capability,
+            "connection_id": ref.get("connection_id"),
+            "action_id": value,
+            "input_schema": schema,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 async def resolve_requested_openviking_refs(
