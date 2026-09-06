@@ -368,7 +368,7 @@ def w5_capability_ref(ref: dict[str, Any]) -> str:
     connection_id = str(ref.get("connection_id") or "")
     if not connection_id:
         raise ValueError("MCP Action 缺少 connection_id")
-    return f"mcp__{connection_id}__execute_action"
+    return f"mcp://{connection_id}/{value}"
 
 
 async def resolve_requested_openviking_refs(

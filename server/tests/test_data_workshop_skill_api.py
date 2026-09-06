@@ -632,7 +632,7 @@ def test_w5_capability_ref_is_generic_and_preserves_opaque_refs() -> None:
                 "connection_id": "hackernews:default",
             }
         )
-        == "mcp__hackernews:default__execute_action"
+        == "mcp://hackernews:default/hackernews.get_max_item_id"
     )
     assert w5_capability_ref({"id": "mcp://provider/action", "connection_id": None}) == "mcp://provider/action"
     with pytest.raises(ValueError, match="connection_id"):
