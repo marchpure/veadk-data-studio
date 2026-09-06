@@ -24,7 +24,8 @@
       "input_branch": "integration/dwv1-i5a-data-studio-cloud-v3",
       "input_sha": "110fc7d9c19f8dae0d84c0865b2f74a7c5c8fb87",
       "rc_branch": "release/dwv1-v3-rc",
-      "rc_sha": "7169524ebe9eeded1e3bffc4f217d6039ae7b9b8"
+      "rc_sha": "f5121336f6e040404e56af6706fa40a8ce10a5c8",
+      "code_merge_sha": "7169524ebe9eeded1e3bffc4f217d6039ae7b9b8"
     },
     "skill_agent": {
       "repository": "marchpure/data-workshop-skill-agent",
