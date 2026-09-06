@@ -361,14 +361,14 @@ def validate_refs(
 
 
 def w5_capability_ref(ref: dict[str, Any]) -> str:
-    """Translate a durable OpenConnector action ref into W5's opaque URI form."""
+    """Translate a durable OpenConnector action ref into W5's service URI form."""
     value = str(ref.get("id") or "")
     if "://" in value:
         return value
     connection_id = str(ref.get("connection_id") or "")
     if not connection_id:
         raise ValueError("MCP Action 缺少 connection_id")
-    return f"mcp://{connection_id}/{value}"
+    return f"mcp://{connection_id}"
 
 
 async def resolve_requested_openviking_refs(
