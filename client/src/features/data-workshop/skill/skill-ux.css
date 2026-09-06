@@ -1,0 +1,85 @@
+.dw-new-fields details.wide {
+  grid-column: 1 / -1;
+}
+
+.dw-new-fields details.wide summary {
+  width: max-content;
+  margin-bottom: 10px;
+  color: var(--dw-green);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dw-new-skill > footer .dw-button-row {
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.dw-context-summary > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px dashed var(--dw-green);
+  border-radius: 99px;
+  background: var(--dw-soft);
+  color: var(--dw-green);
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dw-skill-center > .dw-context-picker {
+  padding: 0 28px 12px;
+  background: white;
+}
+
+.dw-technical-details {
+  max-width: 680px;
+  margin: 0 0 22px 40px;
+  border: 1px solid var(--dw-line);
+  background: white;
+  font-size: 10px;
+}
+
+.dw-technical-details > summary {
+  padding: 10px 13px;
+  color: var(--dw-muted);
+  cursor: pointer;
+}
+
+.dw-context-guidance {
+  max-width: 680px;
+  margin: 0 0 15px 40px;
+  padding: 12px 13px;
+  border: 1px solid var(--dw-line);
+  background: white;
+  color: var(--dw-ink);
+  font-size: 11px;
+}
+
+.dw-context-guidance .dw-button-row {
+  margin-top: 10px;
+  justify-content: flex-start;
+}
+
+@media (max-width: 720px) {
+  .dw-new-fields details.wide {
+    grid-column: auto;
+  }
+
+  .dw-new-skill > footer .dw-button-row {
+    display: grid;
+  }
+
+  .dw-skill-center > .dw-context-picker {
+    padding: 0 14px 10px;
+  }
+
+  .dw-technical-details,
+  .dw-context-guidance {
+    margin-left: 0;
+  }
+}
