@@ -1,0 +1,162 @@
+{
+  "release": "DWV1 V3 RC",
+  "stage": "I5-C",
+  "status": "DWV1_I5C_RC_CODE_READY_WORKBUDDY_MANUAL_PENDING",
+  "created_at": "2026-09-06T22:36:00+08:00",
+  "repositories": {
+    "open_connector": {
+      "repository": "marchpure/open-connector",
+      "remote": "fork",
+      "remote_url": "git@github.com:marchpure/open-connector.git",
+      "default_branch": "main",
+      "default_base_sha": "0fa2c728dfbf957735da2843ec2b8a4f3425b105",
+      "input_branch": "fix/dwv1-w41-multiuser-oauth-rbac-v3",
+      "input_sha": "2341a55591ce111ef8e8d41072831018c2d17aaa",
+      "rc_branch": "release/dwv1-v3-rc",
+      "rc_sha": "5dcfafcdfd584bfa01d101d4faadbbec1ea4a3b5"
+    },
+    "data_studio": {
+      "repository": "marchpure/veadk-data-studio",
+      "remote": "origin",
+      "remote_url": "https://github.com/marchpure/veadk-data-studio.git",
+      "default_branch": "main",
+      "default_base_sha": "9766b3a5e810c12edcfbe3ba43d9a3e0419c2275",
+      "input_branch": "integration/dwv1-i5a-data-studio-cloud-v3",
+      "input_sha": "110fc7d9c19f8dae0d84c0865b2f74a7c5c8fb87",
+      "rc_branch": "release/dwv1-v3-rc",
+      "rc_sha": "7169524ebe9eeded1e3bffc4f217d6039ae7b9b8"
+    },
+    "skill_agent": {
+      "repository": "marchpure/data-workshop-skill-agent",
+      "remote": "canonical",
+      "remote_url": "git@github.com:marchpure/data-workshop-skill-agent.git",
+      "default_branch": "main",
+      "default_base_sha": "495d52e218bcde1b5386c01bcd4be04dc95852d3",
+      "input_branch": "integration/dwv1-i5b-runtime-e2e-v3",
+      "input_sha": "da8cb1be00eb54ef44baa42c5fc07e38e12d7f34",
+      "rc_branch": "release/dwv1-v3-rc",
+      "rc_sha": "401f850b1d478ea462d3d52d1febd3329fc81557"
+    }
+  },
+  "cloud": {
+    "open_connector": {
+      "control_plane_revision": 12,
+      "mcp_runtime_revision": 11,
+      "endpoint": "https://su4f9ugsggenk65g7f7m5.apigateway-cn-beijing.volceapi.com",
+      "smoke": {
+        "health_http_status": 200,
+        "oauth_metadata_http_status": 200,
+        "unauthenticated_mcp_http_status": 401
+      },
+      "rollback": "Promote the previous verified OpenConnector edge revision using the recorded release receipt; no new deployment was performed by I5-C."
+    },
+    "data_studio": {
+      "function_id": "2plj8qqa",
+      "revision": 40,
+      "traffic_percent": 100,
+      "endpoint": "https://si9927hq76iqtflib3r0o.apigateway-cn-beijing.volceapi.com",
+      "rollback_revision": 39
+    },
+    "skill_agent": {
+      "function_id": "57iz04w8",
+      "revision": 13,
+      "traffic_percent": 100,
+      "endpoint": "https://sqc7g2j6h2kvhjb6ovp5t.apigateway-cn-beijing.volceapi.com",
+      "rollback_revision": 12,
+      "smoke": {
+        "ping_http_status": 200,
+        "unauthenticated_invoke_http_status": 401
+      }
+    }
+  },
+  "identity": {
+    "user_pool_id": "f69c17b4-d030-43bc-b4a7-9cae0f6370c3",
+    "oauth_client_id": "0fafe932-4810-4285-87b6-a72611b115f2",
+    "limited_group_id": "a5ee9b1a-2c27-4ea6-a998-8dd39070ba46",
+    "workbuddy_user_b_subject": "c4759165-1664-46bd-8a65-f34b046f18bc"
+  },
+  "artifact": {
+    "skill_id": "e6afb29f-bd27-4556-967d-dd429df47689",
+    "session_id": "efd25b7e-ec4c-4ebc-8aa1-3ced7ae27d66",
+    "tenant_id": "1ad3f604-6f00-456a-b7f0-9afc4a6a7796",
+    "revision": "rev-5",
+    "size_bytes": 5494,
+    "sha256": "c409a7c5230a4dbdd3333b1ce9a5ee5dc666a534ff4c6c4ed31c3deae41f6f50",
+    "download_verified": true,
+    "zip_structure_verified": true,
+    "path_safety_verified": true,
+    "secret_scan": "passed"
+  },
+  "automated_tests": {
+    "open_connector": {
+      "unit_tests": "1473 passed, 4 skipped",
+      "typecheck": "passed",
+      "lint": "passed",
+      "format": "passed",
+      "web_production_build": "passed on retry; first attempt timed out on external provider-icon fetch"
+    },
+    "data_studio": {
+      "backend_tests": "945 passed, 2 skipped",
+      "frontend_tests": "131 passed",
+      "backend_ruff": "passed",
+      "frontend_typecheck": "passed",
+      "frontend_lint": "passed with 358 pre-existing warnings",
+      "frontend_production_build": "passed",
+      "migration_heads": [
+        "add_dwv1_openviking_profile_store"
+      ],
+      "backend_format_check": "not clean: 51 pre-existing files would be reformatted"
+    },
+    "skill_agent": {
+      "pytest": "71 passed",
+      "compileall": "passed",
+      "diff_check": "passed",
+      "lint": "not run: ruff is not present in the frozen RC environment",
+      "literal_secret_scan": "failed on existing placeholders, test fixtures, and contract names; no production source change made"
+    }
+  },
+  "evidence": {
+    "i5b_handoff": "docs/handoffs/dwv1-i5b-runtime-e2e-v3.json",
+    "i5b_corrective": "docs/evidence/dwv1-i5b-corrective-evidence.json",
+    "artifact": "/tmp/i5b-static-rev5.zip",
+    "artifact_checksum": "verified locally against frozen SHA-256",
+    "live_openconnector_smoke": "GET /health=200; OAuth metadata=200; unauthenticated /mcp=401"
+  },
+  "p1_deferred": [
+    "Remove or retire legacy I5-A Token Exchange compatibility code under a separately approved cleanup.",
+    "Server-side delegated-token MCP execution remains deferred; runtime uses WorkBuddy operator OAuth.",
+    "WorkBuddy manual acceptance is the remaining release gate."
+  ],
+  "workbuddy_manual_acceptance": {
+    "status": "pending",
+    "interface": "official WorkBuddy UI only",
+    "zip": "/tmp/i5b-static-rev5.zip",
+    "required_actor": "User B",
+    "required_subject": "c4759165-1664-46bd-8a65-f34b046f18bc",
+    "required_group": "a5ee9b1a-2c27-4ea6-a998-8dd39070ba46",
+    "expected_results": {
+      "skill_install": "pending",
+      "hackernews.get_max_item_id": "pending allow",
+      "hackernews.get_top_stories": "pending deny",
+      "arxiv_action": "pending invisible or deny"
+    },
+    "constraints_verified": [
+      "No generated token was used.",
+      "No direct curl MCP call was used as WorkBuddy acceptance.",
+      "No WorkBuddy internal implementation was inspected."
+    ]
+  },
+  "worktree_integrity": {
+    "open_connector_local_equals_remote": true,
+    "data_studio_local_equals_remote": true,
+    "skill_agent_local_equals_remote": true,
+    "rc_worktrees_clean": true,
+    "default_branches_modified": false,
+    "force_push_used": false
+  },
+  "secrets_policy": {
+    "manifest_contains_secrets": false,
+    "temporary_signed_urls": false,
+    "tokens_cookies_passwords_api_keys_client_secrets": false
+  }
+}
