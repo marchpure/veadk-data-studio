@@ -1,7 +1,7 @@
 {
   "release": "DWV1 V3 RC",
   "stage": "I5-C",
-  "status": "DWV1_I5C_RC_CODE_READY_WORKBUDDY_MANUAL_PENDING",
+  "status": "DWV1_P0_RELEASE_CANDIDATE_V3_FROZEN",
   "created_at": "2026-09-06T22:36:00+08:00",
   "repositories": {
     "open_connector": {
@@ -126,21 +126,24 @@
   "p1_deferred": [
     "Remove or retire legacy I5-A Token Exchange compatibility code under a separately approved cleanup.",
     "Server-side delegated-token MCP execution remains deferred; runtime uses WorkBuddy operator OAuth.",
-    "WorkBuddy manual acceptance is the remaining release gate."
+    "WorkBuddy manual acceptance passed."
   ],
   "workbuddy_manual_acceptance": {
-    "status": "pending",
+    "status": "passed",
     "interface": "official WorkBuddy UI only",
     "zip": "/tmp/i5b-static-rev5.zip",
+    "mcp_server": "data-workshop-openconnector-dev",
     "required_actor": "User B",
     "required_subject": "c4759165-1664-46bd-8a65-f34b046f18bc",
     "required_group": "a5ee9b1a-2c27-4ea6-a998-8dd39070ba46",
     "expected_results": {
-      "skill_install": "pending",
-      "hackernews.get_max_item_id": "pending allow",
-      "hackernews.get_top_stories": "pending deny",
-      "arxiv_action": "pending invisible or deny"
+      "skill_install": "passed",
+      "hackernews.get_max_item_id": "allowed; max_item_id=49587464",
+      "hackernews.get_top_stories": "denied; action_not_allowed",
+      "arxiv.search_papers": "denied; connection_not_allowed"
     },
+    "result_marker": "WORKBUDDY_USER_B_SKILL_RBAC_ACCEPTED",
+    "evidence": "docs/releases/dwv1-v3-rc-workbuddy-evidence.json",
     "constraints_verified": [
       "No generated token was used.",
       "No direct curl MCP call was used as WorkBuddy acceptance.",

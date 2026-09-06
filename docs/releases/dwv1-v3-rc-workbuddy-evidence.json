@@ -1,0 +1,74 @@
+{
+  "stage": "I5-C",
+  "status": "WORKBUDDY_USER_B_SKILL_RBAC_ACCEPTED",
+  "acceptance_interface": "official WorkBuddy UI",
+  "mcp_server": "data-workshop-openconnector-dev",
+  "actor": {
+    "label": "User B",
+    "subject": "c4759165-1664-46bd-8a65-f34b046f18bc",
+    "group": "a5ee9b1a-2c27-4ea6-a998-8dd39070ba46"
+  },
+  "ui_results": {
+    "skill_install": "passed",
+    "hackernews.get_max_item_id": {
+      "result": "allowed",
+      "max_item_id": 49587464
+    },
+    "hackernews.get_top_stories": {
+      "result": "denied",
+      "error": "action_not_allowed"
+    },
+    "arxiv.search_papers": {
+      "result": "denied",
+      "error": "connection_not_allowed"
+    }
+  },
+  "server_audit": {
+    "account_id": "2107625663",
+    "region": "cn-beijing",
+    "function_id": "hygmpcqd",
+    "function_name": "dwv1-openconnector-mcp-runtime-dev",
+    "revision": 11,
+    "traffic_percent": 100,
+    "instance": "hygmpcqd-i11xgwdhid-reserved-67ffff5cb9-6bgrk",
+    "runtime_role": "mcp-runtime",
+    "origin": "https://su4f9ugsggenk65g7f7m5.apigateway-cn-beijing.volceapi.com/mcp",
+    "log_query_request_id": "20260906234819F47716150A1E20566B9E",
+    "events": {
+      "hackernews.get_max_item_id": {
+        "execution_id": "726ca735-1250-4be8-90bf-d7ba820ddf8b",
+        "started_at": "2026-09-06T23:28:51+08:00",
+        "completed_at": "2026-09-06T23:28:52+08:00",
+        "ok": true,
+        "connection_id": "hackernews:default",
+        "audit_persisted": true
+      },
+      "hackernews.get_top_stories": {
+        "execution_id": "bf2945e8-f403-4c51-9f96-217b21c47e7a",
+        "started_at": "2026-09-06T23:29:04+08:00",
+        "ok": false,
+        "error_code": "action_not_allowed",
+        "audit_persisted": true
+      }
+    },
+    "identity_correlation": {
+      "subject_and_group_source": "/tmp/data-workshop-v1-v3/w41-evidence/final.json",
+      "subject_verified": true,
+      "group_verified": true,
+      "source_correlation": "The WorkBuddy server label is data-workshop-openconnector-dev; the corresponding cloud audit events are from the dev MCP Runtime function and Revision 11 above."
+    },
+    "arxiv_denial": {
+      "source": "official WorkBuddy UI result supplied for this acceptance",
+      "error": "connection_not_allowed",
+      "existing_rbac_evidence": "/tmp/data-workshop-v1-v3/w41-evidence/final.json"
+    }
+  },
+  "constraints": {
+    "generated_token_used": false,
+    "direct_mcp_curl_used": false,
+    "workbuddy_internal_inspected": false,
+    "grant_modified": false,
+    "deployment_repeated": false,
+    "skill_regenerated": false
+  }
+}
