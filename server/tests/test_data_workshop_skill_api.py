@@ -29,6 +29,7 @@ from server.data_workshop.skill.service import (
     stable_artifact_url,
     validate_refs,
     visible_catalog,
+    w5_capability_ref,
 )
 from server.data_workshop.skill.w5_adapter import W5AdapterError, W5Invocation, W5SkillAgentAdapter
 from server.db.base import Base
@@ -621,6 +622,21 @@ def test_context_validation_is_fail_closed() -> None:
             [],
             CATALOG,
         )
+
+
+def test_w5_capability_ref_is_generic_and_preserves_opaque_refs() -> None:
+    assert (
+        w5_capability_ref(
+            {
+                "id": "hackernews.get_max_item_id",
+                "connection_id": "hackernews:default",
+            }
+        )
+        == "mcp://hackernews:default/hackernews.get_max_item_id"
+    )
+    assert w5_capability_ref({"id": "mcp://provider/action", "connection_id": None}) == "mcp://provider/action"
+    with pytest.raises(ValueError, match="connection_id"):
+        w5_capability_ref({"id": "provider.action"})
 
 
 def test_next_revision_matches_w5_contract() -> None:

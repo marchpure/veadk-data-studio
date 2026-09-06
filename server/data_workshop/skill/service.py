@@ -360,6 +360,17 @@ def validate_refs(
     }
 
 
+def w5_capability_ref(ref: dict[str, Any]) -> str:
+    """Translate a durable OpenConnector action ref into W5's opaque URI form."""
+    value = str(ref.get("id") or "")
+    if "://" in value:
+        return value
+    connection_id = str(ref.get("connection_id") or "")
+    if not connection_id:
+        raise ValueError("MCP Action 缺少 connection_id")
+    return f"mcp://{connection_id}/{value}"
+
+
 async def resolve_requested_openviking_refs(
     requested: list[ContextRef],
     *,
@@ -518,7 +529,9 @@ async def run_invocation(
             )
             invocation = W5Invocation(
                 business_goal=payload.message,
-                mcp_capability_refs=[ref["id"] for ref in item.context_refs_json.get("mcp_refs", [])],
+                mcp_capability_refs=[
+                    w5_capability_ref(ref) for ref in item.context_refs_json.get("mcp_refs", [])
+                ],
                 knowledge_resource_refs=[ref["id"] for ref in item.context_refs_json.get("knowledge_refs", [])],
                 target_skill=skill.target_skill,
                 revision=next_revision(skill.active_revision),
