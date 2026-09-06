@@ -16,7 +16,12 @@ from server.schemas.source_connections import (
 )
 from server.schemas.standard_response import StandardResponse, success_response
 from server.services.source_connections import SourceConnectionService
-from server.services.source_connectors import ConnectorError, FeishuAdminConfigService, FeishuOAuthStateStore, feishu_callback_url
+from server.services.source_connectors import (
+    ConnectorError,
+    FeishuAdminConfigService,
+    FeishuOAuthStateStore,
+    feishu_callback_url,
+)
 
 router = APIRouter()
 source_connection_service = SourceConnectionService()
@@ -41,8 +46,9 @@ def _require_admin(auth: AuthContext) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
 
 
-def _oauth_callback_html(*, state: str | None, status_value: str, message: str, connection_id: str | None = None) -> str:
-    safe_state = html.escape(state or "")
+def _oauth_callback_html(
+    *, state: str | None, status_value: str, message: str, connection_id: str | None = None
+) -> str:
     safe_status = html.escape(status_value)
     safe_message = html.escape(message)
     safe_connection_id = html.escape(connection_id or "")
@@ -73,9 +79,9 @@ def _oauth_callback_html(*, state: str | None, status_value: str, message: str, 
 </head>
 <body>
   <main>
-    <h1>{'飞书授权已完成' if status_value == 'connected' else '飞书授权未完成'}</h1>
+    <h1>{"飞书授权已完成" if status_value == "connected" else "飞书授权未完成"}</h1>
     <p>{safe_message}</p>
-    <p>状态：<code>{safe_status}</code>{' · Connection: <code>' + safe_connection_id + '</code>' if connection_id else ''}</p>
+    <p>状态：<code>{safe_status}</code>{" · Connection: <code>" + safe_connection_id + "</code>" if connection_id else ""}</p>
     <button onclick="window.close()">关闭窗口</button>
   </main>
   <script>
@@ -112,7 +118,9 @@ async def create_source_connection(
             user_id=auth.user_id,
             payload=payload,
         )
-        return success_response(data=source_connection_service.connection_payload(connection), message="Source connection created")
+        return success_response(
+            data=source_connection_service.connection_payload(connection), message="Source connection created"
+        )
     except (ValueError, ConnectorError) as error:
         raise _http_error(error)
 
@@ -144,7 +152,9 @@ async def refresh_source_connection(
             tenant_id=auth.tenant_id,
             connection_id=connection_id,
         )
-        return success_response(data=source_connection_service.connection_payload(connection), message="Source connection refreshed")
+        return success_response(
+            data=source_connection_service.connection_payload(connection), message="Source connection refreshed"
+        )
     except (ValueError, ConnectorError) as error:
         raise _http_error(error)
 
@@ -311,7 +321,10 @@ async def feishu_oauth_result(
         state=state,
     )
     if not data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "state_not_found", "message": "OAuth state not found"})
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "state_not_found", "message": "OAuth state not found"},
+        )
     return success_response(data=data, message="Retrieved Feishu OAuth result")
 
 
@@ -366,7 +379,9 @@ async def locate_source_connection_resource(
         raise _http_error(error)
 
 
-@router.get("/source-connections/{connection_id}/resources/{external_id:path}/children", response_model=StandardResponse[dict])
+@router.get(
+    "/source-connections/{connection_id}/resources/{external_id:path}/children", response_model=StandardResponse[dict]
+)
 async def list_source_connection_resource_children(
     connection_id: str,
     external_id: str,
