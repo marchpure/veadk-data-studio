@@ -115,6 +115,37 @@ async def test_broker_issue_keeps_oidc_and_delegation_audiences_distinct(broker_
 
 
 @pytest.mark.asyncio
+async def test_broker_exchanges_access_token_for_mcp_audience(broker_db, monkeypatch):
+    monkeypatch.setenv("DWV1_OIDC_AUDIENCE", "data-studio-oauth-client")
+    monkeypatch.setenv("DWV1_MCP_AUDIENCE", "openconnector-resource")
+    owner = SimpleNamespace(
+        tenant_id=uuid4(),
+        external_subject="subject-a",
+        external_groups=("group-a",),
+        access_token="browser-token",
+        external_issuer="https://issuer.example",
+        external_audience="data-studio-oauth-client",
+        external_user_pool="pool-a",
+    )
+
+    async def exchange(_token):
+        return "mcp-resource-token"
+
+    monkeypatch.setattr(delegation_broker, "_exchange_for_mcp_audience", exchange)
+    async with broker_db() as db:
+        ref = await delegation_broker.issue_from_auth(owner, db)
+        record = (
+            await db.execute(
+                delegation_broker.select(Delegation).where(
+                    Delegation.ref_hash == delegation_broker._ref_hash(ref)
+                )
+            )
+        ).scalar_one()
+        encrypted = await delegation_broker.CryptoService.decrypt_config(record.encrypted_access_token, db)
+        assert encrypted["access_token"] == "mcp-resource-token"
+
+
+@pytest.mark.asyncio
 async def test_broker_issue_rejects_missing_required_group_as_auth_failure(broker_db):
     owner = SimpleNamespace(
         tenant_id=uuid4(),

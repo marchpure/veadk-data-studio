@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+import httpx
 from fastapi import HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +28,8 @@ from server.services.runtime_secrets import RuntimeSecretError, get_runtime_secr
 
 MAX_TTL_SECONDS = 300
 DEFAULT_AUDIENCE = "dwv1-skill-agent"
+TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"
+ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
 OPAQUE_REF_PATTERN = r"^dlg_[A-Za-z0-9_-]{32,64}$"
 
 
@@ -67,6 +70,40 @@ async def _service_credential() -> str:
     return value
 
 
+async def _exchange_for_mcp_audience(access_token: str) -> str:
+    """Exchange the browser-client token for the configured MCP resource audience."""
+    target = _configured(os.getenv("DWV1_MCP_AUDIENCE"))
+    if not target:
+        return access_token
+    try:
+        from server.services.external_oidc import _client_id, _client_secret, _discovery
+
+        metadata = await _discovery()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                metadata["token_endpoint"],
+                data={
+                    "grant_type": TOKEN_EXCHANGE_GRANT,
+                    "client_id": _client_id(),
+                    "client_secret": await _client_secret(),
+                    "subject_token": access_token,
+                    "subject_token_type": ACCESS_TOKEN_TYPE,
+                    "requested_token_type": ACCESS_TOKEN_TYPE,
+                    "audience": target,
+                },
+            )
+        if response.status_code >= 400:
+            raise DelegationBrokerError("BLOCKED_AUTH")
+        exchanged = response.json().get("access_token")
+        if not isinstance(exchanged, str) or not exchanged:
+            raise DelegationBrokerError("BLOCKED_AUTH")
+        return exchanged
+    except DelegationBrokerError:
+        raise
+    except Exception as exc:
+        raise DelegationBrokerError("BLOCKED_AUTH") from exc
+
+
 def _constant_time_bearer(request: Request, credential: str) -> bool:
     header = request.headers.get("authorization", "")
     if not header.startswith("Bearer "):
@@ -103,6 +140,7 @@ async def issue_from_auth(auth: AuthContext, session: AsyncSession) -> str:
     now = datetime.now(UTC)
     expires = now + timedelta(seconds=MAX_TTL_SECONDS)
     ref = f"dlg_{secrets.token_urlsafe(32)}"
+    access_token = await _exchange_for_mcp_audience(access_token)
     encrypted = await CryptoService.encrypt_config({"access_token": access_token}, session)
     session.add(
         Delegation(

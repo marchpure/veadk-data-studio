@@ -42,6 +42,10 @@ in browser storage. `DWV1_ALLOW_ENV_SECRETS` remains false in cloud mode.
   - UserPool must equal `f69c17b4-d030-43bc-b4a7-9cae0f6370c3`
   - audience must equal the configured W5 audience
   - required group UID is non-secret configuration
+- MCP resource audience exchange:
+  - `DWV1_MCP_AUDIENCE` is the approved W4.1 resource audience
+  - Broker exchanges the verified browser access token for this audience before
+    returning a one-use delegation token to W5
 - Required validation: RS256 signature, exact issuer, audience, expiry, nbf,
   subject, and `client_id` or `azp` equal to the Data Studio client ID
 - Required identity: verified `sub`, group claim, and optional required group
