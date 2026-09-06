@@ -7,6 +7,7 @@ import os
 import zipfile
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 import httpx
@@ -36,6 +37,7 @@ from server.data_workshop.skill.service import (
     run_invocation,
     session_payload,
     skill_payload,
+    stable_artifact_url,
     status_from_error,
     validate_requested_refs,
     visible_catalog,
@@ -43,6 +45,7 @@ from server.data_workshop.skill.service import (
 from server.data_workshop.skill.w5_adapter import W5AdapterError, W5SkillAgentAdapter
 from server.db.session import AsyncSessionFactory, get_async_session
 from server.schemas.standard_response import success_response
+from server.services.runtime_secrets import RuntimeSecretError, get_runtime_secret
 
 router = APIRouter(prefix="/v1", tags=["data-workshop-skill"])
 
@@ -589,8 +592,10 @@ async def revision_diff(
     )
     text_diff: list[str] = []
     if base_item.upstream_artifact_url and target_item.upstream_artifact_url and base != target:
-        base_name, base_content, _ = preview_from_zip(await fetch_artifact(base_item.upstream_artifact_url))
-        target_name, target_content, _ = preview_from_zip(await fetch_artifact(target_item.upstream_artifact_url))
+        base_url = stable_artifact_url(skill.target_skill, base, base_item.upstream_artifact_url)
+        target_url = stable_artifact_url(skill.target_skill, target, target_item.upstream_artifact_url)
+        base_name, base_content, _ = preview_from_zip(await fetch_artifact(base_url))
+        target_name, target_content, _ = preview_from_zip(await fetch_artifact(target_url))
         text_diff = list(
             difflib.unified_diff(
                 base_content.decode("utf-8", errors="replace").splitlines(),
@@ -619,6 +624,21 @@ async def fetch_artifact(url: str) -> bytes:
     try:
         headers = {"Accept": "application/zip"}
         artifact_token = os.getenv("W5_ARTIFACT_BEARER_TOKEN", "").strip()
+        configured_w5 = os.getenv("W5_SKILL_AGENT_ENDPOINT", "").strip()
+        if (
+            not artifact_token
+            and configured_w5
+            and urlparse(configured_w5).hostname == urlparse(url).hostname
+        ):
+            artifact_token = (
+                get_runtime_secret(
+                    "w5_runtime_api_key",
+                    env_name="W5_SKILL_AGENT_API_KEY",
+                    required=False,
+                    secret_name_env="DWV1_SKILL_AGENT_SECRET_NAME",
+                )
+                or ""
+            )
         if artifact_token:
             headers["Authorization"] = f"Bearer {artifact_token}"
         async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
@@ -627,7 +647,7 @@ async def fetch_artifact(url: str) -> bytes:
             if len(response.content) > 50 * 1024 * 1024:
                 raise HTTPException(status_code=413, detail="Artifact exceeds preview limit")
             return response.content
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, RuntimeSecretError) as exc:
         raise HTTPException(status_code=502, detail="Artifact download failed") from exc
 
 
@@ -680,7 +700,14 @@ async def artifact(
     item = await repo.get_revision(skill.id, revision)
     if item is None or not item.upstream_artifact_url:
         raise HTTPException(status_code=404, detail="Artifact not found")
-    content = await fetch_artifact(item.upstream_artifact_url)
+    upstream_url = stable_artifact_url(
+        skill.target_skill,
+        revision,
+        item.upstream_artifact_url,
+    )
+    if not upstream_url:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    content = await fetch_artifact(upstream_url)
     if operation == "download":
         return Response(
             content=content,

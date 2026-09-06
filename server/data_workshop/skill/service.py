@@ -104,6 +104,20 @@ def artifact_url_allowed(url: str) -> bool:
     return parsed.hostname.lower() in allowed
 
 
+def stable_artifact_url(
+    target_skill: str,
+    revision: str,
+    fallback_url: str | None = None,
+) -> str | None:
+    endpoint = os.getenv("W5_SKILL_AGENT_ENDPOINT", "").rstrip("/")
+    if endpoint:
+        return (
+            f"{endpoint}/artifacts/"
+            f"{quote(target_skill, safe='')}/{quote(revision, safe='')}"
+        )
+    return fallback_url
+
+
 def safe_event(value: dict[str, Any]) -> dict[str, Any]:
     allowed = {
         "checks",
@@ -638,12 +652,17 @@ async def apply_result(
     if not revision or not isinstance(artifact, dict):
         return
     download = artifact.get("download")
-    upstream_url = (
+    fallback_url = (
         str(download["download_url"])
         if isinstance(download, dict) and download.get("download_url")
         else str(artifact["download_url"])
         if artifact.get("download_url")
         else None
+    )
+    upstream_url = stable_artifact_url(
+        skill.target_skill,
+        str(revision),
+        fallback_url,
     )
     metadata = artifact_metadata(artifact)
     metadata["_proxy_ready"] = bool(upstream_url and artifact_url_allowed(upstream_url))

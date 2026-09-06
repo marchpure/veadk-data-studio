@@ -26,6 +26,7 @@ from server.data_workshop.skill.service import (
     public_artifact,
     safe_event,
     session_payload,
+    stable_artifact_url,
     validate_refs,
 )
 from server.data_workshop.skill.w5_adapter import W5AdapterError, W5Invocation, W5SkillAgentAdapter
@@ -872,3 +873,46 @@ def test_artifact_host_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
     assert artifact_url_allowed("https://artifacts.example.test/a.zip")
     assert not artifact_url_allowed("http://w5.example.test/a.zip")
     assert not artifact_url_allowed("https://attacker.example/a.zip")
+
+
+def test_stable_artifact_url_prefers_w5_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("W5_SKILL_AGENT_ENDPOINT", "https://w5.example.test")
+    assert stable_artifact_url(
+        "sales-skill",
+        "rev-2",
+        "https://tos.example/expired",
+    ) == "https://w5.example.test/artifacts/sales-skill/rev-2"
+
+
+@pytest.mark.asyncio
+async def test_fetch_artifact_authenticates_w5_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests = []
+
+    class Response:
+        content = b"PKzip"
+
+        def raise_for_status(self):
+            return None
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url, *, headers):
+            requests.append((url, headers))
+            return Response()
+
+    monkeypatch.setenv("W5_SKILL_AGENT_ENDPOINT", "https://w5.example.test")
+    monkeypatch.delenv("W5_ARTIFACT_BEARER_TOKEN", raising=False)
+    monkeypatch.setattr(api, "get_runtime_secret", lambda *_args, **_kwargs: "service-key")
+    monkeypatch.setattr(api.httpx, "AsyncClient", lambda **_kwargs: Client())
+
+    content = await api.fetch_artifact(
+        "https://w5.example.test/artifacts/sales-skill/rev-2"
+    )
+
+    assert content == b"PKzip"
+    assert requests[0][1]["Authorization"] == "Bearer service-key"
