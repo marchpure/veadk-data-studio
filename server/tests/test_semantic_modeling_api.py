@@ -85,7 +85,6 @@ async def _create_semantic_model(test_session, tenant: Tenant, datasource_id: st
         SemanticModelEntity,
         SemanticModelField,
         SemanticModelMetric,
-        SemanticModelRelationship,
     )
 
     entity = SemanticModelEntity(
@@ -565,7 +564,26 @@ async def test_publish_failure_does_not_create_version(test_client, test_session
 
     patch_response = await test_client.patch(
         "/api/data-models/sales-semantic",
-        json={"expected_revision": 1, "relationships": [{"id": "bad_join", "fromEntity": "orders", "toEntity": "orders", "label": "Bad fanout", "joinFields": [], "cardinality": "many-to-many", "fkEvidence": "none", "uniqueRate": 10, "orphanRate": 90, "fanoutRisk": "high", "validationStatus": "blocked", "status": "candidate", "validationMessage": "Fanout risk"}]},
+        json={
+            "expected_revision": 1,
+            "relationships": [
+                {
+                    "id": "bad_join",
+                    "fromEntity": "orders",
+                    "toEntity": "orders",
+                    "label": "Bad fanout",
+                    "joinFields": [],
+                    "cardinality": "many-to-many",
+                    "fkEvidence": "none",
+                    "uniqueRate": 10,
+                    "orphanRate": 90,
+                    "fanoutRisk": "high",
+                    "validationStatus": "blocked",
+                    "status": "candidate",
+                    "validationMessage": "Fanout risk",
+                }
+            ],
+        },
     )
     assert patch_response.status_code == 200
     validate_response = await test_client.post("/api/data-models/sales-semantic/validate")
@@ -596,8 +614,10 @@ async def test_published_metric_query_uses_physical_schema_and_relationship_join
     )
 
     entities = (
-        await test_session.execute(select(SemanticModelEntity).where(SemanticModelEntity.model_id == model.id))
-    ).scalars().all()
+        (await test_session.execute(select(SemanticModelEntity).where(SemanticModelEntity.model_id == model.id)))
+        .scalars()
+        .all()
+    )
     orders = next(entity for entity in entities if entity.slug == "orders")
     orders.profile_json = json.dumps({"schema": "sales_reporting"})
     customers = SemanticModelEntity(

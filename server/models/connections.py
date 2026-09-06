@@ -50,7 +50,7 @@ class Connection(Base):
         from server.services.crypto_service import CryptoService
 
         try:
-            return await CryptoService.decrypt_config(self.connection_obj_encrypted, session)
+            return await CryptoService.decrypt_config(self.connection_obj_encrypted, session, tenant_id=self.tenant_id)
         except Exception:
             try:
                 return json.loads(self.connection_obj_encrypted)
@@ -63,4 +63,4 @@ class Connection(Base):
         else:
             from server.services.crypto_service import CryptoService
 
-            self.connection_obj_encrypted = await CryptoService.encrypt_config(value, session)
+            self.connection_obj_encrypted = await CryptoService.encrypt_config(value, session, tenant_id=self.tenant_id)

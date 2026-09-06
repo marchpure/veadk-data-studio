@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "preview_url": "http://127.0.0.1:4184",
+  "profile_id": "ov_647a56c8bde92eb51fc2aac2",
+  "display_name_visible": true,
+  "handoff_url_safe": true,
+  "resource_ref_opaque": true,
+  "imported_metadata_visible": true,
+  "screenshots": {
+    "kb": {
+      "1440x900": "/Users/bytedance/worktrees/dwv1-i4a-w61-w71-v3/docs/handoffs/screenshots/dwv1-i4a-w61-w71-v3/kb-resource-1440x900.png",
+      "1280x800": "/Users/bytedance/worktrees/dwv1-i4a-w61-w71-v3/docs/handoffs/screenshots/dwv1-i4a-w61-w71-v3/kb-resource-1280x800.png",
+      "390x844": "/Users/bytedance/worktrees/dwv1-i4a-w61-w71-v3/docs/handoffs/screenshots/dwv1-i4a-w61-w71-v3/kb-resource-390x844.png"
+    },
+    "skill_imported": {
+      "1440x900": "/Users/bytedance/worktrees/dwv1-i4a-w61-w71-v3/docs/handoffs/screenshots/dwv1-i4a-w61-w71-v3/skill-imported-1440x900.png",
+      "1280x800": "/Users/bytedance/worktrees/dwv1-i4a-w61-w71-v3/docs/handoffs/screenshots/dwv1-i4a-w61-w71-v3/skill-imported-1280x800.png",
+      "390x844": "/Users/bytedance/worktrees/dwv1-i4a-w61-w71-v3/docs/handoffs/screenshots/dwv1-i4a-w61-w71-v3/skill-imported-390x844.png"
+    }
+  },
+  "created_session_url": "http://127.0.0.1:4184/skill?skillId=b74f988c-008f-4a9a-a823-fa8892b16929&sessionId=5ca893ca-bf8f-4d02-bfe9-257e09302519",
+  "restored_after_reload": true,
+  "primary_navigation": [
+    "首页",
+    "连接",
+    "知识库",
+    "Skill"
+  ],
+  "blocked_config_visible": true,
+  "context_patch_status": 200,
+  "removed_resource_ref": true,
+  "empty_state_visible": true,
+  "artifact_absent": true,
+  "artifact_preview_download_requests": [],
+  "browser_storage_secret_free": true,
+  "console_errors": [],
+  "network_failures": []
+}

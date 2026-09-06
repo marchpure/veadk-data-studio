@@ -5,6 +5,8 @@ This middleware extracts the tenant_id from the X-Tenant-ID header and stores it
 in a context variable that can be accessed throughout the request lifecycle.
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from uuid import UUID
 
@@ -28,6 +30,16 @@ def get_tenant_id() -> UUID | None:
 def set_tenant_id(tenant_id: UUID | None) -> None:
     """Set the tenant_id in context."""
     tenant_context.set(tenant_id)
+
+
+@contextmanager
+def tenant_id_context(tenant_id: UUID | None) -> Iterator[None]:
+    """Temporarily use an explicit tenant for context-aware repository calls."""
+    token = tenant_context.set(tenant_id)
+    try:
+        yield
+    finally:
+        tenant_context.reset(token)
 
 
 class TenantContextMiddleware(BaseHTTPMiddleware):

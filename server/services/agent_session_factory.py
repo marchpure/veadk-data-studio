@@ -5,18 +5,20 @@ from typing import Any
 
 from sqlalchemy.engine import make_url
 
-from server.db.session import DATABASE_URL
+from server.db import session as db_session
+from server.db.session import get_async_engine, get_database_url
 from server.services.conversation_state import ConversationStateSession
 from server.utils.config_loader import is_self_hosted
 from server.utils.custom_logger import get_logger
 
 logger = get_logger(__name__)
+DATABASE_URL = db_session.DATABASE_URL
 
 
 def _get_sqlite_agent_db_path() -> str:
     """Get path for SQLite agent session database (separate from main db to avoid locking conflicts)."""
     try:
-        url = make_url(DATABASE_URL)
+        url = make_url(DATABASE_URL or get_database_url())
         if url.drivername.startswith("sqlite"):
             db_path = url.database
 
@@ -44,12 +46,10 @@ def _create_sqlite_backend(session_id: str) -> Any:
 async def _create_postgresql_backend(session_id: str) -> Any:
     from agents.extensions.memory import SQLAlchemySession
 
-    from server.db.session import async_engine
-
     logger.debug("Creating PostgreSQL agent session: %s", session_id)
     return SQLAlchemySession(
         session_id,
-        engine=async_engine,
+        engine=get_async_engine(),
         create_tables=False,
         sessions_table="agent_sessions",
         messages_table="agent_messages",
@@ -83,7 +83,7 @@ def get_session_backend_info() -> dict[str, str]:
         return {
             "backend": "postgresql",
             "engine": "SQLAlchemySession",
-            "note": "Using shared async_engine from main application",
+            "note": "Using shared lazy async_engine from main application",
         }
     return {
         "backend": "sqlite",

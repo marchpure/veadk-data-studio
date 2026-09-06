@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -265,7 +266,11 @@ def is_self_hosted() -> bool:
     Returns:
         True if self-hosted mode is active
     """
-    return get_app_mode() == "self-hosted"
+    return get_app_mode() == "self-hosted" or os.getenv("DWV1_EXTERNAL_OIDC_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 def get_self_hosted_config() -> dict[str, str | None]:
@@ -314,6 +319,15 @@ def validate_self_hosted_config() -> tuple[bool, str | None]:
 def get_app_secret() -> str:
     import os
 
+    if os.getenv("DWV1_EXTERNAL_OIDC_ENABLED", "").strip().lower() in {"1", "true", "yes"}:
+        try:
+            from server.services.runtime_secrets import RuntimeSecretError, get_runtime_secret
+
+            secret = get_runtime_secret("app_secret", env_name="APP_SECRET")
+            if secret:
+                return secret
+        except RuntimeSecretError as exc:
+            raise ValueError("APP_SECRET is unavailable from the configured KMS secret") from exc
     return os.getenv("APP_SECRET", "change-me-in-production-use-strong-secret")
 
 

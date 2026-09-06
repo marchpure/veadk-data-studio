@@ -2629,6 +2629,7 @@ dependencies = [
     { name = "sqlglot" },
     { name = "urllib3" },
     { name = "uvicorn" },
+    { name = "volcengine-python-sdk" },
 ]
 
 [package.optional-dependencies]
@@ -2699,6 +2700,7 @@ requires-dist = [
     { name = "sqlglot", specifier = ">=27.8.0" },
     { name = "urllib3", specifier = ">=2.7.0" },
     { name = "uvicorn", specifier = ">=0.30.0" },
+    { name = "volcengine-python-sdk", specifier = "==5.0.43" },
 ]
 provides-extras = ["test"]
 
@@ -4193,6 +4195,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/1f/93/041fca8274050e40e6791f267d82e0e2e27dd165627bd640d3e0e378d877/uvicorn-0.46.0.tar.gz", hash = "sha256:fb9da0926999cc6cb22dc7cd71a94a632f078e6ae47ff683c5c420750fb7413d", size = 88758, upload-time = "2026-04-23T07:16:00.151Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/31/a3/5b1562db76a5a488274b2332a97199b32d0442aca0ed193697fd47786316/uvicorn-0.46.0-py3-none-any.whl", hash = "sha256:bbebbcbed972d162afca128605223022bedd345b7bc7855ce66deb31487a9048", size = 70926, upload-time = "2026-04-23T07:15:58.355Z" },
+]
+
+[[package]]
+name = "volcengine-python-sdk"
+version = "5.0.43"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "python-dateutil" },
+    { name = "six" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/37/57/ff51ed06de6cc033940db01f264e9f8431537820dfa82a51a38e8a82b731/volcengine_python_sdk-5.0.43.tar.gz", hash = "sha256:c4ce3042e61144db52924ff801aea158e4d4215d3ff7dfcd726cc6978133f9af", size = 10165007, upload-time = "2026-07-30T11:08:28.995Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e7/d4/9e0465902e8a3bb402b241f081eb2ab9ddcc6798210ce6ed7f94c2b5765f/volcengine_python_sdk-5.0.43-py2.py3-none-any.whl", hash = "sha256:ff74f2f5aae6962152113ac01dcb92ef614b4b28851f6e350b2b3e2ec980156c", size = 40890444, upload-time = "2026-07-30T11:08:22.887Z" },
 ]
 
 [[package]]

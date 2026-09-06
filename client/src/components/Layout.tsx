@@ -37,9 +37,10 @@ export default function Layout({ children }: LayoutProps) {
 
   const isPreviewPage = location.pathname.includes('/preview')
   const isFullPageRoute = isFullEditorRoute(location.pathname)
+  const isOpenVikingRoute = location.pathname === '/kb' || location.pathname.startsWith('/kb/')
 
   return (
-    <div className={`flex h-screen bg-[#1a1a1a] overflow-hidden ${isFullPageRoute ? 'relative' : ''}`}>
+    <div className={`flex h-screen bg-[#1a1a1a] overflow-hidden ${isFullPageRoute ? 'relative' : ''} ${isOpenVikingRoute ? 'openviking-host-layout' : ''}`}>
       <CollapsibleSidebar />
 
       <div className={`flex-1 min-h-0 ${isPreviewPage ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar'}`}>

@@ -1,3 +1,4 @@
+import os
 import secrets
 from uuid import UUID
 
@@ -41,8 +42,15 @@ def _get_email_service() -> EmailService | SMTPEmailService | None:
 
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, UUID]):
-    reset_password_token_secret = get_auth_secret()
-    verification_token_secret = get_auth_secret()
+    # External OIDC functions receive KMS-backed secrets in request headers.
+    # Keep module import side-effect free on that path.
+    _import_secret = (
+        secrets.token_urlsafe(32)
+        if os.getenv("DWV1_EXTERNAL_OIDC_ENABLED", "").strip().lower() in {"1", "true", "yes"}
+        else get_auth_secret()
+    )
+    reset_password_token_secret = _import_secret
+    verification_token_secret = _import_secret
 
     async def on_after_login(
         self,

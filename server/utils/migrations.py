@@ -18,8 +18,14 @@ from sqlalchemy import create_engine, text
 
 from server.utils.config_loader import is_self_hosted
 from server.utils.custom_logger import get_logger
+from server.utils.database_config import add_schema_query, configured_database_url, sync_connect_args, sync_database_url
 
 logger = get_logger(__name__)
+
+
+def _alembic_config_value(value: str) -> str:
+    """Escape percent signs before passing a URL to ConfigParser-backed Alembic."""
+    return value.replace("%", "%%")
 
 
 def get_alembic_config() -> Config:
@@ -82,13 +88,13 @@ def get_alembic_config() -> Config:
     # Set the database URL based on deployment mode
     if is_self_hosted():
         # Hosted mode: use PostgreSQL from DATABASE_URL
-        database_url = os.getenv("DATABASE_URL")
+        database_url = configured_database_url()
         if not database_url:
             raise ValueError("DATABASE_URL environment variable is required in hosted mode")
         # Alembic expects sync URLs, convert asyncpg to psycopg2
-        sync_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+        sync_url = add_schema_query(sync_database_url(database_url))
         logger.info("🔧 Hosted mode: Database URL configured (PostgreSQL)")
-        alembic_cfg.set_main_option("sqlalchemy.url", sync_url)
+        alembic_cfg.set_main_option("sqlalchemy.url", _alembic_config_value(sync_url))
     else:
         # Local mode: use DATABASE_URL if provided (Tauri sets this), otherwise fallback to local path
         database_url = os.getenv("DATABASE_URL")
@@ -100,7 +106,7 @@ def get_alembic_config() -> Config:
             sqlite_path = base_dir / ".data" / "app.db"
             sync_url = f"sqlite:///{sqlite_path}"
             logger.info(f"🔧 Local mode: Using default path (SQLite): {sync_url}")
-        alembic_cfg.set_main_option("sqlalchemy.url", sync_url)
+        alembic_cfg.set_main_option("sqlalchemy.url", _alembic_config_value(sync_url))
 
     return alembic_cfg
 
@@ -121,10 +127,10 @@ def check_database_has_tables(database_url: str) -> bool:
         if "sqlite+aiosqlite://" in sync_url:
             sync_url = sync_url.replace("sqlite+aiosqlite://", "sqlite:///")
         elif "postgresql+asyncpg://" in sync_url:
-            sync_url = sync_url.replace("postgresql+asyncpg://", "postgresql://")
+            sync_url = sync_database_url(sync_url)
 
         # Create a sync engine for checking
-        engine = create_engine(sync_url, echo=False)
+        engine = create_engine(sync_url, echo=False, connect_args=sync_connect_args())
 
         with engine.connect() as conn:
             if sync_url.startswith("sqlite"):
@@ -164,8 +170,8 @@ def _ensure_wide_alembic_version_column(database_url: str) -> None:
     if "postgresql" not in database_url:
         return
 
-    sync_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
-    engine = create_engine(sync_url, echo=False)
+    sync_url = sync_database_url(database_url)
+    engine = create_engine(sync_url, echo=False, connect_args=sync_connect_args())
     try:
         with engine.begin() as conn:
             conn.execute(
@@ -204,7 +210,7 @@ def run_migrations() -> None:
 
         # Get database URL based on deployment mode
         if is_self_hosted():
-            database_url = os.getenv("DATABASE_URL")
+            database_url = configured_database_url()
             if not database_url:
                 raise ValueError("DATABASE_URL environment variable is required in hosted mode")
             logger.info("ℹ️  Hosted mode: Using PostgreSQL from DATABASE_URL")

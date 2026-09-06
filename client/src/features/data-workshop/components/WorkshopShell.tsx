@@ -1,0 +1,94 @@
+import {
+  BookOpen,
+  ChevronDown,
+  Database,
+  Home,
+  Menu,
+  PanelLeftClose,
+  Sparkles,
+  X,
+} from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { NavLink, useLocation } from 'react-router-dom'
+import { useStore } from '../../../stores/useStore'
+import { workshopApi } from '../api'
+
+const primaryNav = [
+  { label: '首页', path: '/home', icon: Home },
+  { label: '连接', path: '/connections/overview', icon: Database },
+  { label: '知识库', path: '/kb', icon: BookOpen },
+  { label: 'Skill', path: '/skill', icon: Sparkles },
+]
+
+const connectionNav = [
+  ['总览', '/connections/overview'],
+  ['连接器', '/connections/providers/market'],
+  ['Actions', '/connections/actions'],
+  ['Trace', '/connections/trace'],
+  ['访问权限', '/connections/access'],
+  ['文档', '/connections/docs'],
+]
+
+export function WorkshopShell({ children }: { children: ReactNode }) {
+  const location = useLocation()
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [backendMode, setBackendMode] = useState<'REAL' | 'TEST'>('TEST')
+  const user = useStore(state => state.user)
+  const inConnections = location.pathname.startsWith('/connections')
+  const userName = user?.full_name || user?.email || '当前用户'
+  useEffect(() => {
+    void workshopApi.getBootstrap()
+      .then(bootstrap => setBackendMode(bootstrap.backend_mode))
+      .catch(() => setBackendMode('TEST'))
+  }, [])
+
+  return (
+    <div className={`dw-app ${backendMode === 'TEST' ? 'has-test-backend' : ''}`}>
+      {backendMode === 'TEST' && <div className="dw-test-backend" role="alert">TEST BACKEND</div>}
+      <header className="dw-mobile-header">
+        <button aria-label="打开导航" onClick={() => setMobileOpen(true)}><Menu /></button>
+        <span>Data Workshop</span>
+      </header>
+      <aside className={`dw-sidebar ${mobileOpen ? 'is-open' : ''}`}>
+        <div className="dw-brand">
+          <div className="dw-brand-mark">DW</div>
+          <div><strong>Data Workshop</strong><span>数据工作坊</span></div>
+          <button aria-label="关闭导航" className="dw-mobile-close" onClick={() => setMobileOpen(false)}><X /></button>
+        </div>
+        <nav className="dw-primary-nav" aria-label="一级导航">
+          {primaryNav.map(({ label, path, icon: Icon }) => (
+            <NavLink
+              key={path}
+              to={path}
+              className={({ isActive }) => isActive || (label === '连接' && inConnections) ? 'active' : ''}
+              onClick={() => setMobileOpen(false)}
+            >
+              <Icon size={18} /><span>{label}</span>
+            </NavLink>
+          ))}
+        </nav>
+        <div className="dw-sidebar-footer">
+          <div className="dw-avatar">{userName.slice(0, 1).toUpperCase()}</div>
+          <div><strong>{userName}</strong><span>{user?.is_superuser ? '超级管理员' : '当前工作区'}</span></div>
+          <ChevronDown size={16} />
+        </div>
+      </aside>
+      {mobileOpen && <button className="dw-backdrop" aria-label="关闭导航遮罩" onClick={() => setMobileOpen(false)} />}
+      <main className="dw-main">
+        {inConnections && (
+          <div className="dw-subnav-wrap">
+            <nav className="dw-subnav" aria-label="连接二级导航">
+              {connectionNav.map(([label, path]) => (
+                <NavLink key={path} to={path} className={({ isActive }) => isActive ? 'active' : ''}>
+                  {label}
+                </NavLink>
+              ))}
+            </nav>
+            <PanelLeftClose size={17} aria-hidden />
+          </div>
+        )}
+        <div className="dw-content">{children}</div>
+      </main>
+    </div>
+  )
+}

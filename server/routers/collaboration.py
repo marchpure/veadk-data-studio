@@ -11,9 +11,17 @@ from server.collaboration.feishu.adapter import FeishuChannelAdapter
 from server.collaboration.feishu.client import FeishuApiClient
 from server.collaboration.feishu.event_processor import process_feishu_event
 from server.collaboration.installation_service import CollaborationInstallationService
-from server.collaboration.repositories import CollaborationDeliveryTargetRepository, CollaborationInstallationRepository
+from server.collaboration.repositories import (
+    CollaborationDeliveryTargetRepository,
+    CollaborationInstallationRepository,
+)
 from server.db.session import get_async_session
-from server.schemas.collaboration import FeishuChatSelectRequest, FeishuEventIngestRequest, FeishuInstallationCreate, TestMessageRequest
+from server.schemas.collaboration import (
+    FeishuChatSelectRequest,
+    FeishuEventIngestRequest,
+    FeishuInstallationCreate,
+    TestMessageRequest,
+)
 from server.schemas.standard_response import success_response
 from server.services.crypto_service import CryptoService
 from server.utils.custom_logger import get_logger
@@ -106,7 +114,9 @@ async def list_feishu_chats(
     if not installation or installation.tenant_id != auth.tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Installation not found")
     if installation.platform != "feishu":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chat selector is only implemented for Feishu")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Chat selector is only implemented for Feishu"
+        )
     credentials = await CryptoService.decrypt_config(installation.credentials_encrypted, session)
     client = FeishuApiClient(credentials["app_id"], credentials["app_secret"])
     try:
@@ -151,7 +161,9 @@ async def select_feishu_chat(
     if not installation or installation.tenant_id != auth.tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Installation not found")
     if installation.platform != "feishu":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Chat selector is only implemented for Feishu")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Chat selector is only implemented for Feishu"
+        )
     if not payload.confirm_non_production:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -280,7 +292,9 @@ async def send_test_message(
     if not installation or installation.tenant_id != auth.tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Installation not found")
     if installation.platform != "feishu":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Test message is only implemented for Feishu")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Test message is only implemented for Feishu"
+        )
     if not payload.confirm_non_production:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -296,9 +310,13 @@ async def send_test_message(
         targets = await target_repo.list_by_installation(installation.id)
         target = next((item for item in targets if item.external_target_id == payload.chat_id), None)
     if not target:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a Feishu chat from the selector first")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a Feishu chat from the selector first"
+        )
     if not target.is_verified or not (target.config_json or {}).get("confirm_non_production"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected chat is not confirmed as a test group")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Selected chat is not confirmed as a test group"
+        )
     credentials = await CryptoService.decrypt_config(installation.credentials_encrypted, session)
     client = FeishuApiClient(credentials["app_id"], credentials["app_secret"])
     try:

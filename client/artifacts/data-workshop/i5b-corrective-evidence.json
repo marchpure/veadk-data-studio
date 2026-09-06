@@ -1,0 +1,92 @@
+{
+  "schema": "dwv1.i5b.corrective-evidence.v3",
+  "captured_at": "2026-09-06T19:44:00+08:00",
+  "status": "P0_STATIC_GENERATION_READY_W5_DEPLOY_AUTH_BLOCKED",
+  "authoritative_inputs": {
+    "data_studio_origin": "https://si9927hq76iqtflib3r0o.apigateway-cn-beijing.volceapi.com",
+    "tenant_id": "1ad3f604-6f00-456a-b7f0-9afc4a6a7796",
+    "skill_id": "e6afb29f-bd27-4556-967d-dd429df47689",
+    "session_id": "efd25b7e-ec4c-4ebc-8aa1-3ced7ae27d66",
+    "storage_state": "/tmp/dwv1-i5a-oidc-state.json"
+  },
+  "browser_context": {
+    "storage_state_reused": true,
+    "tenant_header": "X-Tenant-ID",
+    "me_http_status": 200,
+    "authenticated": true,
+    "external_subject_present": true,
+    "external_group_count": 1,
+    "skill_http_status": 200,
+    "session_http_status": 200,
+    "catalog_http_status": 200,
+    "authorized_action_visible": "hackernews.get_max_item_id",
+    "unauthorized_action_visible": false,
+    "arxiv_visible": false,
+    "patch_context_http_status": 200,
+    "origin_asserted_before_requests": true
+  },
+  "data_studio": {
+    "function_id": "2plj8qqa",
+    "stable_revision": 38,
+    "traffic_percent": 100,
+    "invalid_exchange_audience_removed": true,
+    "delegation_creation": "passed_with_verified_user_access_token"
+  },
+  "p0_static_generation": {
+    "w5_code_commit": "2ff9bf6",
+    "w5_tests": "70 passed",
+    "data_studio_code_change": "W5_STATIC_CAPABILITY_VALIDATION skips delegation issuance and persisted OpenViking reads",
+    "generation_action_calls": 0,
+    "runtime_oauth_required_in_skill": true,
+    "tokens_in_artifact": false
+    ,"capability_snapshot": "real action input_schema carried in ContextRef metadata and serialized to W5"
+    ,"empty_input_schema_rejected": true
+  },
+  "w5_deploy": {
+    "target_function_id": "57iz04w8",
+    "stable_revision_before": 11,
+    "build_image": "agentkit-platform-2107625663-cn-beijing.cr.volces.com/agentkit/data-workshop-skill-agent-d7ok:20260906195259",
+    "old_runtime_rollback": "completed; r-yeub2fo0lcq2swebzkt6 restored to prior image and Ready",
+    "default_profile_api": "refresh token invalid; veFaaS query/release unavailable",
+    "new_revision": null
+  },
+  "invocations": [
+    {
+      "client_invocation_id": "i5b-runtime-e2e-v3-r9",
+      "status": "blocked_auth",
+      "error": "token exchange rejected (400): access_denied The authorization request was denied."
+    },
+    {
+      "client_invocation_id": "i5b-runtime-e2e-v3-r10",
+      "status": "blocked_auth",
+      "events": [
+        "invocation.started",
+        "target.resolved",
+        "validation"
+      ],
+      "validation_error": "capability access denied"
+    }
+  ],
+  "w4_runtime_probe": {
+    "mcp_origin": "https://su4f9ugsggenk65g7f7m5.apigateway-cn-beijing.volceapi.com",
+    "mcp_path": "/mcp",
+    "http_status": 401,
+    "response_code": "unauthorized",
+    "response_message": "A valid local bearer token is required.",
+    "oauth_discovery_status": 200,
+    "oauth_protected_resource_status": 200,
+    "control_plane_function_id": "6fmb81qa",
+    "control_plane_source_sha": "2341a55591ce111ef8e8d41072831018c2d17aaa",
+    "mcp_runtime_function_id": "hygmpcqd",
+    "mcp_runtime_source_sha": "57dab472e0fa38a87783213f7da0359b8885e6a5",
+    "oauth_ingress_configuration_present": false
+  },
+  "security": {
+    "tokens_or_secrets_in_evidence": false,
+    "dns_blocker": false,
+    "old_dns_blocker_conclusion_revoked": true,
+    "user_login_required": false,
+    "new_blocker_is_reproducible": true
+  },
+  "next_owner_action": "Align the existing W4.1 public /mcp runtime ingress with the approved OAuth/JWKS contract, then rerun the same Skill/Session. Do not create a duplicate Skill or alter Data Studio/W5 cloud resources."
+}

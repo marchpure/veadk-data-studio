@@ -55,6 +55,7 @@ dependencies = [
   "slack-sdk>=3.27.0",
   "croniter>=2.0.0",
   "lark-oapi>=1.4.23",
+  "volcengine-python-sdk==5.0.43",
 ]
 
 [tool.setuptools.packages.find]

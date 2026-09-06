@@ -6,6 +6,7 @@ import resource
 import sys
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -20,7 +21,7 @@ if app_mode not in VALID_APP_MODES:
 import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from server.services.database_operations import AsyncDatabaseService
@@ -45,6 +46,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from server.auth.error_messages import AUTH_ERROR_MESSAGES, get_auth_error_message
 from server.auth.tenant_context import TenantContextMiddleware
 from server.collaboration.feishu.transport import feishu_ws_manager
+from server.data_workshop import api as data_workshop_api
+from server.data_workshop.skill import api as data_workshop_skill_api
 from server.db.session import ensure_database_encoding, ensure_database_schema
 from server.routers import analysis_artifacts as analysis_artifacts_router
 from server.routers import app_config as app_config_router
@@ -61,7 +64,9 @@ from server.routers import datasets as datasets_router  # Dataset management
 from server.routers import (
     datasources as datasources_router,
 )  # Unified datasources (connections + datasets)
+from server.routers import delegations as delegations_router
 from server.routers import exports as exports_router
+from server.routers import external_oidc as external_oidc_router
 from server.routers import (
     file_upload as file_upload_router,
 )  # File upload with DB storage
@@ -73,6 +78,7 @@ from server.routers import llm_connections, unified_agent
 from server.routers import local_repos as local_repos_router
 from server.routers import mcp_keys as mcp_keys_router
 from server.routers import notebooks as notebooks_router
+from server.routers import openviking as openviking_router
 from server.routers import queries as queries_router
 from server.routers import raw_query as raw_query_router
 from server.routers import schedules as schedules_router
@@ -93,6 +99,8 @@ from server.schemas.standard_response import error_response, success_response
 from server.services.conversation_evaluation_service import skill_loop_service
 from server.services.credit_sync_service import credit_sync_service
 from server.services.dashboard_refresh_service import dashboard_refresh_service
+from server.services.external_oidc import enabled as external_oidc_enabled
+from server.services.faas_runtime import deferred_runtime_enabled, request_faas_credentials
 from server.services.posthog_service import PostHogService
 from server.services.schedule_runner_service import schedule_runner_service
 from server.utils.config_loader import get_skill_loop_config, is_community_mode, is_self_hosted
@@ -115,6 +123,8 @@ logger = get_logger(__name__)
 
 # Global migration status tracking
 migration_status = {"completed": False, "error": None, "message": "Migrations pending"}
+_deferred_runtime_ready = False
+_deferred_runtime_lock: asyncio.Lock | None = None
 
 
 async def init_posthog_background():
@@ -133,6 +143,12 @@ async def app_lifespan(app: FastAPI):
     try:
         total_start = time.perf_counter()
         logger.info("🚀 Starting backend initialization...")
+
+        if deferred_runtime_enabled():
+            migration_status["message"] = "Waiting for VeFaaS request credentials"
+            logger.info("⏸️  Cloud runtime initialization deferred until VeFaaS injects request STS credentials")
+            yield
+            return
 
         # Start PostHog in background (non-blocking)
         start = time.perf_counter()
@@ -162,8 +178,9 @@ async def app_lifespan(app: FastAPI):
         else:
             logger.info(f"ℹ️  Running in desktop mode (APP_MODE={os.getenv('APP_MODE')})")
 
-        # Self-hosted setup
-        if is_self_hosted():
+        # Self-hosted setup is not applicable to the external OIDC deployment:
+        # the first verified OIDC login creates the local user/workspace.
+        if is_self_hosted() and not external_oidc_enabled():
             from server.services.self_hosted_setup import setup_self_hosted_environment
 
             start = time.perf_counter()
@@ -172,7 +189,7 @@ async def app_lifespan(app: FastAPI):
             logger.info(f"✅ Self-hosted setup completed: {time.perf_counter() - start:.3f}s")
 
         # Local setup (auto-create/reuse workspace, no external onboarding required)
-        else:
+        elif not is_self_hosted():
             from server.services.community_setup import setup_community_environment
 
             start = time.perf_counter()
@@ -308,6 +325,56 @@ if get_security_flags()["proxy_headers_enabled"]:
     from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
+
+
+async def _ensure_deferred_runtime_ready() -> None:
+    global _deferred_runtime_ready, _deferred_runtime_lock
+
+    if _deferred_runtime_ready:
+        return
+    if _deferred_runtime_lock is None:
+        _deferred_runtime_lock = asyncio.Lock()
+    async with _deferred_runtime_lock:
+        if _deferred_runtime_ready:
+            return
+        logger.info("📦 Initializing deferred cloud runtime from request-scoped VeFaaS credentials")
+        migration_status["message"] = "Running database migrations..."
+        await ensure_database_schema()
+        await ensure_database_encoding()
+        migration_status["completed"] = True
+        migration_status["error"] = None
+        migration_status["message"] = "Backend ready"
+        _deferred_runtime_ready = True
+
+
+@app.middleware("http")
+async def faas_runtime_middleware(request: Request, call_next):
+    """Bind VeFaaS STS headers before any KMS-backed dependency executes."""
+
+    if not deferred_runtime_enabled():
+        return await call_next(request)
+
+    with request_faas_credentials(request):
+        # The Web shell and health endpoint are static/read-only and must remain
+        # reachable while the platform identity path is unavailable. All API
+        # routes still fail closed below until KMS-backed initialization works.
+        if not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        try:
+            await _ensure_deferred_runtime_ready()
+        except Exception:
+            migration_status["completed"] = False
+            migration_status["error"] = "RuntimeCredentialsUnavailable"
+            migration_status["message"] = "Cloud runtime credentials are unavailable"
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "success": False,
+                    "message": "Cloud runtime credentials are unavailable",
+                    "data": {"status": "BLOCKED_CONFIG"},
+                },
+            )
+        return await call_next(request)
 
 EXCLUDED_PATHS = [
     "/api/unified-agent/stream",
@@ -628,6 +695,12 @@ async def redirect_mcp_no_slash():
 
 app.mount("/api/mcp", mcp_app)
 
+
+@app.post("/mcp", include_in_schema=False)
+async def redirect_root_mcp():
+    return RedirectResponse(url="/api/mcp/", status_code=307)
+
+
 if not is_self_hosted():
     app.include_router(waitlist_router.router, prefix="/api", tags=["waitlist"])
 
@@ -641,8 +714,11 @@ app.include_router(github_router.router, prefix="/api", tags=["github"])
 app.include_router(databricks_oauth_router.router, prefix="/api", tags=["databricks-oauth"])
 
 app.include_router(local_repos_router.router, prefix="/api", tags=["local-repos"])
+app.include_router(openviking_router.router, prefix="/api", tags=["openviking"])
+app.include_router(delegations_router.router, tags=["internal-delegations"])
 
 app.include_router(auth_router.router, prefix="/api", tags=["auth"])
+app.include_router(external_oidc_router.router, prefix="/api", tags=["external-oidc"])
 
 app.include_router(app_config_router.router, prefix="/api", tags=["config"])
 
@@ -653,6 +729,9 @@ app.include_router(scopes_router.router, prefix="/api", tags=["scopes"])
 app.include_router(cache_router.router, prefix="/api", tags=["cache"])
 
 app.include_router(schedules_router.router, prefix="/api", tags=["schedules"])
+app.include_router(data_workshop_api.router, prefix="/api", tags=["data-workshop"])
+app.include_router(data_workshop_api.console_router, tags=["openconnector-console"])
+app.include_router(data_workshop_skill_api.router, prefix="/api")
 
 
 @app.get("/health")
@@ -691,6 +770,37 @@ async def health_check():
         "migrations": migration_status,
         "message": "Backend is running",
     }
+
+
+def _frontend_dist() -> Path:
+    configured = os.getenv("DWV1_FRONTEND_DIST", "").strip()
+    if configured:
+        return Path(configured)
+    return Path(__file__).resolve().parents[1] / "client" / "dist"
+
+
+@app.get("/{path:path}", include_in_schema=False)
+async def serve_frontend(path: str):
+    """Serve the compiled Web shell from the same origin as the BFF."""
+    if path == "" or path == "index.html":
+        candidate = _frontend_dist() / "index.html"
+    else:
+        if path.startswith("api/") or path in {"docs", "redoc", "openapi.json"}:
+            return JSONResponse(status_code=404, content={"detail": "Not found"})
+        candidate = _frontend_dist() / path
+    dist = _frontend_dist().resolve()
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
+    if dist not in resolved.parents and resolved != dist:
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
+    if resolved.is_file():
+        return FileResponse(resolved)
+    index = dist / "index.html"
+    if index.is_file():
+        return FileResponse(index)
+    return JSONResponse(status_code=404, content={"detail": "Frontend bundle unavailable"})
 
 
 if __name__ == "__main__":

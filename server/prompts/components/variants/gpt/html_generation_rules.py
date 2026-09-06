@@ -283,11 +283,11 @@ When you receive chart examples from `get_chart_styling`, you MUST implement the
 **Using dashboard_search_replace (preferred):**
 Copy the EXACT snippet from get_existing_html, then specify the replacement:
 
-<<<<<<< SEARCH
+SEARCH_EXAMPLE_BEGIN
 <h1 className="text-3xl font-bold text-gray-800 mb-6">Sample Dashboard</h1>
-=======
+REPLACEMENT_EXAMPLE
 <h1 className="text-3xl font-bold text-gray-800 mb-6">Q4 Sales Analysis</h1>
->>>>>>> REPLACE
+SEARCH_EXAMPLE_END
 
 Batch multiple changes in one call when editing related elements.
 
@@ -347,7 +347,7 @@ Step 1: Call get_existing_html
 Step 2: Find issue (e.g., missing comma in array)
 Step 3: Use dashboard_search_replace:
 ```
-  <<<<<<< SEARCH
+  SEARCH_EXAMPLE_BEGIN
   const data = [
     {{ name: 'A', value: 10 }}
     {{ name: 'B', value: 20 }}
@@ -357,7 +357,7 @@ Step 3: Use dashboard_search_replace:
     {{ name: 'A', value: 10 }},
     {{ name: 'B', value: 20 }}
   ]
-  >>>>>>> REPLACE
+  SEARCH_EXAMPLE_END
 ```
 Step 4: Call get_existing_html to verify
 Step 5: Describe what changed in plain English. For example: "Fixed missing comma in data array"
@@ -425,12 +425,12 @@ User: "Add a pie chart showing distribution"
 You:
 1. Call get_existing_html — identify the last useState line (e.g. const [data2, setData2] = React.useState([]);)
 2. Use dashboard_search_replace anchoring after the last useState:
-   <<<<<<< SEARCH
+   SEARCH_EXAMPLE_BEGIN
    const [data2, setData2] = React.useState([]);
    =======
    const [data2, setData2] = React.useState([]);
    const [pieData, setPieData] = React.useState([]);
-   >>>>>>> REPLACE
+   SEARCH_EXAMPLE_END
 3. Call get_existing_html to verify — confirm pieData useState appears BEFORE any useEffect
 4. Use dashboard_search_replace to update fetch to include pie query
 5. Call get_existing_html to verify
