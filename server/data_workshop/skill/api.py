@@ -342,7 +342,7 @@ async def invoke(
                 "id": str(uuid4()),
                 "type": item.status,
                 "code": exc.code,
-                "message": "委托身份不可用。" if exc.code == "BLOCKED_AUTH" else "委托身份尚未配置或不可用。",
+                "message": str(exc) if exc.code == "BLOCKED_AUTH" else "委托身份尚未配置或不可用。",
                 "at": now_iso(),
             },
         )
@@ -498,7 +498,7 @@ async def retry(
                 "id": str(uuid4()),
                 "type": item.status,
                 "code": exc.code,
-                "message": "委托身份不可用。" if exc.code == "BLOCKED_AUTH" else "委托身份尚未配置或不可用。",
+                "message": str(exc) if exc.code == "BLOCKED_AUTH" else "委托身份尚未配置或不可用。",
                 "at": now_iso(),
             },
         )

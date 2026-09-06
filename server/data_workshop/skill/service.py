@@ -482,7 +482,11 @@ async def delegated_auth_ref(auth: Any, session: AsyncSession) -> str:
     try:
         return await issue_from_auth(auth, session)
     except DelegationBrokerError as exc:
-        message = "委托身份尚未配置或不可用。" if exc.code == "BLOCKED_CONFIG" else "委托身份不可用。"
+        message = (
+            "委托身份尚未配置或不可用。"
+            if exc.code == "BLOCKED_CONFIG"
+            else str(exc) or "委托身份不可用。"
+        )
         raise W5AdapterError(exc.code, message) from exc
 
 

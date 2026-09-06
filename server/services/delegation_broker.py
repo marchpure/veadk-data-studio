@@ -115,7 +115,24 @@ async def _exchange_for_mcp_audience(
                     auth=(client_id, client_secret),
                 )
         if response.status_code >= 400:
-            raise DelegationBrokerError("BLOCKED_AUTH")
+            # Keep the upstream diagnostic useful without ever logging a
+            # bearer, subject token, client secret, or response body.
+            try:
+                detail = response.json()
+            except ValueError:
+                detail = {}
+            error_code = detail.get("error") if isinstance(detail, dict) else None
+            error_description = detail.get("error_description") if isinstance(detail, dict) else None
+            safe_detail = " ".join(
+                str(value).replace("\r", " ").replace("\n", " ")[:160]
+                for value in (error_code, error_description)
+                if isinstance(value, str) and value
+            )
+            raise DelegationBrokerError(
+                "BLOCKED_AUTH",
+                f"token exchange rejected ({response.status_code})"
+                + (f": {safe_detail}" if safe_detail else ""),
+            )
         exchanged = response.json().get("access_token")
         if not isinstance(exchanged, str) or not exchanged:
             raise DelegationBrokerError("BLOCKED_AUTH")
