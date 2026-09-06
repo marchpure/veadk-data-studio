@@ -24,7 +24,7 @@
       "input_branch": "integration/dwv1-i5a-data-studio-cloud-v3",
       "input_sha": "110fc7d9c19f8dae0d84c0865b2f74a7c5c8fb87",
       "rc_branch": "release/dwv1-v3-rc",
-      "rc_sha": "7169524ebe9eeded1e3bffc4f217d6039ae7b9b8"
+      "rc_sha": "2d89f56aa3c300407c41119fd69b2b1caf31da29"
     },
     "skill_agent": {
       "repository": "marchpure/data-workshop-skill-agent",
@@ -111,7 +111,7 @@
       "pytest": "71 passed",
       "compileall": "passed",
       "diff_check": "passed",
-      "lint": "not run: ruff is not present in the frozen RC environment",
+      "lint": "failed: Ruff found 49 existing violations; no production code changed by I5-C",
       "literal_secret_scan": "failed on existing placeholders, test fixtures, and contract names; no production source change made"
     }
   },
