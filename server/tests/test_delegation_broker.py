@@ -60,6 +60,7 @@ async def test_broker_issue_requires_verified_external_identity(broker_db):
         external_subject=None,
         external_groups=(),
         access_token=None,
+        id_token=None,
         external_issuer=None,
         external_audience=None,
         external_user_pool=None,
@@ -77,6 +78,7 @@ async def test_broker_issue_rejects_identity_binding_drift(broker_db):
         external_subject="subject-a",
         external_groups=("group-a",),
         access_token="short-lived-token",
+        id_token=None,
         external_issuer="https://other-issuer.example",
         external_audience="dwv1-skill-agent",
         external_user_pool="pool-a",
@@ -95,6 +97,7 @@ async def test_broker_issue_keeps_oidc_and_delegation_audiences_distinct(broker_
         external_subject="subject-a",
         external_groups=("group-a",),
         access_token="short-lived-token",
+        id_token=None,
         external_issuer="https://issuer.example",
         external_audience="data-studio-oauth-client",
         external_user_pool="pool-a",
@@ -123,12 +126,14 @@ async def test_broker_exchanges_access_token_for_mcp_audience(broker_db, monkeyp
         external_subject="subject-a",
         external_groups=("group-a",),
         access_token="browser-token",
+        id_token="browser-id-token",
         external_issuer="https://issuer.example",
         external_audience="data-studio-oauth-client",
         external_user_pool="pool-a",
     )
 
-    async def exchange(_token):
+    async def exchange(_token, *, id_token=None):
+        assert id_token == "browser-id-token"
         return "mcp-resource-token"
 
     monkeypatch.setattr(delegation_broker, "_exchange_for_mcp_audience", exchange)
@@ -143,6 +148,57 @@ async def test_broker_exchanges_access_token_for_mcp_audience(broker_db, monkeyp
         ).scalar_one()
         encrypted = await delegation_broker.CryptoService.decrypt_config(record.encrypted_access_token, db)
         assert encrypted["access_token"] == "mcp-resource-token"
+
+
+@pytest.mark.asyncio
+async def test_exchange_uses_id_token_and_omits_empty_public_client_secret(monkeypatch):
+    monkeypatch.setenv("DWV1_MCP_AUDIENCE", "mcp-audience")
+    monkeypatch.setenv("DWV1_MCP_RESOURCE", "https://mcp.example/mcp")
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"access_token": "exchanged-token"}
+
+    calls = []
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, endpoint, **kwargs):
+            calls.append((endpoint, kwargs))
+            return Response()
+
+    async def discovery():
+        return {"token_endpoint": "https://issuer.example/oauth/token"}
+
+    monkeypatch.setattr(delegation_broker.httpx, "AsyncClient", lambda **_kwargs: Client())
+    from server.services import external_oidc
+
+    async def client_secret():
+        return ""
+
+    monkeypatch.setattr(external_oidc, "_client_id", lambda: "public-client")
+    monkeypatch.setattr(external_oidc, "_client_secret", client_secret)
+    monkeypatch.setattr(external_oidc, "_discovery", discovery)
+
+    result = await delegation_broker._exchange_for_mcp_audience(
+        "access-token",
+        id_token="id-token",
+    )
+    assert result == "exchanged-token"
+    form = calls[0][1]["data"]
+    assert form["subject_token"] == "id-token"
+    assert form["subject_token_type"] == delegation_broker.ID_TOKEN_TYPE
+    assert form["requested_token_type"] == delegation_broker.ACCESS_TOKEN_TYPE
+    assert form["audience"] == "mcp-audience"
+    assert form["resource"] == "https://mcp.example/mcp"
+    assert "client_secret" not in form
 
 
 @pytest.mark.asyncio

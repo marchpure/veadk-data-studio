@@ -53,6 +53,7 @@ class AuthContext:
         external_subject: str | None = None,
         external_groups: list[str] | None = None,
         access_token: str | None = None,
+        id_token: str | None = None,
         external_issuer: str | None = None,
         external_audience: str | None = None,
         external_user_pool: str | None = None,
@@ -66,6 +67,7 @@ class AuthContext:
         self.external_subject = external_subject
         self.external_groups = tuple(external_groups or ())
         self.access_token = access_token
+        self.id_token = id_token
         self.external_issuer = external_issuer
         self.external_audience = external_audience
         self.external_user_pool = external_user_pool

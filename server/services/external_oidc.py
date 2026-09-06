@@ -412,9 +412,11 @@ async def auth_context_from_cookie(
     auth.external_user_pool = external.user_pool
     tokens = await CryptoService.decrypt_config(external.encrypted_tokens, db)
     access_token = tokens.get("access_token")
+    id_token = tokens.get("id_token")
     if not isinstance(access_token, str) or not access_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OIDC access token unavailable")
     auth.access_token = access_token
+    auth.id_token = id_token if isinstance(id_token, str) and id_token else None
     return auth
 
 

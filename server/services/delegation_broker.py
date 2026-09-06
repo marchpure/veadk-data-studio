@@ -30,6 +30,7 @@ MAX_TTL_SECONDS = 300
 DEFAULT_AUDIENCE = "dwv1-skill-agent"
 TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"
 ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
+ID_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:id_token"
 OPAQUE_REF_PATTERN = r"^dlg_[A-Za-z0-9_-]{32,64}$"
 
 
@@ -70,7 +71,11 @@ async def _service_credential() -> str:
     return value
 
 
-async def _exchange_for_mcp_audience(access_token: str) -> str:
+async def _exchange_for_mcp_audience(
+    access_token: str,
+    *,
+    id_token: str | None = None,
+) -> str:
     """Exchange the browser-client token for the configured MCP resource audience."""
     target = _configured(os.getenv("DWV1_MCP_AUDIENCE"))
     if not target:
@@ -82,15 +87,20 @@ async def _exchange_for_mcp_audience(access_token: str) -> str:
         client_id = _client_id()
         client_secret = await _client_secret()
         resource = _configured(os.getenv("DWV1_MCP_RESOURCE"))
+        subject_token = _configured(id_token) or access_token
+        subject_token_type = ID_TOKEN_TYPE if _configured(id_token) else ACCESS_TOKEN_TYPE
         form = {
             "grant_type": TOKEN_EXCHANGE_GRANT,
             "client_id": client_id,
-            "client_secret": client_secret,
-            "subject_token": access_token,
-            "subject_token_type": ACCESS_TOKEN_TYPE,
+            "subject_token": subject_token,
+            "subject_token_type": subject_token_type,
             "requested_token_type": ACCESS_TOKEN_TYPE,
             "audience": target,
         }
+        # The Data Studio web client is public. Do not send an empty secret;
+        # confidential clients still use client_secret_post when configured.
+        if client_secret:
+            form["client_secret"] = client_secret
         if resource:
             form["resource"] = resource
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -128,6 +138,7 @@ async def issue_from_auth(auth: AuthContext, session: AsyncSession) -> str:
     """Issue a delegation only from an externally verified identity subject."""
     subject = _configured(getattr(auth, "external_subject", None))
     access_token = _configured(getattr(auth, "access_token", None))
+    id_token = _configured(getattr(auth, "id_token", None)) or None
     verified_issuer = _configured(getattr(auth, "external_issuer", None))
     verified_audience = _configured(getattr(auth, "external_audience", None))
     verified_user_pool = _configured(getattr(auth, "external_user_pool", None))
@@ -152,7 +163,7 @@ async def issue_from_auth(auth: AuthContext, session: AsyncSession) -> str:
     now = datetime.now(UTC)
     expires = now + timedelta(seconds=MAX_TTL_SECONDS)
     ref = f"dlg_{secrets.token_urlsafe(32)}"
-    access_token = await _exchange_for_mcp_audience(access_token)
+    access_token = await _exchange_for_mcp_audience(access_token, id_token=id_token)
     encrypted = await CryptoService.encrypt_config({"access_token": access_token}, session)
     session.add(
         Delegation(

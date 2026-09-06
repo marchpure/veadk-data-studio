@@ -44,8 +44,10 @@ in browser storage. `DWV1_ALLOW_ENV_SECRETS` remains false in cloud mode.
   - required group UID is non-secret configuration
 - MCP resource audience exchange:
   - `DWV1_MCP_AUDIENCE` is the approved W4.1 resource audience
-  - Broker exchanges the verified browser access token for this audience before
+  - Broker exchanges the verified OIDC `id_token` for this audience before
     returning a one-use delegation token to W5
+  - Public OIDC clients omit `client_secret`; confidential clients use the
+    configured client secret
 - Required validation: RS256 signature, exact issuer, audience, expiry, nbf,
   subject, and `client_id` or `azp` equal to the Data Studio client ID
 - Required identity: verified `sub`, group claim, and optional required group
