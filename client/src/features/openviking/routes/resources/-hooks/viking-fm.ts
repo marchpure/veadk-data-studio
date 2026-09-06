@@ -7,6 +7,8 @@ import {
   fetchFsStat,
   fetchFsTree,
 } from '../-lib/api'
+import { useOpenVikingIdentityScopeKey } from '../../../hooks/use-app-connection'
+import { profileScopedQueryKey } from '../../../profile-selection'
 import {
   detectFileType,
   normalizeDirUri,
@@ -28,8 +30,14 @@ export function useVikingFsList(
   options: VikingListQueryOptions = {},
   enabled = true,
 ) {
+  const identityScopeKey = useOpenVikingIdentityScopeKey()
   return useQuery({
-    queryKey: ['viking-fs-ls', normalizeDirUri(uri), options],
+    queryKey: profileScopedQueryKey(
+      'viking-fs-ls',
+      identityScopeKey,
+      normalizeDirUri(uri),
+      options,
+    ),
     queryFn: () => fetchFsList(normalizeDirUri(uri), options),
     enabled,
     ...DEFAULT_QUERY_OPTS,
@@ -41,8 +49,14 @@ export function useVikingFsTree(
   options: VikingTreeQueryOptions = {},
   enabled = true,
 ) {
+  const identityScopeKey = useOpenVikingIdentityScopeKey()
   return useQuery({
-    queryKey: ['viking-fs-tree', normalizeDirUri(rootUri), options],
+    queryKey: profileScopedQueryKey(
+      'viking-fs-tree',
+      identityScopeKey,
+      normalizeDirUri(rootUri),
+      options,
+    ),
     queryFn: () => fetchFsTree(normalizeDirUri(rootUri), options),
     enabled,
     ...DEFAULT_QUERY_OPTS,
@@ -54,6 +68,7 @@ export function useVikingFilePreview(
   policy: VikingPreviewPolicy = {},
   readOptions: VikingReadQueryOptions = {},
 ) {
+  const identityScopeKey = useOpenVikingIdentityScopeKey()
   const maxAutoReadBytes = policy.maxAutoReadBytes ?? 2 * 1024 * 1024
   const defaultReadLimit = policy.defaultReadLimit ?? 500
   const requireKnownSize = policy.requireKnownSize ?? false
@@ -76,12 +91,13 @@ export function useVikingFilePreview(
 
   const readQuery = useQuery({
     enabled: Boolean(entry) && autoRead.shouldRead,
-    queryKey: [
+    queryKey: profileScopedQueryKey(
       'viking-file-read',
+      identityScopeKey,
       entry?.uri,
       entry?.modTime || '',
       effectiveReadOptions,
-    ],
+    ),
     queryFn: () => fetchFileContent(entry!.uri, effectiveReadOptions),
   })
 
@@ -126,6 +142,7 @@ export function useVikingFilePreview(
 }
 
 export function useInvalidateVikingFs() {
+  const identityScopeKey = useOpenVikingIdentityScopeKey()
   const queryClient = useQueryClient()
 
   return {
@@ -134,18 +151,28 @@ export function useInvalidateVikingFs() {
     invalidateList: (uri?: string) =>
       queryClient.invalidateQueries({
         queryKey: uri
-          ? ['viking-fs-ls', normalizeDirUri(uri)]
-          : ['viking-fs-ls'],
+          ? profileScopedQueryKey(
+              'viking-fs-ls',
+              identityScopeKey,
+              normalizeDirUri(uri),
+            )
+          : profileScopedQueryKey('viking-fs-ls', identityScopeKey),
       }),
     invalidateTree: (uri?: string) =>
       queryClient.invalidateQueries({
         queryKey: uri
-          ? ['viking-fs-tree', normalizeDirUri(uri)]
-          : ['viking-fs-tree'],
+          ? profileScopedQueryKey(
+              'viking-fs-tree',
+              identityScopeKey,
+              normalizeDirUri(uri),
+            )
+          : profileScopedQueryKey('viking-fs-tree', identityScopeKey),
       }),
     invalidatePreview: (uri?: string) =>
       queryClient.invalidateQueries({
-        queryKey: uri ? ['viking-file-read', uri] : ['viking-file-read'],
+        queryKey: uri
+          ? profileScopedQueryKey('viking-file-read', identityScopeKey, uri)
+          : profileScopedQueryKey('viking-file-read', identityScopeKey),
       }),
   }
 }
@@ -160,8 +187,9 @@ export function useDebouncedValue<T>(value: T, delay: number): T {
 }
 
 export function useVikingFsStat(uri: string | undefined) {
+  const identityScopeKey = useOpenVikingIdentityScopeKey()
   return useQuery<VikingFsEntry>({
-    queryKey: ['viking-fs-stat', uri],
+    queryKey: profileScopedQueryKey('viking-fs-stat', identityScopeKey, uri),
     queryFn: () => fetchFsStat(uri!),
     enabled: Boolean(uri),
     staleTime: 60_000,

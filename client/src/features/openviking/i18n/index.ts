@@ -10,6 +10,7 @@ i18n
   .init({
     defaultNS: 'resources',
     fallbackLng: defaultLanguage,
+    lng: defaultLanguage,
     interpolation: {
       escapeValue: false,
     },

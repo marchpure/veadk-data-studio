@@ -1,19 +1,23 @@
 import * as React from 'react'
+import { DISCONNECTED_OPENVIKING_SCOPE } from '../profile-selection'
 
 export type OpenVikingProfile = {
-  created_at: string
+  api_key_configured?: boolean
+  api_key_masked?: string
+  created_at: string | number
+  credential_mode?: 'managed' | 'byok'
   display_name: string
+  last_validated_at?: string | number | null
   profile_id: string
   root_resource_ref: string
   status: 'pending' | 'ready' | 'error'
-  updated_at: string
+  updated_at: string | number
   workspace_uri: string
 }
 
 type AppConnectionContextValue = {
   activeProfile: OpenVikingProfile | null
   identityScopeKey: string
-  setActiveProfile: (profile: OpenVikingProfile | null) => void
 }
 
 const AppConnectionContext =
@@ -36,18 +40,8 @@ export function AppConnectionProvider({
   children: React.ReactNode
   profile: OpenVikingProfile | null
 }) {
-  const [activeProfile, setActiveProfileState] = React.useState(profile)
-  const setActiveProfile = React.useCallback(
-    (next: OpenVikingProfile | null) => {
-      setActiveOpenVikingProfileId(next?.profile_id ?? '')
-      setActiveProfileState(next)
-    },
-    [],
-  )
-
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     setActiveOpenVikingProfileId(profile?.profile_id ?? '')
-    setActiveProfileState(profile)
     return () => {
       setActiveOpenVikingProfileId('')
     }
@@ -56,9 +50,9 @@ export function AppConnectionProvider({
   return (
     <AppConnectionContext.Provider
       value={{
-        activeProfile,
-        identityScopeKey: activeProfile?.profile_id ?? 'openviking-disconnected',
-        setActiveProfile,
+        activeProfile: profile,
+        identityScopeKey:
+          profile?.profile_id ?? DISCONNECTED_OPENVIKING_SCOPE,
       }}
     >
       {children}
@@ -74,4 +68,13 @@ export function useAppConnection(): AppConnectionContextValue {
     )
   }
   return value
+}
+
+export function useOpenVikingIdentityScopeKey(): string {
+  const value = React.useContext(AppConnectionContext)
+  return (
+    value?.identityScopeKey ||
+    getActiveOpenVikingProfileId() ||
+    DISCONNECTED_OPENVIKING_SCOPE
+  )
 }

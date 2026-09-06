@@ -69,9 +69,10 @@ export function selectConnectionResources(
     }))
 }
 
-type CreateOpenVikingProfile = {
-  api_key: string
-  base_url: string
+export type CreateOpenVikingProfile = {
+  api_key?: string
+  base_url?: string
+  credential_mode?: 'managed' | 'byok'
   display_name: string
   workspace_uri: string
 }

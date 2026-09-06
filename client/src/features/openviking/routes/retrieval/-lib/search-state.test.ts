@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { setActiveOpenVikingProfileId } from '../../../hooks/use-app-connection'
 
 import {
   createRetrievalSubmission,
   parseLevels,
+  readLastRetrievalSearch,
   validateRetrievalSearch,
+  writeLastRetrievalSearch,
 } from './search-state'
 import { memoryTypeFromUri } from './results'
 import type { RetrievalRequestOptions } from '../-types/retrieval'
@@ -74,5 +77,18 @@ describe('retrieval search state', () => {
     expect(memoryTypeFromUri('viking://user/default/memories/profile.md')).toBe(
       'PROFILE',
     )
+  })
+
+  it('keeps the last retrieval query isolated by Profile', () => {
+    setActiveOpenVikingProfileId('finance')
+    writeLastRetrievalSearch({ q: 'quarterly plan' })
+    setActiveOpenVikingProfileId('support')
+    expect(readLastRetrievalSearch()).toBeUndefined()
+    writeLastRetrievalSearch({ q: 'refund policy' })
+
+    expect(readLastRetrievalSearch()).toEqual({ q: 'refund policy' })
+    setActiveOpenVikingProfileId('finance')
+    expect(readLastRetrievalSearch()).toEqual({ q: 'quarterly plan' })
+    setActiveOpenVikingProfileId('')
   })
 })

@@ -15,6 +15,14 @@ import type {
   RetrievalSearch,
   RetrievalTimeField,
 } from '../-types/retrieval'
+import { getActiveOpenVikingProfileId } from '../../../hooks/use-app-connection'
+
+function retrievalStorageKey(): string {
+  const profileId = getActiveOpenVikingProfileId()
+  return profileId
+    ? `${LAST_RETRIEVAL_SEARCH_KEY}.${profileId}`
+    : LAST_RETRIEVAL_SEARCH_KEY
+}
 
 export function isRetrievalMode(value: unknown): value is RetrievalMode {
   return (
@@ -121,7 +129,7 @@ export function readLastRetrievalSearch(): RetrievalSearch | undefined {
   }
 
   try {
-    const raw = window.sessionStorage.getItem(LAST_RETRIEVAL_SEARCH_KEY)
+    const raw = window.sessionStorage.getItem(retrievalStorageKey())
     if (!raw) {
       return undefined
     }
@@ -145,7 +153,7 @@ export function writeLastRetrievalSearch(search: RetrievalSearch) {
 
   try {
     window.sessionStorage.setItem(
-      LAST_RETRIEVAL_SEARCH_KEY,
+      retrievalStorageKey(),
       JSON.stringify(search),
     )
   } catch {
