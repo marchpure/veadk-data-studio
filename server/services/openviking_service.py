@@ -227,7 +227,7 @@ class OpenVikingProfileRepository:
                 """
             )
             columns = {str(row["column_name"]) for row in cursor.fetchall()}
-            if columns and ("credential_mode" not in columns or "last_validated_at" not in columns):
+            if "credential_mode" not in columns or "last_validated_at" not in columns:
                 raise RuntimeError("OpenViking profile credential migration is not installed")
         self._db.commit()
 
