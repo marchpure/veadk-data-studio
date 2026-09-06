@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -113,6 +115,96 @@ async def test_external_cookie_context_rejects_missing_session() -> None:
             return Result()
 
     request = SimpleNamespace(cookies={external_oidc.LOGIN_COOKIE: "opaque-session"})
+    with pytest.raises(HTTPException) as error:
+        await external_oidc.auth_context_from_cookie(request, Database(), None)
+    assert error.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_external_bearer_context_requires_matching_active_session(monkeypatch) -> None:
+    user = SimpleNamespace(id="user-1")
+    session = SimpleNamespace(
+        subject="subject-1",
+        issuer="https://issuer.example.test",
+        audience="data-studio-client",
+        user_pool="pool-1",
+        revoked_at=None,
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        encrypted_tokens="encrypted",
+        groups='["group-1"]',
+    )
+
+    class Result:
+        def all(self):
+            return [(session, user)]
+
+    class Database:
+        async def execute(self, _query):
+            return Result()
+
+    monkeypatch.setenv("DWV1_OIDC_ISSUER", session.issuer)
+    monkeypatch.setenv("DWV1_OIDC_AUDIENCE", session.audience)
+    monkeypatch.setenv("DWV1_OIDC_USER_POOL", session.user_pool)
+    monkeypatch.setattr(external_oidc, "_discovery", AsyncMock(return_value={"jwks_uri": "https://issuer/keys"}))
+    monkeypatch.setattr(
+        external_oidc,
+        "_verify_jwt",
+        AsyncMock(return_value={"sub": session.subject}),
+    )
+    monkeypatch.setattr(
+        external_oidc.CryptoService,
+        "decrypt_config",
+        AsyncMock(return_value={"access_token": "verified-user-token"}),
+    )
+    expected = SimpleNamespace()
+    monkeypatch.setattr(external_oidc, "_get_auth_context_hosted", AsyncMock(return_value=expected))
+
+    request = SimpleNamespace(headers={"authorization": "Bearer verified-user-token"}, cookies={})
+    result = await external_oidc.auth_context_from_cookie(request, Database(), None)
+
+    assert result is expected
+    assert result.external_subject == session.subject
+    assert result.external_groups == ("group-1",)
+    assert result.access_token == "verified-user-token"
+
+
+@pytest.mark.asyncio
+async def test_external_bearer_context_rejects_token_not_bound_to_session(monkeypatch) -> None:
+    user = SimpleNamespace(id="user-1")
+    session = SimpleNamespace(
+        subject="subject-1",
+        issuer="https://issuer.example.test",
+        audience="data-studio-client",
+        user_pool="pool-1",
+        revoked_at=None,
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        encrypted_tokens="encrypted",
+    )
+
+    class Result:
+        def all(self):
+            return [(session, user)]
+
+    class Database:
+        async def execute(self, _query):
+            return Result()
+
+    monkeypatch.setenv("DWV1_OIDC_ISSUER", session.issuer)
+    monkeypatch.setenv("DWV1_OIDC_AUDIENCE", session.audience)
+    monkeypatch.setenv("DWV1_OIDC_USER_POOL", session.user_pool)
+    monkeypatch.setattr(external_oidc, "_discovery", AsyncMock(return_value={"jwks_uri": "https://issuer/keys"}))
+    monkeypatch.setattr(
+        external_oidc,
+        "_verify_jwt",
+        AsyncMock(return_value={"sub": session.subject}),
+    )
+    monkeypatch.setattr(
+        external_oidc.CryptoService,
+        "decrypt_config",
+        AsyncMock(return_value={"access_token": "different-token"}),
+    )
+
+    request = SimpleNamespace(headers={"authorization": "Bearer unbound-token"}, cookies={})
     with pytest.raises(HTTPException) as error:
         await external_oidc.auth_context_from_cookie(request, Database(), None)
     assert error.value.status_code == 401

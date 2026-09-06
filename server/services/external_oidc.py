@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -344,18 +345,51 @@ async def auth_context_from_cookie(
     x_tenant_id: str | None,
 ) -> AuthContext:
     session_value = request.cookies.get(LOGIN_COOKIE)
-    if not session_value:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OIDC login required")
-    result = await db.execute(
-        select(ExternalOIDCSession, User)
-        .join(User, User.id == ExternalOIDCSession.user_id)
-        .where(ExternalOIDCSession.session_hash == _hash(session_value))
-    )
-    row = result.one_or_none()
     now = datetime.now(UTC)
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OIDC session unavailable")
-    external, user = row
+    if session_value:
+        result = await db.execute(
+            select(ExternalOIDCSession, User)
+            .join(User, User.id == ExternalOIDCSession.user_id)
+            .where(ExternalOIDCSession.session_hash == _hash(session_value))
+        )
+        row = result.one_or_none()
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OIDC session unavailable")
+        external, user = row
+    else:
+        scheme, separator, bearer = request.headers.get("authorization", "").partition(" ")
+        if not separator or scheme.casefold() != "bearer" or not bearer.strip():
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OIDC login required")
+        bearer = bearer.strip()
+        try:
+            claims = await _verify_jwt(bearer, await _discovery(), audience=_audience())
+        except ExternalOIDCError as exc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OIDC token unavailable") from exc
+        result = await db.execute(
+            select(ExternalOIDCSession, User)
+            .join(User, User.id == ExternalOIDCSession.user_id)
+            .where(
+                ExternalOIDCSession.subject == claims["sub"],
+                ExternalOIDCSession.issuer == _issuer(),
+                ExternalOIDCSession.audience == _audience(),
+                ExternalOIDCSession.user_pool == _user_pool(),
+                ExternalOIDCSession.revoked_at.is_(None),
+            )
+            .order_by(ExternalOIDCSession.expires_at.desc())
+        )
+        row = None
+        for candidate in result.all():
+            candidate_session, _candidate_user = candidate
+            if candidate_session.expires_at <= now:
+                continue
+            tokens = await CryptoService.decrypt_config(candidate_session.encrypted_tokens, db)
+            stored_token = tokens.get("access_token") if isinstance(tokens, dict) else None
+            if isinstance(stored_token, str) and hmac.compare_digest(stored_token, bearer):
+                row = candidate
+                break
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OIDC session unavailable")
+        external, user = row
     if external.revoked_at is not None or external.expires_at <= now:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="OIDC session expired")
     try:
