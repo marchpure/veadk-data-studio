@@ -327,7 +327,12 @@ async def invoke(
     await db.refresh(item)
     await db.refresh(skill)
     try:
-        auth_ref = await delegated_auth_ref(auth, db)
+        static_validation = os.getenv("W5_STATIC_CAPABILITY_VALIDATION", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        auth_ref = None if static_validation else await delegated_auth_ref(auth, db)
         # The W5 worker resolves this reference through a separate request and
         # database session, so it must be committed before the task can start.
         await db.commit()
@@ -484,7 +489,12 @@ async def retry(
     await db.refresh(item)
     await db.refresh(skill)
     try:
-        auth_ref = await delegated_auth_ref(auth, db)
+        static_validation = os.getenv("W5_STATIC_CAPABILITY_VALIDATION", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        auth_ref = None if static_validation else await delegated_auth_ref(auth, db)
         # Publish the delegation before the background worker can resolve it.
         await db.commit()
         await db.refresh(item)

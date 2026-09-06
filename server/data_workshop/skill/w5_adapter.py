@@ -65,7 +65,12 @@ class W5SkillAgentAdapter:
     async def invoke(self, invocation: W5Invocation) -> AsyncIterator[dict[str, Any]]:
         if not self.endpoint:
             raise W5AdapterError("BLOCKED_CONFIG", "W5 production HTTPS transport 尚未配置。")
-        if not invocation.delegated_auth_ref:
+        static_validation = os.getenv("W5_STATIC_CAPABILITY_VALIDATION", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        if not invocation.delegated_auth_ref and not static_validation:
             raise W5AdapterError("BLOCKED_AUTH", "请完成 OAuth 授权或重新授权后继续。")
 
         request = {

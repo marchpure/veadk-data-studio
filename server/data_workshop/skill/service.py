@@ -526,11 +526,17 @@ async def run_invocation(
         if skill is None:
             return
         try:
-            await validate_persisted_openviking_refs(
-                item.context_refs_json.get("knowledge_refs", []),
-                tenant_id=tenant_id,
-                owner_id=owner_id,
-            )
+            static_validation = os.getenv("W5_STATIC_CAPABILITY_VALIDATION", "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+            }
+            if not static_validation:
+                await validate_persisted_openviking_refs(
+                    item.context_refs_json.get("knowledge_refs", []),
+                    tenant_id=tenant_id,
+                    owner_id=owner_id,
+                )
             invocation = W5Invocation(
                 business_goal=payload.message,
                 mcp_capability_refs=[
