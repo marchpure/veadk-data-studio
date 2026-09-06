@@ -3,15 +3,19 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type FormEvent,
   type SVGProps,
 } from 'react'
-import { useNavigate } from 'react-router-dom'
+import {
+  Link,
+  NavLink,
+  Navigate,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom'
 import { I18nextProvider } from 'react-i18next'
 import { Toaster } from 'sonner'
-import { useAppConfig } from '../../hooks/useAppConfig'
 
 import { openVikingApi } from './api'
 import {
@@ -37,7 +41,6 @@ import {
 } from './routes/resources/-lib/api'
 import {
   ACTIVE_OPENVIKING_PROFILE_KEY,
-  selectReadyProfileId,
 } from './profile-selection'
 import {
   fileNameFromUri,
@@ -59,44 +62,81 @@ type OpenVikingPage =
   | 'retrieval'
   | 'tasks'
   | 'watches'
-  | 'connection'
+  | 'settings'
 
-const CANONICAL_BASE_URL =
-  'https://api.vikingdb.cn-beijing.volces.com/openviking'
 const queryClient = new QueryClient()
+const detailPages = new Set<OpenVikingPage>([
+  'resources',
+  'retrieval',
+  'tasks',
+  'watches',
+  'settings',
+])
+
+export type OpenVikingCredentialPolicy = 'managed' | 'byok' | 'hybrid'
+
+type KnowledgeRoute =
+  | { kind: 'list' }
+  | { kind: 'new' }
+  | { kind: 'redirect'; to: string }
+  | { kind: 'detail'; profileId: string; page: OpenVikingPage }
+
+function parseKnowledgeRoute(pathname: string): KnowledgeRoute {
+  const parts = pathname
+    .replace(/^\/kb\/?/, '')
+    .split('/')
+    .filter(Boolean)
+    .map((part) => decodeURIComponent(part))
+  if (!parts.length) return { kind: 'list' }
+  if (parts[0] === 'new' || parts[0] === 'connect') return { kind: 'new' }
+  if (parts.length === 1) {
+    return {
+      kind: 'redirect',
+      to: `/kb/${encodeURIComponent(parts[0])}/resources`,
+    }
+  }
+  const page = parts[1] as OpenVikingPage
+  if (!detailPages.has(page)) return { kind: 'list' }
+  return { kind: 'detail', profileId: parts[0], page }
+}
+
+function credentialMode(profile: OpenVikingProfile): 'managed' | 'byok' {
+  return profile.credential_mode === 'byok' ? 'byok' : 'managed'
+}
+
+function credentialModeLabel(profile: OpenVikingProfile): string {
+  return credentialMode(profile) === 'managed'
+    ? '平台托管凭据'
+    : '自有 OpenViking 凭据'
+}
+
+function statusLabel(status: OpenVikingProfile['status']): string {
+  return {
+    pending: '待检查',
+    ready: '可用',
+    error: '连接异常',
+  }[status]
+}
+
+function formatDate(value?: string | number | null): string {
+  if (value === undefined || value === null || value === '') return '暂无记录'
+  const date = new Date(
+    typeof value === 'number' && value < 10_000_000_000
+      ? value * 1000
+      : value,
+  )
+  if (Number.isNaN(date.getTime())) return '暂无记录'
+  return new Intl.DateTimeFormat('zh-CN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
+}
 
 function ResourcesIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" {...props}>
       <path d="M3 4.25h5l1.45 1.6H17v9.9H3V4.25Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.45" />
       <path d="M6.25 9h7.5M6.25 12h5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.3" />
-    </svg>
-  )
-}
-
-function RetrievalIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" {...props}>
-      <circle cx="8.6" cy="8.6" r="4.85" stroke="currentColor" strokeWidth="1.45" />
-      <path d="m12.25 12.25 4 4" stroke="currentColor" strokeLinecap="round" strokeWidth="1.45" />
-    </svg>
-  )
-}
-
-function TasksIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" {...props}>
-      <rect x="4" y="3" width="12" height="14" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
-      <path d="m6.8 8 1 1 1.8-2M11 8h2.5m-6.7 4.25 1 1 1.8-2M11 12.25h2.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.25" />
-    </svg>
-  )
-}
-
-function WatchesIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" {...props}>
-      <path d="M15.5 7.2A6.1 6.1 0 1 0 16 12" stroke="currentColor" strokeLinecap="round" strokeWidth="1.45" />
-      <path d="M15.5 3.5v3.7h-3.7M10 6.5v4l2.65 1.55" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.35" />
     </svg>
   )
 }
@@ -180,13 +220,18 @@ function expandedAncestors(uri: string, rootUri: string): Set<string> {
 }
 
 function ProfileForm({
+  credentialPolicy,
   onCreated,
 }: {
+  credentialPolicy: OpenVikingCredentialPolicy
   onCreated: (profile: OpenVikingProfile) => void
 }) {
-  const { externalOIDCEnabled } = useAppConfig()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
+  const [mode, setMode] = useState<'managed' | 'byok'>(
+    credentialPolicy === 'byok' ? 'byok' : 'managed',
+  )
+  const byokEnabled = credentialPolicy === 'byok' || credentialPolicy === 'hybrid'
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -195,16 +240,28 @@ function ProfileForm({
     setError('')
     const fields = new FormData(form)
     try {
-      const profile = await openVikingApi.createProfile({
+      const input = {
         display_name: String(fields.get('display_name') || ''),
-        base_url: String(fields.get('base_url') || ''),
-        api_key: String(fields.get('api_key') || ''),
         workspace_uri: String(fields.get('workspace_uri') || ''),
-      })
-      onCreated(await openVikingApi.validateProfile(profile.profile_id))
+        ...(mode === 'byok'
+          ? {
+              api_key: String(fields.get('api_key') || ''),
+              base_url: String(fields.get('base_url') || ''),
+              credential_mode: 'byok' as const,
+            }
+          : credentialPolicy === 'hybrid'
+            ? { credential_mode: 'managed' as const }
+            : {}),
+      }
+      const profile = await openVikingApi.createProfile(input)
       form.reset()
+      if (credentialPolicy === 'managed') {
+        onCreated(await openVikingApi.validateProfile(profile.profile_id))
+      } else {
+        onCreated(profile)
+      }
     } catch (value) {
-      setError(value instanceof Error ? value.message : 'Connection failed')
+      setError(value instanceof Error ? value.message : '知识库创建失败')
     } finally {
       setPending(false)
     }
@@ -215,150 +272,190 @@ function ProfileForm({
       <div className="ov-profile-heading">
         <span className="ov-profile-heading-icon"><ShieldIcon /></span>
         <div>
-          <h2>Add connection</h2>
-          <p>The API key is encrypted by the AgentKit server.</p>
+          <h1>新建知识库</h1>
+          <p>创建独立的 OpenViking Profile，资源和任务不会与其他知识库混用。</p>
         </div>
       </div>
+      {credentialPolicy === 'hybrid' ? (
+        <fieldset className="ov-credential-options">
+          <legend>凭据模式</legend>
+          <label>
+            <input
+              checked={mode === 'managed'}
+              name="credential_mode"
+              onChange={() => setMode('managed')}
+              type="radio"
+              value="managed"
+            />
+            <span><strong>平台托管凭据</strong><small>由平台安全提供 Endpoint 和 API Key。</small></span>
+          </label>
+          <label>
+            <input
+              checked={mode === 'byok'}
+              name="credential_mode"
+              onChange={() => setMode('byok')}
+              type="radio"
+              value="byok"
+            />
+            <span><strong>自有 OpenViking</strong><small>使用你自己的 Endpoint 和 API Key。</small></span>
+          </label>
+        </fieldset>
+      ) : (
+        <div className="ov-managed-credential">
+          <ShieldIcon />
+          <div>
+            <strong>{credentialPolicy === 'managed' ? '平台托管凭据' : '自有 OpenViking 凭据'}</strong>
+            <span>
+              {credentialPolicy === 'managed'
+                ? 'Endpoint 和 API Key 由平台安全托管，浏览器不会接触密钥。'
+                : 'API Key 仅通过本次加密请求提交，保存后不会再次显示。'}
+            </span>
+          </div>
+        </div>
+      )}
       <div className="ov-form-grid">
         <label>
-          Name
-          <input name="display_name" required defaultValue="OpenViking" />
+          知识库名称
+          <input name="display_name" required placeholder="例如：产品文档库" />
         </label>
         <label>
           Workspace URI
           <input name="workspace_uri" required defaultValue="viking://resources/" />
         </label>
       </div>
-      {!externalOIDCEnabled && (
-        <label>
-          Base URL
-          <input name="base_url" required type="url" defaultValue={CANONICAL_BASE_URL} />
-        </label>
-      )}
-      {!externalOIDCEnabled && (
-        <label>
-          API key
-          <input name="api_key" required type="password" autoComplete="off" />
-        </label>
-      )}
+      {byokEnabled && mode === 'byok' ? (
+        <>
+          <label>
+            Base URL
+            <input name="base_url" required type="url" placeholder="https://…" />
+          </label>
+          <label>
+            API Key
+            <input name="api_key" required type="password" autoComplete="new-password" />
+          </label>
+          <p className="ov-security-note">密钥只在本次 HTTPS 创建请求的请求体中提交；页面不会保存或回显。</p>
+        </>
+      ) : null}
       {error ? <p className="ov-form-error" role="alert">{error}</p> : null}
       <div className="ov-form-actions">
         <button className="ov-primary-button" disabled={pending} type="submit">
-          {pending ? 'Validating...' : 'Connect'}
+          {pending ? '正在创建…' : '创建知识库'}
         </button>
+        <Link className="ov-secondary-link" to="/kb">取消</Link>
       </div>
     </form>
   )
 }
 
-function ConnectionPage({
-  profiles,
-  onCreated,
+function ProfileSettings({
+  profile,
   onProfilesChanged,
   onRevoke,
 }: {
-  profiles: OpenVikingProfile[]
-  onCreated: (profile: OpenVikingProfile) => void
+  profile: OpenVikingProfile
   onProfilesChanged: () => Promise<void>
   onRevoke: (profile: OpenVikingProfile) => void
 }) {
-  const { externalOIDCEnabled } = useAppConfig()
-  const [editing, setEditing] = useState<OpenVikingProfile | null>(null)
-  const [pendingId, setPendingId] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [pending, setPending] = useState(false)
   const [message, setMessage] = useState('')
 
-  async function validate(profile: OpenVikingProfile) {
-    setPendingId(profile.profile_id)
+  async function validate() {
+    setPending(true)
     setMessage('')
     try {
       await openVikingApi.validateProfile(profile.profile_id)
-      setMessage(`${profile.display_name} is ready.`)
+      setMessage(`${profile.display_name} 连接正常。`)
       await onProfilesChanged()
     } catch (value) {
-      setMessage(value instanceof Error ? value.message : 'Health check failed')
+      setMessage(value instanceof Error ? value.message : '连接检查失败')
       await onProfilesChanged()
     } finally {
-      setPendingId('')
+      setPending(false)
     }
   }
 
   async function update(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!editing) return
-    const fields = new FormData(event.currentTarget)
+    const form = event.currentTarget
+    const fields = new FormData(form)
     const apiKey = String(fields.get('api_key') || '').trim()
-    setPendingId(editing.profile_id)
+    const baseUrl = String(fields.get('base_url') || '').trim()
+    setPending(true)
     setMessage('')
     try {
-      await openVikingApi.updateProfile(editing.profile_id, {
+      await openVikingApi.updateProfile(profile.profile_id, {
         display_name: String(fields.get('display_name') || ''),
-        base_url: String(fields.get('base_url') || ''),
-        ...(apiKey ? { api_key: apiKey } : {}),
+        ...(credentialMode(profile) === 'byok'
+          ? {
+              ...(baseUrl ? { base_url: baseUrl } : {}),
+              ...(apiKey ? { api_key: apiKey } : {}),
+            }
+          : {}),
       })
-      setEditing(null)
-      setMessage('Profile updated. Run health check to reconnect.')
+      form.reset()
+      setEditing(false)
+      setMessage('设置已保存，请重新检查连接。')
       await onProfilesChanged()
     } catch (value) {
-      setMessage(value instanceof Error ? value.message : 'Profile update failed')
+      setMessage(value instanceof Error ? value.message : '设置保存失败')
     } finally {
-      setPendingId('')
+      setPending(false)
     }
   }
 
   return (
     <div className="ov-connection-page">
-      <section className="ov-profile-list" aria-label="OpenViking profiles">
-        {profiles.map((profile) => (
-          <article className="ov-active-connection" key={profile.profile_id}>
-            <div>
-              <span className={`ov-connection-state is-${profile.status}`}>
-                <span /> {profile.status}
-              </span>
-              <h2>{profile.display_name}</h2>
-              <p>{profile.workspace_uri}</p>
-            </div>
-            <div className="ov-profile-actions">
-              <button type="button" onClick={() => setEditing(profile)}>Edit</button>
-              <button
-                type="button"
-                disabled={pendingId === profile.profile_id}
-                onClick={() => void validate(profile)}
-              >
-                <RefreshIcon />
-                Health check
-              </button>
-              <button className="ov-danger-button" type="button" onClick={() => onRevoke(profile)}>
-                <DeleteIcon />
-                Revoke
-              </button>
-            </div>
-          </article>
-        ))}
+      <section className="ov-settings-card">
+        <div>
+          <h2>连接设置</h2>
+          <p>管理显示名称、检查连接，并查看当前凭据模式。</p>
+        </div>
+        <dl className="ov-profile-metadata">
+          <div><dt>状态</dt><dd>{statusLabel(profile.status)}</dd></div>
+          <div><dt>凭据模式</dt><dd>{credentialModeLabel(profile)}</dd></div>
+          <div><dt>Workspace URI</dt><dd>{profile.workspace_uri}</dd></div>
+          <div><dt>最近更新时间</dt><dd>{formatDate(profile.updated_at)}</dd></div>
+        </dl>
+        <div className="ov-profile-actions">
+          <button type="button" onClick={() => setEditing(true)}>编辑</button>
+          <button type="button" disabled={pending} onClick={() => void validate()}>
+            <RefreshIcon />
+            {pending ? '检查中…' : '检查连接'}
+          </button>
+        </div>
       </section>
       {message ? <p className="ov-form-error" role="status">{message}</p> : null}
       {editing ? (
         <form className="ov-profile-form" onSubmit={update}>
           <div className="ov-profile-heading">
             <span className="ov-profile-heading-icon"><ShieldIcon /></span>
-            <div><h2>Edit profile</h2><p>Leave API key blank to keep the encrypted credential.</p></div>
+            <div><h2>编辑知识库</h2><p>{credentialModeLabel(profile)}</p></div>
           </div>
           <div className="ov-form-grid">
-            <label>Name<input name="display_name" required defaultValue={editing.display_name} /></label>
-            <label>Workspace URI<input readOnly value={editing.workspace_uri} /></label>
+            <label>知识库名称<input name="display_name" required defaultValue={profile.display_name} /></label>
+            <label>Workspace URI<input readOnly value={profile.workspace_uri} /></label>
           </div>
-          {!externalOIDCEnabled && (
+          {credentialMode(profile) === 'byok' ? (
             <>
-              <label>Base URL<input name="base_url" type="url" placeholder="Keep current hosted URL" /></label>
-              <label>New API key<input name="api_key" type="password" autoComplete="off" /></label>
+              <label>Base URL<input name="base_url" type="url" placeholder="保留当前地址" /></label>
+              <label>轮换 API Key<input name="api_key" type="password" autoComplete="new-password" /></label>
+              <p className="ov-security-note">留空表示保留原密钥；填写后仅通过本次 HTTPS 请求体轮换。</p>
             </>
-          )}
+          ) : <p className="ov-security-note">平台托管模式不允许浏览器提交 Endpoint 或 API Key。</p>}
           <div className="ov-form-actions">
-            <button className="ov-primary-button" disabled={pendingId === editing.profile_id} type="submit">Save changes</button>
-            <button type="button" onClick={() => setEditing(null)}>Cancel</button>
+            <button className="ov-primary-button" disabled={pending} type="submit">保存设置</button>
+            <button type="button" onClick={() => setEditing(false)}>取消</button>
           </div>
         </form>
       ) : null}
-      <ProfileForm onCreated={onCreated} />
+      <section className="ov-danger-zone">
+        <div><h2>删除知识库</h2><p>删除后，此知识库签发的 ResourceRef 将失效。</p></div>
+        <button className="ov-danger-button" type="button" onClick={() => onRevoke(profile)}>
+          <DeleteIcon />
+          删除知识库
+        </button>
+      </section>
     </div>
   )
 }
@@ -467,21 +564,21 @@ function ResourceWorkspace({ rootUri, profileId }: { rootUri: string; profileId:
           <header className="ov-context-header">
             <div className="ov-context-title">
               <span className="ov-context-glyph"><ResourcesIcon /></span>
-              <span>Context tree</span>
+              <span>资源目录</span>
             </div>
             <div className="ov-icon-actions">
-              <button type="button" title="Search resources" aria-label="Search resources" onClick={() => setSearchOpen(true)}>
+              <button type="button" title="搜索资源" aria-label="搜索资源" onClick={() => setSearchOpen(true)}>
                 <SearchIcon />
               </button>
-              <button type="button" title="Import resource" aria-label="Import resource" onClick={() => setAddOpen(true)}>
+              <button type="button" title="导入资源" aria-label="导入资源" onClick={() => setAddOpen(true)}>
                 <AddIcon />
               </button>
-              <button type="button" title="Refresh resources" aria-label="Refresh resources" onClick={() => void refresh()}>
+              <button type="button" title="刷新资源" aria-label="刷新资源" onClick={() => void refresh()}>
                 <RefreshIcon />
               </button>
             </div>
           </header>
-          <div className="ov-context-scope" title="Workspace">Workspace</div>
+          <div className="ov-context-scope" title="Workspace">当前知识库</div>
           <div className="ov-context-tree-scroll">
             <ResourceContextTree
               expandedUris={expandedUris}
@@ -492,7 +589,7 @@ function ResourceWorkspace({ rootUri, profileId }: { rootUri: string; profileId:
             />
           </div>
         </section>
-        <section className="ov-resource-preview" aria-label="Resource preview">
+        <section className="ov-resource-preview" aria-label="资源预览">
           {contextError ? <div className="error" role="alert">{contextError}</div> : null}
           {selectedFile.uri !== normalizedRoot ? (
             <div className="ov-resource-preview-actions">
@@ -513,7 +610,7 @@ function ResourceWorkspace({ rootUri, profileId }: { rootUri: string; profileId:
                 onClick={() => void deleteSelected()}
               >
                 <DeleteIcon />
-                {deleting ? 'Deleting…' : 'Delete resource'}
+                {deleting ? '正在删除…' : '删除资源'}
               </button>
             </div>
           ) : null}
@@ -535,8 +632,8 @@ function ResourceWorkspace({ rootUri, profileId }: { rootUri: string; profileId:
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="ov-import-dialog sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Import resource</DialogTitle>
-            <DialogDescription>Add files, text, remote sources, or connected resources.</DialogDescription>
+            <DialogTitle>导入资源</DialogTitle>
+            <DialogDescription>添加文件、文本、远程来源或已授权连接资源。</DialogDescription>
           </DialogHeader>
           <AddResourceForm
             onCompleted={() => {
@@ -550,35 +647,193 @@ function ResourceWorkspace({ rootUri, profileId }: { rootUri: string; profileId:
   )
 }
 
+function KnowledgeBaseList({
+  onProfilesChanged,
+  onRevoke,
+  profiles,
+}: {
+  onProfilesChanged: () => Promise<void>
+  onRevoke: (profile: OpenVikingProfile) => void
+  profiles: OpenVikingProfile[]
+}) {
+  const [message, setMessage] = useState('')
+  const [validatingId, setValidatingId] = useState('')
+
+  async function validate(profile: OpenVikingProfile) {
+    setValidatingId(profile.profile_id)
+    setMessage('')
+    try {
+      await openVikingApi.validateProfile(profile.profile_id)
+      setMessage(`${profile.display_name} 连接正常。`)
+      await onProfilesChanged()
+    } catch (value) {
+      setMessage(value instanceof Error ? value.message : '连接检查失败')
+      await onProfilesChanged()
+    } finally {
+      setValidatingId('')
+    }
+  }
+
+  return (
+    <div className="ov-kb-page">
+      <header className="ov-kb-heading">
+        <div>
+          <span>DATA WORKSHOP · KNOWLEDGE</span>
+          <h1>知识库</h1>
+          <p>每个知识库拥有独立的 Profile、资源、检索、任务和定时同步状态。</p>
+        </div>
+        <Link className="ov-primary-link" to="/kb/new">
+          <AddIcon />
+          新建知识库
+        </Link>
+      </header>
+      {message ? <p className="ov-inline-message" role="status">{message}</p> : null}
+      {profiles.length ? (
+        <section className="ov-kb-grid" aria-label="知识库列表">
+          {profiles.map((profile) => (
+            <article className="ov-kb-card" key={profile.profile_id}>
+              <div className="ov-kb-card-head">
+                <div className="ov-kb-card-icon"><ResourcesIcon /></div>
+                <span className={`ov-status is-${profile.status}`}>
+                  <span />
+                  {statusLabel(profile.status)}
+                </span>
+              </div>
+              <h2>{profile.display_name}</h2>
+              <dl>
+                <div><dt>凭据模式</dt><dd>{credentialModeLabel(profile)}</dd></div>
+                <div><dt>Workspace URI</dt><dd>{profile.workspace_uri}</dd></div>
+                <div><dt>最近健康检查</dt><dd>{formatDate(profile.last_validated_at)}</dd></div>
+                <div><dt>最近更新</dt><dd>{formatDate(profile.updated_at)}</dd></div>
+              </dl>
+              <div className="ov-kb-card-actions">
+                <Link
+                  aria-label={`进入 ${profile.display_name}`}
+                  className="ov-primary-link"
+                  to={`/kb/${encodeURIComponent(profile.profile_id)}/resources`}
+                >
+                  进入详情
+                </Link>
+                <button
+                  disabled={validatingId === profile.profile_id}
+                  onClick={() => void validate(profile)}
+                  type="button"
+                >
+                  {validatingId === profile.profile_id ? '检查中…' : '检查连接'}
+                </button>
+                <Link to={`/kb/${encodeURIComponent(profile.profile_id)}/settings`}>编辑</Link>
+                <button
+                  className="is-danger"
+                  onClick={() => onRevoke(profile)}
+                  type="button"
+                >
+                  删除
+                </button>
+              </div>
+            </article>
+          ))}
+        </section>
+      ) : (
+        <section className="ov-kb-empty">
+          <ResourcesIcon />
+          <h2>还没有知识库</h2>
+          <p>创建第一个知识库，开始导入和检索团队知识。</p>
+          <Link className="ov-primary-link" to="/kb/new">新建知识库</Link>
+        </section>
+      )}
+    </div>
+  )
+}
+
+function KnowledgeBaseHeader({
+  page,
+  profile,
+}: {
+  page: OpenVikingPage
+  profile: OpenVikingProfile
+}) {
+  const items: Array<[OpenVikingPage, string]> = [
+    ['resources', '资源'],
+    ['retrieval', '检索'],
+    ['tasks', '任务'],
+    ['watches', '定时同步'],
+    ['settings', '设置'],
+  ]
+  const base = `/kb/${encodeURIComponent(profile.profile_id)}`
+  return (
+    <>
+      <header className="ov-detail-heading">
+        <div className="ov-breadcrumbs">
+          <Link to="/kb">知识库</Link>
+          <span>/</span>
+          <span>{profile.display_name}</span>
+        </div>
+        <div className="ov-detail-title">
+          <div>
+            <h1>{profile.display_name}</h1>
+            <p>{profile.workspace_uri}</p>
+          </div>
+          <span className={`ov-status is-${profile.status}`}>
+            <span />
+            {statusLabel(profile.status)}
+          </span>
+        </div>
+      </header>
+      <nav className="ov-detail-nav" aria-label="知识库二级导航">
+        {items.map(([id, label]) => (
+          <NavLink className={page === id ? 'is-active' : ''} key={id} to={`${base}/${id}`}>
+            {label}
+          </NavLink>
+        ))}
+      </nav>
+    </>
+  )
+}
+
 export function OpenVikingWorkspace({
   connectOnly = false,
+  credentialPolicy = 'managed',
 }: {
   connectOnly?: boolean
+  credentialPolicy?: OpenVikingCredentialPolicy
 }) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const route = useMemo(
+    () => connectOnly ? ({ kind: 'new' } as const) : parseKnowledgeRoute(location.pathname),
+    [connectOnly, location.pathname],
+  )
   const [profiles, setProfiles] = useState<OpenVikingProfile[]>([])
-  const [activeId, setActiveId] = useState('')
-  const activeIdRef = useRef(
-    window.localStorage.getItem(ACTIVE_OPENVIKING_PROFILE_KEY) ?? '',
-  )
-  const [page, setPage] = useState<OpenVikingPage>(
-    connectOnly ? 'connection' : 'resources',
-  )
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const activeProfile = useMemo(
-    () =>
-      profiles.find(
-        (profile) =>
-          profile.profile_id === activeId && profile.status === 'ready',
-      ) ?? null,
-    [activeId, profiles],
+  const routeProfile = useMemo(
+    () => route.kind === 'detail'
+      ? profiles.find((profile) => profile.profile_id === route.profileId) ?? null
+      : null,
+    [profiles, route],
   )
+  const activeProfile =
+    routeProfile?.status === 'ready' ? routeProfile : null
 
   useEffect(() => {
-    if (!activeProfile) return
-    registerOpenVikingRoot('viking://', activeProfile.root_resource_ref)
-    registerOpenVikingRoot('viking://workspace/', activeProfile.root_resource_ref)
-  }, [activeProfile])
+    if (!routeProfile) return
+    window.localStorage.setItem(
+      ACTIVE_OPENVIKING_PROFILE_KEY,
+      routeProfile.profile_id,
+    )
+    if (activeProfile) {
+      registerOpenVikingRoot(
+        'viking://',
+        activeProfile.root_resource_ref,
+        activeProfile.profile_id,
+      )
+      registerOpenVikingRoot(
+        'viking://workspace/',
+        activeProfile.root_resource_ref,
+        activeProfile.profile_id,
+      )
+    }
+  }, [activeProfile, routeProfile])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -586,22 +841,16 @@ export function OpenVikingWorkspace({
     try {
       const values = await openVikingApi.listProfiles()
       setProfiles(values)
-      const readyId = selectReadyProfileId(values, activeIdRef.current)
-      activeIdRef.current = readyId
-      if (readyId) {
-        window.localStorage.setItem(ACTIVE_OPENVIKING_PROFILE_KEY, readyId)
-      } else {
+      const stored = window.localStorage.getItem(ACTIVE_OPENVIKING_PROFILE_KEY)
+      if (stored && !values.some((profile) => profile.profile_id === stored)) {
         window.localStorage.removeItem(ACTIVE_OPENVIKING_PROFILE_KEY)
       }
-      setActiveId(readyId)
-      if (!readyId || connectOnly) setPage('connection')
     } catch (value) {
-      setError(value instanceof Error ? value.message : 'Unable to load profiles')
-      setPage('connection')
+      setError(value instanceof Error ? value.message : '知识库加载失败')
     } finally {
       setLoading(false)
     }
-  }, [connectOnly])
+  }, [])
 
   useEffect(() => {
     void load()
@@ -612,138 +861,88 @@ export function OpenVikingWorkspace({
       profile,
       ...current.filter((item) => item.profile_id !== profile.profile_id),
     ])
-    activeIdRef.current = profile.profile_id
     window.localStorage.setItem(
       ACTIVE_OPENVIKING_PROFILE_KEY,
       profile.profile_id,
     )
-    setActiveId(profile.profile_id)
-    setPage(connectOnly ? 'connection' : 'resources')
-  }, [connectOnly])
+    navigate(`/kb/${encodeURIComponent(profile.profile_id)}/resources`, {
+      replace: true,
+    })
+  }, [navigate])
 
   const handleRevoke = useCallback(async (profile: OpenVikingProfile) => {
-    if (!window.confirm(`Revoke ${profile.display_name}?`)) return
-    await openVikingApi.revokeProfile(profile.profile_id)
-    await load()
-  }, [load])
+    if (!window.confirm(`删除知识库“${profile.display_name}”？此操作不可撤销。`)) return
+    try {
+      await openVikingApi.revokeProfile(profile.profile_id)
+      if (route.kind === 'detail' && route.profileId === profile.profile_id) {
+        navigate('/kb', { replace: true })
+      }
+      await load()
+    } catch (value) {
+      setError(value instanceof Error ? value.message : '知识库删除失败')
+    }
+  }, [load, navigate, route])
 
-  const pageLabel = page[0].toUpperCase() + page.slice(1)
-  const canUseWorkspace = Boolean(activeProfile)
-  const showWorkspaceRequired = page !== 'connection' && !canUseWorkspace
+  if (route.kind === 'redirect') return <Navigate replace to={route.to} />
 
   return (
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={queryClient}>
         <AppConnectionProvider profile={activeProfile}>
           <div className="openviking-studio">
-            <aside className="openviking-module-nav">
-              <button className="openviking-brand" type="button" onClick={() => setPage('resources')}>
-                <ResourcesIcon />
-                <span>OpenViking</span>
-              </button>
-              {!connectOnly ? (
-                <nav aria-label="OpenViking">
-                  {([
-                    ['resources', 'Resources', ResourcesIcon],
-                    ['retrieval', 'Retrieval', RetrievalIcon],
-                    ['tasks', 'Tasks', TasksIcon],
-                    ['watches', 'Watches', WatchesIcon],
-                    ['connection', 'Connection', ConnectionIcon],
-                  ] as const).map(([id, label, Icon]) => (
-                    <button
-                      className={page === id ? 'is-active' : ''}
-                      key={id}
-                      onClick={() => setPage(id)}
-                      type="button"
-                    >
-                      <Icon />
-                      <span>{label}</span>
-                    </button>
-                  ))}
-                </nav>
-              ) : null}
-              {activeProfile ? (
-                <button className="ov-sidebar-connection" type="button" onClick={() => setPage('connection')} title={activeProfile.display_name}>
-                  <span className="ov-sidebar-status" />
-                  <span className="ov-sidebar-profile">
-                    <strong>{activeProfile.display_name}</strong>
-                    <span>{activeProfile.status}</span>
-                  </span>
-                </button>
-              ) : null}
-            </aside>
             <section className="main-shell">
               <main className="main openviking-main">
-                <header className="openviking-toolbar">
-                  <div>
-                    <strong>OpenViking</strong>
-                    <span>{pageLabel}</span>
-                  </div>
-                  {activeProfile ? (
-                    <div className="ov-navbar-profile">
-                      <button
-                        type="button"
-                        className="ov-return-button"
-                        onClick={() => {
-                          void openVikingApi.authorizeSkillContext(
-                            activeProfile.profile_id,
-                            activeProfile.root_resource_ref,
-                          )
-                        }}
-                      >
-                        加入 Skill 上下文
-                      </button>
-                      <span className="ov-navbar-status" title={activeProfile.status} />
-                      <select
-                        aria-label="OpenViking profile"
-                        value={activeId}
-                        onChange={(event) => {
-                          activeIdRef.current = event.target.value
-                          window.localStorage.setItem(
-                            ACTIVE_OPENVIKING_PROFILE_KEY,
-                            event.target.value,
-                          )
-                          setActiveId(event.target.value)
-                        }}
-                      >
-                        {profiles.map((profile) => (
-                          <option
-                            key={profile.profile_id}
-                            value={profile.profile_id}
-                            disabled={profile.status !== 'ready'}
-                          >
-                            {profile.display_name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ) : null}
-                </header>
                 {error ? <div className="error" role="alert">{error}</div> : null}
                 {loading ? (
-                  <div className="ov-loading" role="status">Loading OpenViking...</div>
-                ) : showWorkspaceRequired ? (
+                  <div className="ov-loading" role="status">正在加载知识库…</div>
+                ) : route.kind === 'list' ? (
+                  <KnowledgeBaseList
+                    onProfilesChanged={load}
+                    onRevoke={(profile) => void handleRevoke(profile)}
+                    profiles={profiles}
+                  />
+                ) : route.kind === 'new' ? (
+                  <div className="ov-kb-form-page">
+                    <ProfileForm
+                      credentialPolicy={credentialPolicy}
+                      onCreated={handleCreated}
+                    />
+                  </div>
+                ) : !routeProfile ? (
                   <div className="ov-disconnected">
                     <ConnectionIcon />
-                    <h1>Connect OpenViking</h1>
-                    <button type="button" onClick={() => setPage('connection')}>Open connection settings</button>
+                    <h1>知识库不存在</h1>
+                    <Link to="/kb">返回知识库列表</Link>
                   </div>
-                ) : page === 'resources' && activeProfile ? (
-                <ResourceWorkspace rootUri="viking://workspace/" profileId={activeProfile.profile_id} />
-                ) : page === 'retrieval' ? (
-                  <div className="ov-page-scroll"><div className="ov-page-content"><RetrievalPage /></div></div>
-                ) : page === 'tasks' ? (
-                  <div className="ov-page-scroll"><div className="ov-page-content"><TasksRoute /></div></div>
-                ) : page === 'watches' ? (
-                  <div className="ov-page-scroll"><div className="ov-page-content"><WatchesRoute /></div></div>
                 ) : (
-                  <div className="ov-page-scroll">
-                    <ConnectionPage
-                      profiles={profiles}
-                      onCreated={handleCreated}
-                      onProfilesChanged={load}
-                      onRevoke={(profile) => void handleRevoke(profile)}
-                    />
+                  <div className="ov-profile-detail">
+                    <KnowledgeBaseHeader page={route.page} profile={routeProfile} />
+                    {route.page !== 'settings' && !activeProfile ? (
+                      <div className="ov-disconnected">
+                        <ConnectionIcon />
+                        <h2>请先完成连接检查</h2>
+                        <p>只有状态可用的知识库可以访问资源、检索、任务和定时同步。</p>
+                        <Link to={`/kb/${encodeURIComponent(routeProfile.profile_id)}/settings`}>
+                          打开连接设置
+                        </Link>
+                      </div>
+                    ) : route.page === 'resources' && activeProfile ? (
+                      <ResourceWorkspace rootUri="viking://workspace/" profileId={activeProfile.profile_id} />
+                    ) : route.page === 'retrieval' ? (
+                      <div className="ov-page-scroll"><div className="ov-page-content"><RetrievalPage /></div></div>
+                    ) : route.page === 'tasks' ? (
+                      <div className="ov-page-scroll"><div className="ov-page-content"><TasksRoute /></div></div>
+                    ) : route.page === 'watches' ? (
+                      <div className="ov-page-scroll"><div className="ov-page-content"><WatchesRoute /></div></div>
+                    ) : (
+                      <div className="ov-page-scroll">
+                        <ProfileSettings
+                          onProfilesChanged={load}
+                          onRevoke={(profile) => void handleRevoke(profile)}
+                          profile={routeProfile}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </main>

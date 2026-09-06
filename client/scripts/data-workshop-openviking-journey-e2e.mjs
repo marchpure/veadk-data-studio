@@ -53,9 +53,29 @@ const unsafeUrlMarkers = ['viking://', 'OPENVIKING_E2E_API_KEY', 'volc-', 'skill
 
 await page.goto(`${baseUrl}/kb`, { waitUntil: 'networkidle' })
 await page.getByText(profileName).first().waitFor()
+if (await page.locator('.openviking-module-nav').count()) {
+  throw new Error('OpenViking rendered a second global sidebar')
+}
+const profileCard = page.locator('.ov-kb-card', { hasText: profileName })
+await profileCard.getByRole('link', { name: `进入 ${profileName}` }).click()
+await page.waitForURL(
+  url =>
+    url.pathname === `/kb/${encodeURIComponent(profileId)}/resources`,
+)
 const primaryNavLabels = await page.locator('.dw-primary-nav a').allTextContents()
 if (primaryNavLabels.join('|') !== '首页|连接|知识库|Skill') {
   throw new Error(`Unexpected primary navigation: ${primaryNavLabels.join('|')}`)
+}
+const detailRoutes = ['resources', 'retrieval', 'tasks', 'watches', 'settings']
+const detailLabels = ['资源', '检索', '任务', '定时同步', '设置']
+for (let index = 0; index < detailRoutes.length; index += 1) {
+  const route = detailRoutes[index]
+  const label = detailLabels[index]
+  const link = page.getByRole('navigation', { name: '知识库二级导航' })
+    .getByRole('link', { name: label })
+  if (await link.getAttribute('href') !== `/kb/${profileId}/${route}`) {
+    throw new Error(`Unexpected ${label} route: ${await link.getAttribute('href')}`)
+  }
 }
 await page.getByRole('treeitem', { name: /^skill_prompt$/ }).click()
 const importedLeaf = page.locator('.ov-context-tree-scroll [role="group"] [role="treeitem"]').first()
@@ -161,6 +181,8 @@ const evidence = {
   handoff_url_safe: true,
   resource_ref_opaque: true,
   imported_metadata_visible: true,
+  knowledge_routes: detailRoutes.map(route => `/kb/:profileId/${route}`),
+  openviking_second_sidebar_absent: true,
   screenshots: {
     kb: kbScreenshots,
     skill_imported: skillScreenshots,

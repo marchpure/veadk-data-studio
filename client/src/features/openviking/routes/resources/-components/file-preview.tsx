@@ -10,12 +10,14 @@ import { X, Pencil, Save, XCircle, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '#/components/ui/button'
+import { useOpenVikingIdentityScopeKey } from '#/hooks/use-app-connection'
 import { ScrollArea } from '#/components/ui/scroll-area'
 import { client } from '#/gen/ov-client/client.gen'
 import { getContentDownload, ovClient } from '#/lib/ov-client'
 import { fileNameFromUri } from '#/lib/viking-uri'
 import type { GetContentDownloadData } from '#/gen/ov-client/types.gen'
 import type { ContentDownloadQuery } from '@ov-server/api/v1/content'
+import { profileScopedQueryKey } from '#/profile-selection'
 
 import { formatSize, normalizeReadContent } from '../-lib/normalize'
 import { fetchDirectoryLevelContent, saveFileContent } from '../-lib/api'
@@ -194,16 +196,27 @@ function cleanSummaryContent(value: unknown): string {
 }
 
 function useDirectoryPreview(file: VikingFsEntry | null) {
+  const identityScopeKey = useOpenVikingIdentityScopeKey()
   const enabled = Boolean(file?.isDir)
   const abstractQuery = useQuery({
     enabled,
-    queryKey: ['viking-directory-level', file?.uri, 'abstract'],
+    queryKey: profileScopedQueryKey(
+      'viking-directory-level',
+      identityScopeKey,
+      file?.uri,
+      'abstract',
+    ),
     queryFn: () => fetchDirectoryLevelContent(file!.uri, 'abstract'),
     staleTime: 30_000,
   })
   const overviewQuery = useQuery({
     enabled,
-    queryKey: ['viking-directory-level', file?.uri, 'overview'],
+    queryKey: profileScopedQueryKey(
+      'viking-directory-level',
+      identityScopeKey,
+      file?.uri,
+      'overview',
+    ),
     queryFn: () => fetchDirectoryLevelContent(file!.uri, 'overview'),
     staleTime: 30_000,
   })

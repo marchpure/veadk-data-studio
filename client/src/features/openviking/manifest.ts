@@ -17,11 +17,7 @@ export const openVikingManifest: KnowledgeSourceExtension = {
       label: "创建知识库",
       description: "关联 OpenViking profile 后导入和选择知识资源",
       run: () => {
-        const target = new URL(window.location.href);
-        target.search = "";
-        target.searchParams.set("view", "openviking");
-        target.searchParams.set("return", "knowledge-workspace");
-        window.history.pushState({}, "", target);
+        window.history.pushState({}, "", "/kb/new");
         window.dispatchEvent(new PopStateEvent("popstate"));
       },
     },

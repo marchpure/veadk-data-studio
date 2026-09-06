@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '#/components/ui/button'
+import { useOpenVikingIdentityScopeKey } from '#/hooks/use-app-connection'
 import { getFsLs, getOvResult, isOvClientError } from '#/lib/ov-client'
+import { profileScopedQueryKey } from '#/profile-selection'
 import {
   Dialog,
   DialogContent,
@@ -59,6 +61,7 @@ export function DirectoryPickerDialog({
   onSelect,
 }: DirectoryPickerDialogProps) {
   const { t } = useTranslation('addResource')
+  const identityScopeKey = useOpenVikingIdentityScopeKey()
   const [browseUri, setBrowseUri] = useState(value)
 
   useEffect(() => {
@@ -70,7 +73,11 @@ export function DirectoryPickerDialog({
   const normalizedUri = normalizeDirUri(browseUri)
 
   const dirQuery = useQuery({
-    queryKey: ['dir-picker', normalizedUri],
+    queryKey: profileScopedQueryKey(
+      'dir-picker',
+      identityScopeKey,
+      normalizedUri,
+    ),
     queryFn: async () => {
       const result = await getOvResult<FSListResult>(
         getFsLs({

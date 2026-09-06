@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 
+import { useOpenVikingIdentityScopeKey } from '#/hooks/use-app-connection'
 import { getFsLs, getOvResult } from '#/lib/ov-client'
+import { profileScopedQueryKey } from '#/profile-selection'
 import type { FSListResult } from '@ov-server/api/v1/fs'
 
 type ResourceProbeResult = {
@@ -28,6 +30,7 @@ function normalizeHasEntries(result: FSListResult | unknown): boolean {
 }
 
 export function useResourceContextProbe() {
+  const identityScopeKey = useOpenVikingIdentityScopeKey()
   return useQuery<ResourceProbeResult>({
     queryFn: async () => {
       const result = await getOvResult<FSListResult>(
@@ -44,7 +47,10 @@ export function useResourceContextProbe() {
 
       return { hasContext: normalizeHasEntries(result) }
     },
-    queryKey: ['retrieval-resource-context-probe'],
+    queryKey: profileScopedQueryKey(
+      'retrieval-resource-context-probe',
+      identityScopeKey,
+    ),
     staleTime: 30_000,
   })
 }

@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 
+import { useOpenVikingIdentityScopeKey } from '#/hooks/use-app-connection'
 import { fetchFind, fetchGlob, fetchGrep, fetchSearch } from '#/lib/retrieval'
 import type { GroupedFindResult } from '#/lib/retrieval'
+import { profileScopedQueryKey } from '#/profile-selection'
 
 import type {
   RetrievalMode,
@@ -19,6 +21,7 @@ export function useRetrievalQuery({
   query: string
   options: RetrievalRequestOptions
 }) {
+  const identityScopeKey = useOpenVikingIdentityScopeKey()
   return useQuery<GroupedFindResult>({
     enabled,
     gcTime: 5 * 60_000,
@@ -67,7 +70,13 @@ export function useRetrievalQuery({
         until: options.until,
       })
     },
-    queryKey: ['retrieval', mode, query, options],
+    queryKey: profileScopedQueryKey(
+      'retrieval',
+      identityScopeKey,
+      mode,
+      query,
+      options,
+    ),
     staleTime: 60_000,
   })
 }
