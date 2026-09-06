@@ -106,7 +106,7 @@ async def get_catalog(
     auth: AuthContext = Depends(require_skill_read),
     db: AsyncSession = Depends(get_async_session),
 ):
-    data = await visible_catalog(db, auth.tenant_id, auth.user_id, auth.user.email)
+    data = await visible_catalog(db, auth.tenant_id, auth.user_id, auth.user.email, auth.external_subject)
     data["backend"] = "TEST BACKEND" if os.getenv("DATA_WORKSHOP_BACKEND_MODE", "REAL").upper() == "TEST" else "REAL"
     w5_adapter = W5SkillAgentAdapter()
     data["w5_configured"] = bool(w5_adapter.endpoint and w5_adapter.api_key)
@@ -130,7 +130,7 @@ async def create_skill(
     db: AsyncSession = Depends(get_async_session),
 ):
     repo = repo_for(db, auth)
-    catalog = await visible_catalog(db, auth.tenant_id, auth.user_id, auth.user.email)
+    catalog = await visible_catalog(db, auth.tenant_id, auth.user_id, auth.user.email, auth.external_subject)
     try:
         context_refs = await validate_requested_refs(
             body.mcp_refs,
@@ -214,7 +214,7 @@ async def create_session(
     if body.mcp_refs is None and body.knowledge_refs is None:
         context_refs = skill.context_refs_json
     else:
-        catalog = await visible_catalog(db, auth.tenant_id, auth.user_id, auth.user.email)
+        catalog = await visible_catalog(db, auth.tenant_id, auth.user_id, auth.user.email, auth.external_subject)
         try:
             context_refs = await validate_requested_refs(
                 body.mcp_refs or [],
@@ -251,7 +251,7 @@ async def update_context(
     skill = await repo.get_skill(item.skill_id)
     if skill is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    catalog = await visible_catalog(db, auth.tenant_id, auth.user_id, auth.user.email)
+    catalog = await visible_catalog(db, auth.tenant_id, auth.user_id, auth.user.email, auth.external_subject)
     try:
         item.context_refs_json = await validate_requested_refs(
             body.mcp_refs,

@@ -195,6 +195,7 @@ async def visible_catalog(
     tenant_id: UUID,
     owner_id: UUID,
     owner_email: str | None = None,
+    external_subject: str | None = None,
 ) -> dict[str, Any]:
     """Return only references whose access can be established for this user."""
     client = get_openconnector_client()
@@ -205,17 +206,32 @@ async def visible_catalog(
         subjects = _subject_views(
             _items(await client.request_admin("GET", "/api/identity/subjects", tenant_id=str(tenant_id)))
         )
-        identity = next(
-            (
-                subject.get("_runtime_subject")
-                for subject in subjects
-                if subject["type"] == "user"
-                and (
-                    subject["id"] == str(owner_id) or bool(owner_email and subject.get("secondary_text") == owner_email)
-                )
-            ),
-            None,
-        )
+        if external_subject is not None:
+            # An upstream subject is cryptographically verified by the external
+            # identity bridge. Once present, it is the only identity that may
+            # select an OpenConnector subject. Never fall back to local UUID or
+            # email if the subject is not found.
+            identity = next(
+                (
+                    subject.get("_runtime_subject")
+                    for subject in subjects
+                    if subject["type"] == "user" and subject["id"] == external_subject
+                ),
+                None,
+            )
+        else:
+            identity = next(
+                (
+                    subject.get("_runtime_subject")
+                    for subject in subjects
+                    if subject["type"] == "user"
+                    and (
+                        subject["id"] == str(owner_id)
+                        or bool(owner_email and subject.get("secondary_text") == owner_email)
+                    )
+                ),
+                None,
+            )
         if identity is None:
             return {
                 "connections": [],

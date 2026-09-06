@@ -28,6 +28,7 @@ from server.data_workshop.skill.service import (
     session_payload,
     stable_artifact_url,
     validate_refs,
+    visible_catalog,
 )
 from server.data_workshop.skill.w5_adapter import W5AdapterError, W5Invocation, W5SkillAgentAdapter
 from server.db.base import Base
@@ -119,10 +120,13 @@ async def skill_app(tmp_path, monkeypatch: pytest.MonkeyPatch):
             tenant_id=current["tenant_id"],
             user_id=current["user_id"],
             user=SimpleNamespace(email="owner@example.test"),
+            external_subject=current.get("external_subject"),
             is_viewer=False,
         )
 
     async def catalog_override(*_args, **_kwargs):
+        if _args and _args[-1] == "not-the-upstream-subject":
+            return {"connections": [], "knowledge_refs": []}
         return CATALOG
 
     async def run_override(**_kwargs):
@@ -233,6 +237,88 @@ async def test_session_context_update_persists_and_removes_knowledge_ref(skill_a
 
     refreshed = await client.get(f"/api/v1/sessions/{session_id}")
     assert refreshed.json()["data"]["context_refs"] == reduced
+
+
+@pytest.mark.asyncio
+async def test_visible_catalog_uses_external_subject_and_fails_closed(
+    skill_app, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, factory, _, identities = skill_app
+    tenant_id, owner_id, _, _ = identities
+
+    class Client:
+        async def request_admin(self, method: str, path: str, **kwargs):
+            if path == "/api/actions":
+                return [
+                    {"id": "hackernews.get_max_item_id", "service": "hackernews", "name": "get_max_item_id"},
+                    {"id": "hackernews.publish", "service": "hackernews", "name": "publish"},
+                    {"id": "arxiv.search", "service": "arxiv", "name": "search"},
+                ]
+            if path == "/api/identity/subjects":
+                return [
+                    {
+                        "sub": "external-user-b",
+                        "email": "owner@example.test",
+                        "displayName": "User B",
+                    }
+                ]
+            if path == "/api/access/preview":
+                action_id = kwargs["json"]["actionId"]
+                return {"decision": {"allowed": action_id == "hackernews.get_max_item_id"}}
+            raise AssertionError(f"unexpected request: {method} {path}")
+
+    monkeypatch.setattr(service, "get_openconnector_client", lambda: Client())
+    async def list_apps(_client, _tenant_id):
+        return [
+            {"id": "hn-connection", "service": "hackernews", "displayName": "Hacker News"},
+            {"id": "arxiv-connection", "service": "arxiv", "displayName": "arXiv"},
+        ]
+
+    monkeypatch.setattr(service, "_list_apps", list_apps)
+    monkeypatch.setenv("W6_RESOURCE_REF_PROVIDER", "test_provider:list_refs")
+    monkeypatch.setattr(
+        service.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(list_refs=lambda **_kwargs: []),
+    )
+
+    async with factory() as db:
+        catalog = await visible_catalog(
+            db,
+            tenant_id,
+            owner_id,
+            "owner@example.test",
+            external_subject="external-user-b",
+        )
+        assert [action["id"] for action in catalog["connections"][0]["actions"]] == [
+            "hackernews.get_max_item_id"
+        ]
+
+        mismatched = await visible_catalog(
+            db,
+            tenant_id,
+            owner_id,
+            "owner@example.test",
+            external_subject="not-the-upstream-subject",
+        )
+        assert mismatched["connections"] == []
+
+
+@pytest.mark.asyncio
+async def test_external_subject_mismatch_does_not_allow_patch_email_fallback(skill_app) -> None:
+    client, _, current, _ = skill_app
+    created = await client.post("/api/v1/skills", json=skill_body())
+    session_id = created.json()["data"]["session"]["id"]
+    current["external_subject"] = "not-the-upstream-subject"
+
+    updated = await client.patch(
+        f"/api/v1/sessions/{session_id}/context",
+        json={
+            "mcp_refs": [CATALOG["connections"][0]["actions"][0]],
+            "knowledge_refs": [],
+        },
+    )
+    assert updated.status_code == 403
 
 
 @pytest.mark.asyncio
