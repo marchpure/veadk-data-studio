@@ -377,6 +377,41 @@ async def test_invocation_is_idempotent_and_preserves_history(skill_app) -> None
 
 
 @pytest.mark.asyncio
+async def test_delegation_is_committed_before_background_invocation(
+    skill_app, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, factory, _, _ = skill_app
+    created = await client.post("/api/v1/skills", json=skill_body())
+    session_id = UUID(created.json()["data"]["session"]["id"])
+    observed = asyncio.Event()
+    visible = False
+
+    async def issue(_auth, db):
+        item = await db.get(DataWorkshopSkillSession, session_id)
+        item.title = "delegation-committed"
+        await db.flush()
+        return "dlg_" + "a" * 43
+
+    async def run_override(**_kwargs):
+        nonlocal visible
+        async with factory() as independent:
+            item = await independent.get(DataWorkshopSkillSession, session_id)
+            visible = item.title == "delegation-committed"
+        observed.set()
+
+    monkeypatch.setattr(api, "delegated_auth_ref", issue)
+    monkeypatch.setattr(api, "run_invocation", run_override)
+
+    response = await client.post(
+        f"/api/v1/sessions/{session_id}/invocations",
+        json={"message": "生成", "client_invocation_id": "commit-before-task", "validate": True},
+    )
+    assert response.status_code == 202
+    await asyncio.wait_for(observed.wait(), timeout=1)
+    assert visible
+
+
+@pytest.mark.asyncio
 async def test_cancel_and_retry_keep_the_same_session(skill_app) -> None:
     client, _, _, _ = skill_app
     created = await client.post("/api/v1/skills", json=skill_body())
