@@ -79,19 +79,31 @@ async def _exchange_for_mcp_audience(access_token: str) -> str:
         from server.services.external_oidc import _client_id, _client_secret, _discovery
 
         metadata = await _discovery()
+        client_id = _client_id()
+        client_secret = await _client_secret()
+        resource = _configured(os.getenv("DWV1_MCP_RESOURCE"))
+        form = {
+            "grant_type": TOKEN_EXCHANGE_GRANT,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "subject_token": access_token,
+            "subject_token_type": ACCESS_TOKEN_TYPE,
+            "requested_token_type": ACCESS_TOKEN_TYPE,
+            "audience": target,
+        }
+        if resource:
+            form["resource"] = resource
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                metadata["token_endpoint"],
-                data={
-                    "grant_type": TOKEN_EXCHANGE_GRANT,
-                    "client_id": _client_id(),
-                    "client_secret": await _client_secret(),
-                    "subject_token": access_token,
-                    "subject_token_type": ACCESS_TOKEN_TYPE,
-                    "requested_token_type": ACCESS_TOKEN_TYPE,
-                    "audience": target,
-                },
-            )
+            response = await client.post(metadata["token_endpoint"], data=form)
+            if response.status_code in {400, 401}:
+                # UserPool advertises both client_secret_post and
+                # client_secret_basic. Retry only the client-auth shape; never
+                # fall back to returning the browser token.
+                response = await client.post(
+                    metadata["token_endpoint"],
+                    data={key: value for key, value in form.items() if key != "client_secret"},
+                    auth=(client_id, client_secret),
+                )
         if response.status_code >= 400:
             raise DelegationBrokerError("BLOCKED_AUTH")
         exchanged = response.json().get("access_token")
