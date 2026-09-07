@@ -79,8 +79,12 @@ export function OpenConnectorSurface({
   const frameRoute = useRef<OpenConnectorRoute | null>(null)
   const mounted = useRef(true)
   const safeSearch = sanitizeSearch(location.search)
-  const desiredRoute = useRef({ surface, resourcePath, search: safeSearch })
-  desiredRoute.current = { surface, resourcePath, search: safeSearch }
+  // Keep resource navigation constrained to a single safe OpenConnector id.
+  // The parent router validates action ids too, but this guard protects the
+  // embed when it is mounted directly by another caller.
+  const safeResourcePath = isSafeResourcePath(surface, resourcePath) ? resourcePath : ''
+  const desiredRoute = useRef({ surface, resourcePath: safeResourcePath, search: safeSearch })
+  desiredRoute.current = { surface, resourcePath: safeResourcePath, search: safeSearch }
 
   const load = useCallback(async (forceReload = false) => {
     requestedRevision.current += 1
@@ -157,7 +161,7 @@ export function OpenConnectorSurface({
 
   useEffect(() => {
     void load()
-  }, [load, resourcePath, safeSearch, surface])
+  }, [load, safeResourcePath, safeSearch, surface])
 
   useEffect(() => {
     mounted.current = true

@@ -26,6 +26,10 @@ function surfaceView(surface: 'overview' | 'actions' | 'runs') {
   return <OpenConnectorSurface surface={surface} title={titles[surface]} />
 }
 
+function actionDetailView(actionId: string) {
+  return <OpenConnectorSurface surface="actions" title="操作详情" resourcePath={`/${actionId}`} />
+}
+
 function view(surface: 'overview' | 'actions' | 'runs') {
   return (
     <MemoryRouter>
@@ -81,6 +85,23 @@ describe('OpenConnectorSurface', () => {
     expect(iframe.getAttribute('src')).toBe('/oc/runs?embed=studio')
     expect(screen.queryByTitle('OpenConnector 操作')).toBeNull()
     expect(screen.queryByTitle('OpenConnector 总览')).toBeNull()
+  })
+
+  it('launches an action detail in the same iframe with its encoded resource path', async () => {
+    createLaunchSession.mockResolvedValue({
+      launch_url: '/oc/actions/oracle.query_rows?embed=studio',
+      expires_at: 1000,
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/connections/actions/oracle.query_rows']}>
+        {actionDetailView('oracle.query_rows')}
+      </MemoryRouter>,
+    )
+
+    const iframe = await screen.findByTitle('OpenConnector 操作详情')
+    expect(createLaunchSession).toHaveBeenCalledWith('actions', '', '/oracle.query_rows')
+    expect(iframe.getAttribute('src')).toBe('/oc/actions/oracle.query_rows?embed=studio')
   })
 
   it('accepts a same-origin iframe card navigation and ignores an unsafe route', async () => {

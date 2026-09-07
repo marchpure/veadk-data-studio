@@ -36,6 +36,23 @@ function ConnectionSurfaceRoute() {
   if (path === '/connections/providers') return <OpenConnectorSurface surface="providers" title="提供商" />
   if (path === '/connections/marketplace') return <OpenConnectorSurface surface="marketplace" title="市场" />
   if (path === '/connections/actions') return <OpenConnectorSurface surface="actions" title="操作" />
+  const actionMatch = path.match(/^\/connections\/actions\/([^/]+)$/)
+  if (actionMatch) {
+    let actionId: string
+    try {
+      actionId = decodeURIComponent(actionMatch[1])
+    } catch {
+      return <Navigate to="/connections/actions" replace />
+    }
+    if (!isSafeResourceId(actionId)) return <Navigate to="/connections/actions" replace />
+    return (
+      <OpenConnectorSurface
+        surface="actions"
+        resourcePath={`/${encodeURIComponent(actionId)}`}
+        title="操作详情"
+      />
+    )
+  }
   if (path === '/connections/runs') return <OpenConnectorSurface surface="runs" title="运行记录" />
   if (path === '/connections/access') return <OpenConnectorSurface surface="access" title="访问权限" />
   const provider = path.match(/^\/connections\/providers\/([^/]+)$/)?.[1]
@@ -47,6 +64,10 @@ function ConnectionSurfaceRoute() {
     />
   }
   return <Navigate to="/connections/overview" replace />
+}
+
+function isSafeResourceId(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_.~-]{0,255}$/.test(value)
 }
 
 export function DataWorkshopApp() {

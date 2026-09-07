@@ -58,6 +58,11 @@ describe('DataWorkshopApp routes', () => {
     expect(screen.getByTestId('openconnector-surface').textContent).toBe('providers/oracle')
   })
 
+  it('maps action detail ids to the actions OpenConnector resource', () => {
+    renderRoute('/connections/actions/oracle.query_rows')
+    expect(screen.getByTestId('openconnector-surface').textContent).toBe('actions/oracle.query_rows')
+  })
+
   it.each([
     ['/connections/trace', '/connections/runs'],
     ['/connections/providers/market', '/connections/providers'],

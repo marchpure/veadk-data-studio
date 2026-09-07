@@ -117,6 +117,21 @@ for (const [surface, parentPath, pageMarker] of routes) {
   }
 }
 
+// Action detail uses the same persistent iframe and a validated one-segment
+// resource id, while the marketplace remains reachable only as a compatibility
+// route (it is intentionally absent from the secondary nav).
+if (await page.getByRole('navigation', { name: '连接二级导航' }).getByRole('link', { name: '市场', exact: true }).count()) {
+  throw new Error('Marketplace must not be present in the connection secondary navigation')
+}
+currentPageUrl = new URL('/connections/actions/query_rows', baseUrl).toString()
+await page.goto(currentPageUrl)
+const actionFrame = page.locator('iframe[src^="/oc/actions/query_rows"]')
+await actionFrame.waitFor()
+const actionFrameElement = await actionFrame.elementHandle()
+const actionContentFrame = await actionFrameElement?.contentFrame()
+if (!actionContentFrame) throw new Error('OpenConnector action detail frame did not load')
+await actionContentFrame.waitForURL(url => url.pathname === '/oc/actions/query_rows')
+
 currentPageUrl = new URL('/connections/overview', baseUrl).toString()
 await page.goto(new URL('/connections/overview', baseUrl).toString())
 const overviewElement = await page.locator('iframe[src^="/oc/overview"]').elementHandle()
