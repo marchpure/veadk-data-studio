@@ -10,8 +10,13 @@ import type {
 } from './types'
 
 const API_ROOT = '/api/v1'
+export const SKILL_REQUEST_TIMEOUT_MS = 12_000
 
 type Envelope<T> = { success: boolean; message: string; data: T }
+export type SkillRequestOptions = {
+  signal?: AbortSignal
+  timeoutMs?: number
+}
 
 export class SkillApiError extends Error {
   status: number
@@ -24,15 +29,43 @@ export class SkillApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await apiFetch(`${API_ROOT}${path}`, {
-    credentials: 'include',
-    ...init,
-    headers: {
-      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-      ...init?.headers,
-    },
-  })
+export class SkillApiTimeoutError extends SkillApiError {
+  constructor(path: string) {
+    super(`请求超时（${path}）`, 408, 'SKILL_REQUEST_TIMEOUT')
+    this.name = 'SkillApiTimeoutError'
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit, options?: SkillRequestOptions): Promise<T> {
+  const controller = new AbortController()
+  let timedOut = false
+  const timeoutId = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, options?.timeoutMs ?? SKILL_REQUEST_TIMEOUT_MS)
+  const abortFromCaller = () => controller.abort()
+  if (options?.signal) {
+    if (options.signal.aborted) controller.abort()
+    else options.signal.addEventListener('abort', abortFromCaller, { once: true })
+  }
+  let response: Response
+  try {
+    response = await apiFetch(`${API_ROOT}${path}`, {
+      credentials: 'include',
+      ...init,
+      signal: controller.signal,
+      headers: {
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init?.headers,
+      },
+    })
+  } catch (reason) {
+    if (timedOut) throw new SkillApiTimeoutError(path)
+    throw reason
+  } finally {
+    clearTimeout(timeoutId)
+    options?.signal?.removeEventListener('abort', abortFromCaller)
+  }
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     const detail = payload?.detail
@@ -46,10 +79,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const skillApi = {
-  catalog: () => request<SkillCatalog>('/skill-catalog'),
-  listSkills: (search = '') =>
+  catalog: (options?: SkillRequestOptions) => request<SkillCatalog>('/skill-catalog', undefined, options),
+  listSkills: (search = '', options?: SkillRequestOptions) =>
     request<{ items: WorkshopSkill[]; total: number }>(
       `/skills${search ? `?search=${encodeURIComponent(search)}` : ''}`,
+      undefined,
+      options,
     ),
   getSkill: (skillId: string) => request<WorkshopSkill>(`/skills/${encodeURIComponent(skillId)}`),
   createSkill: (body: {
@@ -63,12 +98,14 @@ export const skillApi = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  listSessions: (skillId: string) =>
+  listSessions: (skillId: string, options?: SkillRequestOptions) =>
     request<{ items: SkillSession[]; total: number }>(
       `/skills/${encodeURIComponent(skillId)}/sessions`,
+      undefined,
+      options,
     ),
-  getSession: (sessionId: string) =>
-    request<SkillSession>(`/sessions/${encodeURIComponent(sessionId)}`),
+  getSession: (sessionId: string, options?: SkillRequestOptions) =>
+    request<SkillSession>(`/sessions/${encodeURIComponent(sessionId)}`, undefined, options),
   createSession: (skillId: string) =>
     request<SkillSession>(`/skills/${encodeURIComponent(skillId)}/sessions`, {
       method: 'POST',
@@ -104,9 +141,11 @@ export const skillApi = {
       method: 'POST',
       body: JSON.stringify({}),
     }),
-  revisions: (skillId: string) =>
+  revisions: (skillId: string, options?: SkillRequestOptions) =>
     request<{ items: SkillRevision[]; total: number }>(
       `/skills/${encodeURIComponent(skillId)}/revisions`,
+      undefined,
+      options,
     ),
   revisionDiff: (skillId: string, base: string, target: string) =>
     request<RevisionDiff>(

@@ -21,6 +21,17 @@ import type {
 import { openVikingApi } from '../../openviking/api'
 
 type MobilePane = 'skills' | 'conversation' | 'artifact'
+type LoadState = 'loading' | 'ready' | 'empty' | 'partial' | 'error' | 'timeout'
+
+function stateForError(reason: unknown): Extract<LoadState, 'error' | 'timeout'> {
+  return (reason instanceof Error && 'code' in reason && (reason as { code?: string }).code === 'SKILL_REQUEST_TIMEOUT')
+    ? 'timeout'
+    : 'error'
+}
+
+function messageForError(reason: unknown, fallback: string) {
+  return reason instanceof Error && reason.message ? reason.message : fallback
+}
 
 function queryFor(skillId?: string, sessionId?: string, mode?: 'new') {
   const search = new URLSearchParams()
@@ -85,13 +96,19 @@ export function SkillMount() {
   const [catalog, setCatalog] = useState<SkillCatalog | null>(null)
   const [revisions, setRevisions] = useState<SkillRevision[]>([])
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [loadState, setLoadState] = useState<LoadState>('loading')
+  const [catalogState, setCatalogState] = useState<Extract<LoadState, 'loading' | 'ready' | 'error' | 'timeout'>>('loading')
+  const [sessionState, setSessionState] = useState<Extract<LoadState, 'loading' | 'ready' | 'empty' | 'partial' | 'error' | 'timeout'>>('ready')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
+  const [catalogError, setCatalogError] = useState('')
   const [mobilePane, setMobilePane] = useState<MobilePane>('conversation')
   const [importedKnowledge, setImportedKnowledge] = useState<SkillContextRef[]>([])
   const [importError, setImportError] = useState('')
   const [contextEditor, setContextEditor] = useState<'action' | 'knowledge' | null>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [catalogAttempt, setCatalogAttempt] = useState(0)
+  const loading = loadState === 'loading'
 
   const selectedSkill = skills.find(item => item.id === requestedSkillId) || null
   const visibleSkills = useMemo(() => {
@@ -137,38 +154,71 @@ export function SkillMount() {
     return () => { cancelled = true }
   }, [isNew, location.search, query])
 
-  const loadSkills = useCallback(async () => {
-    const response = await skillApi.listSkills()
-    setSkills(response.items)
+  const loadSkills = useCallback(async (signal?: AbortSignal) => {
+    const response = await skillApi.listSkills('', { signal })
     return response.items
   }, [])
 
   useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    Promise.all([loadSkills(), skillApi.catalog()])
-      .then(([items, nextCatalog]) => {
-        if (cancelled) return
-        setCatalog(nextCatalog)
-        setError('')
+    const controller = new AbortController()
+    let active = true
+    setLoadState('loading')
+    setError('')
+    void loadSkills(controller.signal)
+      .then(items => {
+        if (!active) return
+        setSkills(items)
+        const nextState: LoadState = items.length ? 'ready' : 'empty'
+        setLoadState(nextState)
         if (!isNew && !requestedSkillId && requestedSessionId) {
-          void skillApi.getSession(requestedSessionId)
-            .then(found => navigate(queryFor(found.skill_id, found.id), { replace: true }))
-            .catch(() => {
-              if (items[0]) navigate(queryFor(items[0].id), { replace: true })
+          void skillApi.getSession(requestedSessionId, { signal: controller.signal })
+            .then(found => {
+              if (active) navigate(queryFor(found.skill_id, found.id), { replace: true })
+            })
+            .catch(reason => {
+              if (active && !controller.signal.aborted && items[0]) navigate(queryFor(items[0].id), { replace: true })
             })
         } else if (!isNew && !requestedSkillId && items[0]) {
           navigate(queryFor(items[0].id), { replace: true })
+        } else if (!isNew && requestedSkillId && !items.some(item => item.id === requestedSkillId)) {
+          if (items[0]) navigate(queryFor(items[0].id), { replace: true })
+          else setError('找不到该 Skill，请从列表中选择或新建。')
         }
       })
       .catch(reason => {
-        if (!cancelled) setError(reason instanceof Error ? reason.message : 'Skill 工作台加载失败')
+        if (!active || controller.signal.aborted) return
+        setLoadState(stateForError(reason))
+        setError(messageForError(reason, 'Skill 列表加载失败'))
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [isNew, loadAttempt, loadSkills, navigate, requestedSessionId, requestedSkillId])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+    setCatalogState('loading')
+    setCatalogError('')
+    void skillApi.catalog({ signal: controller.signal })
+      .then(nextCatalog => {
+        if (!active) return
+        setCatalog(nextCatalog)
+        setCatalogState('ready')
+        setCatalogError('')
       })
-    return () => { cancelled = true }
-  }, [isNew, loadSkills, navigate, requestedSessionId, requestedSkillId])
+      .catch(reason => {
+        if (!active || controller.signal.aborted) return
+        setCatalogState(stateForError(reason))
+        setCatalogError(messageForError(reason, '能力目录暂时不可用，可稍后重试'))
+        setLoadState(current => current === 'loading' ? 'partial' : current)
+      })
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [catalogAttempt])
 
   useEffect(() => {
     if (!selectedSkill || isNew) {
@@ -177,28 +227,47 @@ export function SkillMount() {
       setRevisions([])
       return
     }
-    let cancelled = false
-    Promise.all([skillApi.listSessions(selectedSkill.id), skillApi.revisions(selectedSkill.id)])
-      .then(async ([sessionResult, revisionResult]) => {
-        if (cancelled) return
-        setSessions(sessionResult.items)
-        setRevisions(revisionResult.items)
+    const controller = new AbortController()
+    let active = true
+    setSessionState('loading')
+    setSession(null)
+    void Promise.allSettled([
+      skillApi.listSessions(selectedSkill.id, { signal: controller.signal }),
+      skillApi.revisions(selectedSkill.id, { signal: controller.signal }),
+    ]).then(results => {
+      if (!active) return
+      const sessionsResult = results[0]
+      const revisionsResult = results[1]
+      const sessionsOk = sessionsResult.status === 'fulfilled'
+      const revisionsOk = revisionsResult.status === 'fulfilled'
+      if (sessionsOk) {
+        setSessions(sessionsResult.value.items)
         const requested = requestedSessionId
-          ? sessionResult.items.find(item => item.id === requestedSessionId)
-          : sessionResult.items[0]
+          ? sessionsResult.value.items.find(item => item.id === requestedSessionId)
+          : sessionsResult.value.items[0]
         if (requested) {
           setSession(requested)
-          if (requested.id !== requestedSessionId) {
-            navigate(queryFor(selectedSkill.id, requested.id), { replace: true })
-          }
+          setSessionState(revisionsOk ? 'ready' : 'partial')
+          if (requested.id !== requestedSessionId) navigate(queryFor(selectedSkill.id, requested.id), { replace: true })
         } else {
           setSession(null)
+          setSessionState(revisionsOk ? 'empty' : 'partial')
         }
-      })
-      .catch(reason => {
-        if (!cancelled) setError(reason instanceof Error ? reason.message : '会话加载失败')
-      })
-    return () => { cancelled = true }
+      } else {
+        setSessions([])
+        setSession(null)
+        setSessionState(stateForError(sessionsResult.reason))
+      }
+      if (revisionsOk) setRevisions(revisionsResult.value.items)
+      else setRevisions([])
+      const failedReason = !sessionsOk ? sessionsResult.reason : !revisionsOk ? revisionsResult.reason : null
+      if (failedReason) setError(messageForError(failedReason, '会话或版本记录加载失败'))
+      else setError('')
+    })
+    return () => {
+      active = false
+      controller.abort()
+    }
   }, [isNew, navigate, requestedSessionId, selectedSkill])
 
   useEffect(() => {
@@ -362,13 +431,22 @@ export function SkillMount() {
           skills={visibleSkills}
           selectedId={selectedSkill?.id || null}
           search={search}
-          loading={loading}
+          loading={loading && skills.length === 0}
           onSearch={setSearch}
           onNew={() => { setMobilePane('conversation'); navigate(queryFor(undefined, undefined, 'new')) }}
           onSelect={selectSkill}
         />
         <main className="dw-skill-center">
-          {(error || importError) && <div className="dw-inline-error dw-skill-global-error">{error || importError}<button onClick={() => { setError(''); setImportError('') }}>关闭</button></div>}
+          {(error || importError || catalogError) && (
+            <div className="dw-inline-error dw-skill-global-error" role="alert">
+              <span>{error || importError || catalogError}</span>
+              <div className="dw-button-row">
+                {error && !isNew && <button className="dw-button dw-button-secondary" onClick={() => setLoadAttempt(value => value + 1)}>重试</button>}
+                {catalogError && <button className="dw-button dw-button-secondary" onClick={() => setCatalogAttempt(value => value + 1)}>重试目录</button>}
+                <button className="dw-button dw-button-secondary" onClick={() => { setError(''); setImportError(''); setCatalogError('') }}>关闭</button>
+              </div>
+            </div>
+          )}
           {isNew ? (
             <>
               <header className="dw-skill-create-heading">
@@ -442,9 +520,28 @@ export function SkillMount() {
           ) : (
             <div className="dw-skill-empty">
               <span><Sparkles size={25} /></span>
-              <h1>{loading ? '正在打开 Skill 工作台' : '把数据能力变成可复用的 Skill'}</h1>
-              <p>{loading ? '正在读取你的 Skill 与会话…' : '从一个明确目标开始，连接可见的 Action 与知识资源。'}</p>
-              {!loading && <button className="dw-button dw-button-primary" onClick={() => navigate(queryFor(undefined, undefined, 'new'))}><Plus size={15} />新建 Skill</button>}
+              <h1>
+                {loading ? '正在打开 Skill 工作台'
+                  : loadState === 'timeout' ? '加载超时'
+                    : loadState === 'error' ? 'Skill 暂时不可用'
+                      : sessionState === 'empty' ? '还没有会话'
+                        : '把数据能力变成可复用的 Skill'}
+              </h1>
+              <p>
+                {loading ? '正在读取你的 Skill 与会话…'
+                  : loadState === 'timeout' ? '请求等待时间过长，请重试。'
+                    : loadState === 'error' ? '请检查网络后重试，或新建一个 Skill。'
+                      : sessionState === 'empty' && selectedSkill ? '为这个 Skill 创建第一个会话即可开始。'
+                        : '从一个明确目标开始，连接可见的 Action 与知识资源。'}
+              </p>
+              {!loading && (
+                <div className="dw-button-row">
+                  {(loadState === 'error' || loadState === 'timeout') && <button className="dw-button dw-button-secondary" onClick={() => setLoadAttempt(value => value + 1)}>重试</button>}
+                  <button className="dw-button dw-button-primary" onClick={() => selectedSkill ? void createSession() : navigate(queryFor(undefined, undefined, 'new'))}>
+                    <Plus size={15} />{selectedSkill ? '新建会话' : '新建 Skill'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </main>
