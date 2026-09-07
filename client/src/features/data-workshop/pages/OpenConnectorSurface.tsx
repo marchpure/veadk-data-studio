@@ -25,6 +25,12 @@ interface OpenConnectorRouteChangedMessage {
   search: string
 }
 
+interface OpenConnectorRoute {
+  surface: OpenConnectorSurfaceKey
+  resourcePath: string
+  search: string
+}
+
 const parentRouteBySurface: Record<OpenConnectorSurfaceKey, string> = {
   overview: '/connections/overview',
   providers: '/connections/providers',
@@ -61,36 +67,105 @@ export function OpenConnectorSurface({
   const location = useLocation()
   const [state, setState] = useState<LoadState>('loading')
   const [launchUrl, setLaunchUrl] = useState('')
-  const [frameReady, setFrameReady] = useState(false)
+  const [standaloneLaunchUrl, setStandaloneLaunchUrl] = useState('')
+  const [transitioning, setTransitioning] = useState(false)
+  const launchUrlRef = useRef('')
+  const frameReadyRef = useRef(false)
+  const requestedRevision = useRef(0)
+  const appliedRevision = useRef(0)
+  const requestRunning = useRef(false)
+  const forceReloadRequested = useRef(false)
+  const pendingRoute = useRef<OpenConnectorRoute | null>(null)
+  const frameRoute = useRef<OpenConnectorRoute | null>(null)
+  const mounted = useRef(true)
   const safeSearch = sanitizeSearch(location.search)
   const desiredRoute = useRef({ surface, resourcePath, search: safeSearch })
   desiredRoute.current = { surface, resourcePath, search: safeSearch }
 
-  const load = useCallback(async () => {
-    setState('loading')
-    setFrameReady(false)
+  const load = useCallback(async (forceReload = false) => {
+    requestedRevision.current += 1
+    if (forceReload) forceReloadRequested.current = true
+    pendingRoute.current = { ...desiredRoute.current }
+    const hasFrame = Boolean(iframeRef.current && launchUrlRef.current)
+    if (hasFrame) setTransitioning(true)
+    else setState('loading')
+    if (requestRunning.current) return
+    requestRunning.current = true
     try {
-      const requested = desiredRoute.current
-      const session = await createSurfaceLaunchSession(
-        requested.surface,
-        requested.search,
-        requested.resourcePath,
-      )
-      setLaunchUrl(validateSurfaceLaunchUrl(
-        session.launch_url,
-        requested.surface,
-        requested.search,
-        requested.resourcePath,
-      ))
-      setState('ready')
+      while (mounted.current && appliedRevision.current < requestedRevision.current) {
+        const revision = requestedRevision.current
+        const requested = desiredRoute.current
+        const session = await createSurfaceLaunchSession(
+          requested.surface,
+          requested.search,
+          requested.resourcePath,
+        )
+        const validatedUrl = validateSurfaceLaunchUrl(
+          session.launch_url,
+          requested.surface,
+          requested.search,
+          requested.resourcePath,
+        )
+        if (!mounted.current) return
+        if (revision !== requestedRevision.current) continue
+
+        setStandaloneLaunchUrl(validatedUrl)
+        const reload = forceReloadRequested.current
+        forceReloadRequested.current = false
+        if (!hasFrame) {
+          launchUrlRef.current = validatedUrl
+          frameReadyRef.current = false
+          pendingRoute.current = requested
+          setTransitioning(true)
+          setLaunchUrl(validatedUrl)
+        } else if (reload || !frameReadyRef.current) {
+          frameReadyRef.current = false
+          pendingRoute.current = requested
+          if (iframeRef.current) iframeRef.current.src = validatedUrl
+        } else if (
+          frameReadyRef.current
+          && frameRoute.current?.surface === requested.surface
+          && frameRoute.current.resourcePath === requested.resourcePath
+          && frameRoute.current.search === requested.search
+        ) {
+          pendingRoute.current = null
+          setTransitioning(false)
+        } else if (frameReadyRef.current) {
+          pendingRoute.current = requested
+          iframeRef.current?.contentWindow?.postMessage({
+            type: 'openconnector.route.navigate',
+            version: 1,
+            surface: requested.surface,
+            resourcePath: requested.resourcePath,
+            search: requested.search,
+          }, window.location.origin)
+        }
+        appliedRevision.current = revision
+        setState('ready')
+      }
     } catch {
+      if (!mounted.current) return
+      setTransitioning(false)
       setState('error')
+    } finally {
+      requestRunning.current = false
+      if (mounted.current && appliedRevision.current < requestedRevision.current) {
+        void load()
+      }
     }
   }, [])
 
   useEffect(() => {
     void load()
-  }, [load, resourcePath, surface])
+  }, [load, resourcePath, safeSearch, surface])
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      requestedRevision.current += 1
+    }
+  }, [])
 
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
@@ -101,6 +176,21 @@ export function OpenConnectorSurface({
       ) {
         return
       }
+      frameRoute.current = {
+        surface: event.data.surface,
+        resourcePath: event.data.resourcePath,
+        search: event.data.search,
+      }
+      if (
+        event.data.surface === desiredRoute.current.surface
+        && event.data.resourcePath === desiredRoute.current.resourcePath
+        && event.data.search === desiredRoute.current.search
+      ) {
+        pendingRoute.current = null
+        setTransitioning(false)
+      } else if (pendingRoute.current) {
+        return
+      }
       const nextLocation = `${parentRouteBySurface[event.data.surface]}${event.data.resourcePath}${event.data.search}`
       if (`${location.pathname}${location.search}` !== nextLocation) {
         void navigate(nextLocation)
@@ -109,18 +199,6 @@ export function OpenConnectorSurface({
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
   }, [location.pathname, location.search, navigate])
-
-  useEffect(() => {
-    const frameWindow = iframeRef.current?.contentWindow
-    if (!frameWindow || state !== 'ready' || !frameReady) return
-    frameWindow.postMessage({
-      type: 'openconnector.route.navigate',
-      version: 1,
-      surface,
-      resourcePath,
-      search: safeSearch,
-    }, window.location.origin)
-  }, [frameReady, resourcePath, safeSearch, state, surface])
 
   if (state !== 'ready') {
     return (
@@ -139,11 +217,11 @@ export function OpenConnectorSurface({
       <div className="dw-openconnector-toolbar">
         <span>通过短期安全会话加载 OpenConnector</span>
         <div>
-          <a className="dw-icon-text" href={standaloneUrl(launchUrl)} target="_blank" rel="noreferrer">
+          <a className="dw-icon-text" href={standaloneUrl(standaloneLaunchUrl || launchUrl)} target="_blank" rel="noreferrer">
             <ExternalLink size={15} />
             新窗口打开
           </a>
-          <button className="dw-icon-text" onClick={() => void load()}>
+          <button className="dw-icon-text" onClick={() => void load(true)}>
             <RefreshCw size={15} />
             刷新会话
           </button>
@@ -154,9 +232,19 @@ export function OpenConnectorSurface({
           ref={iframeRef}
           title={`OpenConnector ${title}`}
           src={launchUrl}
-          onLoad={() => setFrameReady(true)}
+          onLoad={() => {
+            frameReadyRef.current = true
+            pendingRoute.current = null
+            setTransitioning(false)
+          }}
           onError={() => setState('error')}
         />
+        {transitioning && (
+          <div className="dw-openconnector-loading" role="status">
+            <span className="dw-openconnector-spinner" />
+            正在切换到{title}…
+          </div>
+        )}
       </div>
     </section>
   )

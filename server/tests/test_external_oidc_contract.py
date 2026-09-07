@@ -216,13 +216,20 @@ async def test_same_origin_frontend_serves_spa_deep_links(monkeypatch: pytest.Mo
 
     (tmp_path / "index.html").write_text("<html>studio</html>")
     (tmp_path / "assets").mkdir()
-    (tmp_path / "assets" / "app.js").write_text("console.log('studio')")
+    (tmp_path / "assets" / "app-ABC123xy.js").write_text("console.log('studio')")
+    (tmp_path / "config.js").write_text("window.__RUNTIME_CONFIG__ = {}")
     monkeypatch.setenv("DWV1_FRONTEND_DIST", str(tmp_path))
 
     deep_link = await serve_frontend("connections/docs")
-    asset = await serve_frontend("assets/app.js")
+    index = await serve_frontend("index.html")
+    config = await serve_frontend("config.js")
+    asset = await serve_frontend("assets/app-ABC123xy.js")
     api_path = await serve_frontend("api/unknown")
 
     assert deep_link.path == tmp_path / "index.html"
-    assert asset.path == tmp_path / "assets" / "app.js"
+    assert deep_link.headers["cache-control"] == "no-store, must-revalidate"
+    assert index.headers["cache-control"] == "no-store, must-revalidate"
+    assert config.headers["cache-control"] == "no-store, must-revalidate"
+    assert asset.path == tmp_path / "assets" / "app-ABC123xy.js"
+    assert asset.headers["cache-control"] == "public, max-age=31536000, immutable"
     assert api_path.status_code == 404

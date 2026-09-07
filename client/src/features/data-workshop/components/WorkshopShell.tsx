@@ -30,6 +30,10 @@ const connectionNav = [
   ['文档', '/connections/docs'],
 ]
 
+function warmOpenConnector() {
+  void workshopApi.warmOpenConnector().catch(() => undefined)
+}
+
 export function WorkshopShell({ children }: { children: ReactNode }) {
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -42,6 +46,11 @@ export function WorkshopShell({ children }: { children: ReactNode }) {
       .then(bootstrap => setBackendMode(bootstrap.backend_mode))
       .catch(() => setBackendMode('TEST'))
   }, [])
+
+  useEffect(() => {
+    if (location.pathname !== '/home') return
+    warmOpenConnector()
+  }, [location.pathname])
 
   return (
     <div className={`dw-app ${backendMode === 'TEST' ? 'has-test-backend' : ''}`}>
@@ -63,6 +72,8 @@ export function WorkshopShell({ children }: { children: ReactNode }) {
               to={path}
               className={({ isActive }) => isActive || (label === '连接' && inConnections) ? 'active' : ''}
               onClick={() => setMobileOpen(false)}
+              onFocus={label === '连接' && !inConnections ? warmOpenConnector : undefined}
+              onPointerEnter={label === '连接' && !inConnections ? warmOpenConnector : undefined}
             >
               <Icon size={18} /><span>{label}</span>
             </NavLink>

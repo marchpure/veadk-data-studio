@@ -6,7 +6,7 @@ from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from server.auth.dependencies import AuthContext, get_current_auth_context
@@ -51,6 +51,8 @@ SENSITIVE_KEYS = {
     "token",
 }
 OPENCONNECTOR_SUPPORT_PATHS = {"api", "assets", "docs", "favicon.png", "oauth", "openapi.json"}
+LEGACY_CONSOLE_SURFACE = "legacy-approved"
+OPENCONNECTOR_SURFACES = {"overview", "providers", "marketplace", "actions", "runs", "access"}
 CONSOLE_ROOT_PATH = re.compile(
     r"""(?P<prefix>["'])/(?P<path>assets|docs|favicon\.png)(?P<suffix>[/?"'])"""
 )
@@ -430,15 +432,67 @@ def _safe_console_search(search: str) -> str:
 
 
 def _console_path_allowed(path: str, surface: str) -> bool:
-    first = path.strip("/").split("/", 1)[0]
+    normalized = path.strip("/")
+    first = normalized.split("/", 1)[0]
     if first in OPENCONNECTOR_SUPPORT_PATHS:
         return True
+    if surface == LEGACY_CONSOLE_SURFACE:
+        if not normalized:
+            return True
+        if first in OPENCONNECTOR_SURFACES:
+            return _console_path_allowed(path, first)
+        segments = normalized.split("/")
+        return segments == ["traces"] or segments in (["connections"], ["connections", "new"])
     if first != surface:
         return False
     segments = path.strip("/").split("/")
     if surface in {"overview", "marketplace", "runs", "access"}:
         return len(segments) == 1
-    return all(segment and segment not in {".", ".."} for segment in segments)
+    return len(segments) <= 2 and all(
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.~-]{0,255}", segment) for segment in segments
+    )
+
+
+def _canonical_console_path(path: str, surface: str) -> str:
+    if surface != LEGACY_CONSOLE_SURFACE:
+        return path
+    return {
+        "": "overview",
+        "connections": "providers",
+        "connections/new": "providers",
+        "traces": "runs",
+    }.get(path.strip("/"), path)
+
+
+def _legacy_console_redirect(path: str, query: bytes, surface: str) -> str | None:
+    canonical = _canonical_console_path(path, surface)
+    if canonical == path:
+        return None
+    suffix = f"?{query.decode('utf-8')}" if query else ""
+    return f"/oc/{canonical}{suffix}"
+
+
+def _validate_console_proxy_query(query: bytes) -> None:
+    try:
+        value = query.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "INVALID_CONSOLE_SEARCH", "message": "Console search is invalid"},
+        ) from error
+    pairs = parse_qsl(value, keep_blank_values=True)
+    for key, value in pairs:
+        normalized = key.casefold().replace("-", "_")
+        if normalized in SENSITIVE_KEYS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"code": "INVALID_CONSOLE_SEARCH", "message": "Console search contains a reserved parameter"},
+            )
+        if normalized == "embed" and value != "studio":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"code": "INVALID_CONSOLE_SEARCH", "message": "Console embed mode is invalid"},
+            )
 
 
 def _safe_console_resource_path(surface: str, resource_path: str) -> str:
@@ -471,8 +525,8 @@ async def bootstrap(auth: AuthContext = Depends(require_workshop_member)):
 
 @router.post("/openconnector/launch-sessions")
 async def create_launch_session(
-    body: OpenConnectorLaunchPayload,
     response: Response,
+    body: OpenConnectorLaunchPayload | None = None,
     auth: AuthContext = Depends(require_workshop_admin),
 ):
     client = get_openconnector_client()
@@ -481,9 +535,16 @@ async def create_launch_session(
             status_code=503,
             detail={"code": "OPENCONNECTOR_NOT_CONFIGURED", "message": "OpenConnector is not configured"},
         )
-    safe_search = _safe_console_search(body.search)
-    resource_path = _safe_console_resource_path(body.surface, body.resource_path)
-    session_id, session = launch_sessions.create(str(auth.tenant_id), str(auth.user_id), body.surface)
+    if body is None:
+        surface = LEGACY_CONSOLE_SURFACE
+        launch_url = "/oc/?embed=studio"
+    else:
+        safe_search = _safe_console_search(body.search)
+        resource_path = _safe_console_resource_path(body.surface, body.resource_path)
+        surface = body.surface
+        separator = "&" if safe_search else "?"
+        launch_url = f"/oc/{body.surface}{resource_path}{safe_search}{separator}embed=studio"
+    session_id, session = launch_sessions.create(str(auth.tenant_id), str(auth.user_id), surface)
     response.set_cookie(
         key=LAUNCH_COOKIE,
         value=session_id,
@@ -494,13 +555,34 @@ async def create_launch_session(
         httponly=True,
         samesite="strict",
     )
-    separator = "&" if safe_search else "?"
     return success_response(
         data={
-            "launch_url": f"/oc/{body.surface}{resource_path}{safe_search}{separator}embed=studio",
+            "launch_url": launch_url,
             "expires_at": session.expires_at,
         },
         message="Launch session created",
+    )
+
+
+@router.post("/openconnector/warmup", status_code=status.HTTP_202_ACCEPTED)
+async def warm_openconnector(auth: AuthContext = Depends(require_workshop_admin)):
+    client = get_openconnector_client()
+    if not client.configured:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "OPENCONNECTOR_NOT_CONFIGURED", "message": "OpenConnector is not configured"},
+        )
+    try:
+        await client.request_public("GET", "/health")
+        warmup_status = "ready"
+    except OpenConnectorError as error:
+        if error.status_code not in {503, 504}:
+            _raise_upstream(error)
+        warmup_status = "initializing"
+    return JSONResponse(
+        success_response(data={"status": warmup_status}, message="OpenConnector warmup accepted"),
+        status_code=status.HTTP_202_ACCEPTED,
+        headers={"X-Data-Workshop-Upstream-Scope": "public"},
     )
 
 
@@ -930,12 +1012,17 @@ async def proxy_openconnector_console(
         raise HTTPException(status_code=401, detail="A valid Data Workshop launch session is required")
     if not _console_path_allowed(path, session.surface):
         raise HTTPException(status_code=403, detail="OpenConnector surface is not allowed for this launch session")
+    query = request.scope.get("query_string", b"")
+    _validate_console_proxy_query(query)
+    redirect = _legacy_console_redirect(path, query, session.surface)
+    if redirect:
+        return RedirectResponse(redirect, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
     client = get_openconnector_client()
     try:
         upstream = await client.proxy(
             request.method,
             path,
-            query=request.scope.get("query_string", b""),
+            query=query,
             body=await request.body(),
             content_type=request.headers.get("content-type"),
             tenant_id=session.tenant_id,

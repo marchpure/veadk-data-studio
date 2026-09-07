@@ -105,4 +105,28 @@ describe('Conversation', () => {
     const progress = screen.getByText('生成进度').closest('section') as HTMLElement
     expect(within(progress).getByText(expected)).toBeTruthy()
   })
+
+  it('shows the ready terminal state without presenting historical retry failures as current', () => {
+    renderConversation(session({
+      status: 'ready',
+      context_refs: {
+        mcp_refs: [{
+          id: 'action',
+          kind: 'mcp_action',
+          name: '查询',
+          source: 'OpenConnector',
+          metadata: {},
+        }],
+        knowledge_refs: [],
+      },
+      events: [
+        { id: 'old-failure', type: 'retryable', message: 'historical failure' },
+        { id: 'artifact', type: 'artifact.created', message: 'artifact ready' },
+      ],
+    }))
+
+    const progress = screen.getByText('生成进度').closest('section') as HTMLElement
+    expect(within(progress).getByText('生成完成')).toBeTruthy()
+    expect(within(progress).queryByText('生成失败')).toBeNull()
+  })
 })

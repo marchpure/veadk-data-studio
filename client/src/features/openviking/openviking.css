@@ -1,8 +1,34 @@
+.openviking-studio,
+body:has(.openviking-studio) {
+  --background: 90 13% 97%;
+  --foreground: 154 26% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 154 26% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 154 26% 11%;
+  --primary: 159 65% 26%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 140 13% 96%;
+  --secondary-foreground: 153 13% 23%;
+  --muted: 140 13% 96%;
+  --muted-foreground: 152 6% 38%;
+  --accent: 150 31% 94%;
+  --accent-foreground: 159 65% 26%;
+  --destructive: 0 44% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 142 13% 88%;
+  --input: 142 13% 88%;
+  --ring: 159 65% 26%;
+  --panel: 0 0% 100%;
+  --success: 159 50% 35%;
+  color-scheme: light;
+}
+
 .openviking-studio {
   display: block;
   width: 100%;
   min-height: calc(100vh - 57px);
-  background: hsl(var(--muted) / 0.42);
+  background: hsl(var(--background));
   color: hsl(var(--foreground));
 }
 
@@ -22,7 +48,22 @@
 
 .openviking-main {
   min-height: inherit;
-  background: hsl(var(--muted) / 0.42);
+  background: hsl(var(--background));
+}
+
+.openviking-studio :where(button, a, input, textarea, select):focus-visible {
+  outline: 3px solid hsl(var(--ring) / 0.24);
+  outline-offset: 2px;
+}
+
+.openviking-studio :where(button, a) {
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.ov-kb-card:hover,
+.ov-settings-card:hover {
+  border-color: hsl(var(--primary) / 0.35);
+  box-shadow: 0 8px 24px hsl(var(--foreground) / 0.055);
 }
 
 .ov-loading,

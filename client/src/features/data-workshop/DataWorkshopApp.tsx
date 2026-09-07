@@ -22,28 +22,39 @@ function SkillRedirect({ source }: { source: 'new' | 'skill' | 'session' }) {
   return <Navigate to={{ pathname: '/skill', search: search.toString() }} replace />
 }
 
-function ProviderDetailSurface() {
-  const { id = '' } = useParams()
-  return <OpenConnectorSurface surface="providers" resourcePath={`/${encodeURIComponent(id)}`} title="提供商" />
+function ConnectionSurfaceRoute() {
+  const location = useLocation()
+  const path = location.pathname
+  if (path === '/connections/trace') return <Navigate to="/connections/runs" replace />
+  if (path === '/connections/providers/market' || path.startsWith('/connections/providers/new/')) {
+    return <Navigate to="/connections/providers" replace />
+  }
+  if (path === '/connections/access/identity' || /^\/connections\/providers\/[^/]+\/access$/.test(path)) {
+    return <Navigate to="/connections/access" replace />
+  }
+  if (path === '/connections/overview') return <OpenConnectorSurface surface="overview" title="总览" />
+  if (path === '/connections/providers') return <OpenConnectorSurface surface="providers" title="提供商" />
+  if (path === '/connections/marketplace') return <OpenConnectorSurface surface="marketplace" title="市场" />
+  if (path === '/connections/actions') return <OpenConnectorSurface surface="actions" title="操作" />
+  if (path === '/connections/runs') return <OpenConnectorSurface surface="runs" title="运行记录" />
+  if (path === '/connections/access') return <OpenConnectorSurface surface="access" title="访问权限" />
+  const provider = path.match(/^\/connections\/providers\/([^/]+)$/)?.[1]
+  if (provider) {
+    return <OpenConnectorSurface
+      surface="providers"
+      resourcePath={`/${encodeURIComponent(decodeURIComponent(provider))}`}
+      title="提供商"
+    />
+  }
+  return <Navigate to="/connections/overview" replace />
 }
 
 export function DataWorkshopApp() {
   return <WorkshopShell><Routes>
     <Route path="/" element={<Navigate to="/home" replace />} />
     <Route path="/home" element={<WorkshopHome />} />
-    <Route path="/connections/overview" element={<OpenConnectorSurface surface="overview" title="总览" />} />
-    <Route path="/connections/providers" element={<OpenConnectorSurface surface="providers" title="提供商" />} />
-    <Route path="/connections/marketplace" element={<OpenConnectorSurface surface="marketplace" title="市场" />} />
-    <Route path="/connections/actions" element={<OpenConnectorSurface surface="actions" title="操作" />} />
-    <Route path="/connections/runs" element={<OpenConnectorSurface surface="runs" title="运行记录" />} />
-    <Route path="/connections/access" element={<OpenConnectorSurface surface="access" title="访问权限" />} />
-    <Route path="/connections/trace" element={<Navigate to="/connections/runs" replace />} />
-    <Route path="/connections/providers/market" element={<Navigate to="/connections/providers" replace />} />
-    <Route path="/connections/providers/new/:providerId" element={<Navigate to="/connections/providers" replace />} />
-    <Route path="/connections/providers/:id/access" element={<Navigate to="/connections/access" replace />} />
-    <Route path="/connections/providers/:id" element={<ProviderDetailSurface />} />
-    <Route path="/connections/access/identity" element={<Navigate to="/connections/access" replace />} />
     <Route path="/connections/docs" element={<ConnectionDocs />} />
+    <Route path="/connections/*" element={<ConnectionSurfaceRoute />} />
     <Route path="/kb/connect" element={<Navigate to="/kb/new" replace />} />
     <Route path="/kb/*" element={<OpenVikingPage />} />
     <Route path="/skill" element={<SkillMount />} />

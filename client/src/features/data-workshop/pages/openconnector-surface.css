@@ -33,8 +33,35 @@
   border: 0;
 }
 
+.dw-openconnector-frame {
+  position: relative;
+}
+
 .dw-openconnector-frame iframe {
   display: block;
+}
+
+.dw-openconnector-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  background: rgb(247 249 247 / 0.92);
+  color: var(--dw-muted);
+  font-size: 13px;
+  backdrop-filter: blur(2px);
+}
+
+.dw-openconnector-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #b9c8be;
+  border-top-color: var(--dw-green);
+  border-radius: 50%;
+  animation: dw-spin 0.8s linear infinite;
 }
 
 @media (max-width: 640px) {

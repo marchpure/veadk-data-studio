@@ -19,16 +19,26 @@ const routes = [
 ]
 
 const browser = await chromium.launch()
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+const contextOptions = { viewport: { width: 1440, height: 900 } }
+if (process.env.DATA_WORKSHOP_STORAGE_STATE) {
+  contextOptions.storageState = process.env.DATA_WORKSHOP_STORAGE_STATE
+}
+const context = await browser.newContext(contextOptions)
+const page = await context.newPage()
 const consoleErrors = []
 const failedNetwork = []
 const browserRequests = []
 let currentPageUrl = ''
+let launchSessionRequests = 0
+let abortedRequests = 0
 
 page.on('console', message => {
   if (message.type() === 'error') consoleErrors.push(message.text())
 })
 page.on('request', request => {
+  if (new URL(request.url()).pathname === '/api/v1/openconnector/launch-sessions') {
+    launchSessionRequests += 1
+  }
   browserRequests.push({
     url: request.url(),
     authorization: request.headers().authorization || '',
@@ -36,6 +46,9 @@ page.on('request', request => {
 })
 page.on('requestfailed', request => {
   const failure = request.failure()?.errorText
+  if (failure === 'net::ERR_ABORTED' && new URL(request.url()).pathname.startsWith('/oc/')) {
+    abortedRequests += 1
+  }
   if (
     failure === 'net::ERR_ABORTED'
     && (
@@ -46,6 +59,27 @@ page.on('requestfailed', request => {
   ) return
   failedNetwork.push({ page: currentPageUrl, url: request.url(), reason: failure })
 })
+
+await page.goto(new URL('/connections/overview', baseUrl).toString())
+const persistentFrame = page.locator('iframe').first()
+await persistentFrame.waitFor()
+await persistentFrame.evaluate(element => { element.dataset.e2eFrameIdentity = 'persistent' })
+const launchBeforeTabs = launchSessionRequests
+const abortedBeforeTabs = abortedRequests
+for (const label of ['提供商', '操作', '运行记录', '访问权限']) {
+  await page.getByRole('navigation', { name: '连接二级导航' }).getByRole('link', { name: label, exact: true }).click()
+}
+await page.waitForURL('**/connections/access')
+await page.locator('.dw-openconnector-loading').waitFor({ state: 'hidden' })
+if (await page.locator('iframe[data-e2e-frame-identity="persistent"]').count() !== 1) {
+  throw new Error('Connection tab navigation replaced the OpenConnector iframe')
+}
+if (launchSessionRequests - launchBeforeTabs > 2) {
+  throw new Error(`Rapid navigation issued too many launch sessions: ${launchSessionRequests - launchBeforeTabs}`)
+}
+if (abortedRequests !== abortedBeforeTabs) {
+  throw new Error(`Rapid navigation aborted ${abortedRequests - abortedBeforeTabs} OpenConnector requests`)
+}
 page.on('response', response => {
   if (response.status() >= 400) failedNetwork.push({
     page: currentPageUrl,
@@ -135,5 +169,8 @@ console.log(JSON.stringify({
   screenshots: outputDir,
   console_errors: consoleErrors,
   failed_network: failedNetwork,
+  launch_session_requests: launchSessionRequests,
+  aborted_requests: abortedRequests,
 }, null, 2))
+await context.close()
 await browser.close()

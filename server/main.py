@@ -779,6 +779,19 @@ def _frontend_dist() -> Path:
     return Path(__file__).resolve().parents[1] / "client" / "dist"
 
 
+_NO_STORE_HEADERS = {"Cache-Control": "no-store, must-revalidate"}
+_IMMUTABLE_ASSET = re.compile(r"-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$")
+
+
+def _frontend_file_response(path: Path, request_path: str, *, spa_fallback: bool = False) -> FileResponse:
+    normalized = request_path.strip("/")
+    if spa_fallback or normalized in {"", "index.html", "config.js"} or path.name in {"index.html", "config.js"}:
+        return FileResponse(path, headers=_NO_STORE_HEADERS)
+    if normalized.startswith("assets/") and _IMMUTABLE_ASSET.search(path.name):
+        return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    return FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/{path:path}", include_in_schema=False)
 async def serve_frontend(path: str):
     """Serve the compiled Web shell from the same origin as the BFF."""
@@ -796,10 +809,10 @@ async def serve_frontend(path: str):
     if dist not in resolved.parents and resolved != dist:
         return JSONResponse(status_code=404, content={"detail": "Not found"})
     if resolved.is_file():
-        return FileResponse(resolved)
+        return _frontend_file_response(resolved, path)
     index = dist / "index.html"
     if index.is_file():
-        return FileResponse(index)
+        return _frontend_file_response(index, path, spa_fallback=True)
     return JSONResponse(status_code=404, content={"detail": "Frontend bundle unavailable"})
 
 

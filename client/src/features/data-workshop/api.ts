@@ -21,6 +21,12 @@ interface Envelope<T> {
   data: T
 }
 
+type OpenConnectorSurface = 'overview' | 'providers' | 'marketplace' | 'actions' | 'runs' | 'access'
+type LaunchSession = { launch_url: string; expires_at: number }
+let launchSessionQueue: Promise<void> = Promise.resolve()
+let warmupExpiresAt = 0
+let warmupRequest: Promise<void> | null = null
+
 export class WorkshopApiError extends Error {
   status: number
   code?: string
@@ -59,6 +65,23 @@ function asItems<T>(value: T[] | { items: T[] }): T[] {
   return Array.isArray(value) ? value : value.items
 }
 
+function scheduleLaunch<T>(operation: () => Promise<T>): Promise<T> {
+  const scheduled = launchSessionQueue.catch(() => undefined).then(operation)
+  launchSessionQueue = scheduled.then(() => undefined, () => undefined)
+  return scheduled
+}
+
+function createLaunchSession(
+  surface: OpenConnectorSurface,
+  search = '',
+  resourcePath = '',
+): Promise<LaunchSession> {
+  return scheduleLaunch(() => request<LaunchSession>('/openconnector/launch-sessions', {
+    method: 'POST',
+    body: JSON.stringify({ surface, search, resource_path: resourcePath }),
+  }))
+}
+
 export const workshopApi = {
   getBootstrap: () => request<WorkshopBootstrap>('/bootstrap'),
   listProviders: async () => asItems(await request<Provider[] | { items: Provider[] }>('/providers')),
@@ -94,15 +117,19 @@ export const workshopApi = {
         `/access/audit${connectionId ? `?connection_id=${encodeURIComponent(connectionId)}` : ''}`,
       ),
     ),
-  createLaunchSession: (
-    surface: 'overview' | 'providers' | 'marketplace' | 'actions' | 'runs' | 'access',
-    search = '',
-    resource_path = '',
-  ) =>
-    request<{ launch_url: string; expires_at: number }>('/openconnector/launch-sessions', {
+  createLaunchSession,
+  warmOpenConnector: () => {
+    if (warmupExpiresAt > Date.now() + 10_000) return Promise.resolve()
+    if (warmupRequest) return warmupRequest
+    warmupRequest = request<{ status: 'ready' | 'initializing' }>('/openconnector/warmup', {
       method: 'POST',
-      body: JSON.stringify({ surface, search, resource_path }),
-    }),
+    }).then(() => {
+      warmupExpiresAt = Date.now() + 60_000
+    }).finally(() => {
+      warmupRequest = null
+    })
+    return warmupRequest
+  },
   runReadOnlyTest: (operation: 'health' | 'identity' | 'tools_list' | 'list_connections') =>
     request<unknown>('/connection-docs/read-only-tests', {
       method: 'POST',

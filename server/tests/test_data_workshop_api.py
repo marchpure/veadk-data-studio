@@ -662,6 +662,61 @@ def test_launch_session_cookie_is_short_lived_http_only_secure_and_strict(
     assert response.json()["data"]["launch_url"] == "/oc/runs?service=gmail&embed=studio"
 
 
+def test_legacy_launch_session_without_body_is_admin_only_and_safely_scoped(
+    fake_client: FakeOpenConnector,
+) -> None:
+    app = FastAPI()
+    app.include_router(api.router, prefix="/api")
+    app.include_router(api.console_router)
+    admin = SimpleNamespace(
+        tenant_id="tenant-a",
+        user_id="user-admin",
+        is_admin=True,
+        has_scope=lambda _: True,
+    )
+    app.dependency_overrides[api.require_workshop_admin] = lambda: admin
+    secure_client = TestClient(app, base_url="https://testserver")
+
+    launch = secure_client.post("/api/v1/openconnector/launch-sessions")
+
+    assert launch.status_code == 200
+    assert launch.json()["data"]["launch_url"] == "/oc/?embed=studio"
+    assert launch.json()["data"]["expires_at"] > 0
+    assert "max-age=300" in launch.headers["set-cookie"].lower()
+    for path in (
+        "/oc/overview",
+        "/oc/providers",
+        "/oc/marketplace",
+        "/oc/actions",
+        "/oc/runs",
+        "/oc/access",
+    ):
+        assert secure_client.get(path).status_code == 200
+    trace = secure_client.get("/oc/traces", follow_redirects=False)
+    new_connection = secure_client.get("/oc/connections/new?provider=oracle", follow_redirects=False)
+    assert trace.status_code == 307
+    assert trace.headers["location"] == "/oc/runs"
+    assert new_connection.status_code == 307
+    assert new_connection.headers["location"] == "/oc/providers?provider=oracle"
+    assert secure_client.get("/oc/admin").status_code == 403
+    assert secure_client.get("/oc/connections/delete").status_code == 403
+    sensitive = secure_client.get("/oc/actions?token=browser-secret")
+    assert sensitive.status_code == 422
+    assert "browser-secret" not in sensitive.text
+
+
+def test_openconnector_warmup_uses_only_public_health(
+    client: TestClient,
+    fake_client: FakeOpenConnector,
+) -> None:
+    response = client.post("/api/v1/openconnector/warmup")
+
+    assert response.status_code == 202
+    assert response.json()["data"]["status"] == "ready"
+    assert fake_client.calls[-1] == ("GET", "/health", {"scope": "public"})
+    assert "set-cookie" not in response.headers
+
+
 @pytest.mark.parametrize("surface", ["overview", "providers", "marketplace", "actions", "runs", "access"])
 def test_launch_session_accepts_only_known_console_surfaces(
     client: TestClient,

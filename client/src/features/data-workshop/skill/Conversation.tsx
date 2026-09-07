@@ -99,6 +99,10 @@ export function Conversation({
     const seen = new Set<string>()
     const eventPhases = session.events.flatMap(event => {
       const phase = phaseCopy[event.type.toLocaleLowerCase()]
+      if (
+        session.status === 'ready'
+        && ['生成失败', '校验未通过', '生成已停止'].includes(phase?.label || '')
+      ) return []
       if (!phase || seen.has(phase.label)) return []
       seen.add(phase.label)
       return [phase]
