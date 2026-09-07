@@ -35,9 +35,9 @@
     "secret_scan": "passed; targeted changed-file scan; zero findings",
     "browser_smoke": {
       "status": "passed_authenticated_browser",
-      "connection": "HTTP 200 and embedded route smoke passed; authenticated browser E2E requires storage state not present in this run",
-      "knowledge": "HTTP 200; focused visual/component tests passed; authenticated browser screenshots pending",
-      "skill": "HTTP 200; focused bounded-loading tests passed; authenticated browser screenshots pending",
+      "connection": "Authenticated embedded route probe passed: policy-only DOM, forbidden admin modules absent, overflow 0, launch-session HTTP 200",
+      "knowledge": "Authenticated list/detail probe passed: overflow 0, expected detail tabs present, four card actions share 13px/20px/600/36px boxes",
+      "skill": "Authenticated probe plus three hard refreshes passed: loading absent, overflow 0, list/catalog/session/revision requests completed",
       "console_errors": 0,
       "screenshots": [
         "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/access-1440x900.png",
