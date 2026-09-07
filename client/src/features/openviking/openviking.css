@@ -25,6 +25,14 @@ body:has(.openviking-studio) {
 }
 
 .openviking-studio {
+  --ov-title-size: 28px;
+  --ov-section-size: 18px;
+  --ov-body-size: 14px;
+  --ov-control-size: 13px;
+  --ov-meta-size: 12px;
+  --ov-control-height: 36px;
+  --ov-control-radius: 7px;
+  --ov-control-padding: 12px;
   display: block;
   width: 100%;
   min-height: calc(100vh - 57px);
@@ -158,7 +166,8 @@ body:has(.openviking-studio) {
 
 .ov-kb-heading span {
   color: hsl(var(--primary));
-  font-size: 10px;
+  font-size: var(--ov-meta-size);
+  line-height: 18px;
   font-weight: 750;
   letter-spacing: 0.1em;
 }
@@ -178,7 +187,7 @@ body:has(.openviking-studio) {
 
 .ov-kb-heading h1 {
   margin-top: 6px;
-  font-size: 28px;
+  font-size: var(--ov-title-size);
   line-height: 1.2;
 }
 
@@ -188,7 +197,8 @@ body:has(.openviking-studio) {
 .ov-danger-zone p {
   margin-top: 7px;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--ov-body-size);
+  line-height: 21px;
 }
 
 .ov-primary-link,
@@ -200,7 +210,8 @@ body:has(.openviking-studio) {
   gap: 7px;
   padding: 0 14px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: var(--ov-control-size);
+  line-height: 20px;
   font-weight: 650;
   text-decoration: none;
 }
@@ -277,7 +288,8 @@ body:has(.openviking-studio) {
   align-items: center;
   gap: 7px;
   color: hsl(var(--muted-foreground));
-  font-size: 11px;
+  font-size: var(--ov-meta-size);
+  line-height: 18px;
   font-weight: 650;
 }
 
@@ -298,7 +310,8 @@ body:has(.openviking-studio) {
 
 .ov-kb-card h2 {
   margin-top: 18px;
-  font-size: 17px;
+  font-size: 18px;
+  line-height: 24px;
 }
 
 .ov-kb-card dl {
@@ -318,7 +331,8 @@ body:has(.openviking-studio) {
 .ov-kb-card dt,
 .ov-profile-metadata dt {
   color: hsl(var(--muted-foreground));
-  font-size: 11px;
+  font-size: var(--ov-meta-size);
+  line-height: 18px;
 }
 
 .ov-kb-card dd,
@@ -326,7 +340,8 @@ body:has(.openviking-studio) {
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  font-size: 11px;
+  font-size: var(--ov-meta-size);
+  line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -337,19 +352,52 @@ body:has(.openviking-studio) {
   gap: 8px;
 }
 
-.ov-kb-card-actions button,
-.ov-kb-card-actions a:not(.ov-primary-link),
+.ov-kb-card-actions .ov-kb-action,
 .ov-profile-actions button {
-  min-height: 34px;
-  padding: 0 10px;
+  box-sizing: border-box;
+  display: inline-flex;
+  min-width: 0;
+  height: var(--ov-control-height);
+  min-height: var(--ov-control-height);
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--ov-control-padding);
   border: 1px solid hsl(var(--border));
-  border-radius: 6px;
+  border-radius: var(--ov-control-radius);
   background: hsl(var(--panel));
   color: hsl(var(--foreground));
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--ov-control-size);
+  line-height: 20px;
+  font-weight: 600;
   text-decoration: none;
+}
+
+.ov-kb-card-actions {
+  align-items: stretch;
+}
+
+.ov-kb-card-actions .ov-kb-action {
+  flex: 1 1 0;
+  white-space: nowrap;
+}
+
+.ov-kb-card-actions .ov-kb-action-primary {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.ov-kb-card-actions .ov-kb-action:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.ov-kb-action-label {
+  display: inline-block;
+  min-width: 66px;
+  text-align: center;
 }
 
 .ov-kb-card-actions .is-danger {
@@ -378,13 +426,18 @@ body:has(.openviking-studio) {
 
 .ov-kb-empty h2 {
   color: hsl(var(--foreground));
-  font-size: 18px;
+  font-size: var(--ov-section-size);
+}
+
+.ov-kb-empty p {
+  font-size: var(--ov-body-size);
+  line-height: 21px;
 }
 
 .ov-inline-message {
   margin: 0 0 16px;
   color: hsl(var(--foreground));
-  font-size: 12px;
+  font-size: var(--ov-body-size);
 }
 
 .ov-detail-heading {
@@ -397,7 +450,8 @@ body:has(.openviking-studio) {
   align-items: center;
   gap: 8px;
   color: hsl(var(--muted-foreground));
-  font-size: 11px;
+  font-size: var(--ov-meta-size);
+  line-height: 18px;
 }
 
 .ov-breadcrumbs a {
@@ -411,11 +465,14 @@ body:has(.openviking-studio) {
 }
 
 .ov-detail-title h1 {
-  font-size: 23px;
+  font-size: 26px;
+  line-height: 32px;
 }
 
 .ov-detail-title p {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--ov-meta-size);
+  line-height: 18px;
 }
 
 .ov-detail-nav {
@@ -434,7 +491,8 @@ body:has(.openviking-studio) {
   align-items: center;
   border-bottom: 2px solid transparent;
   color: hsl(var(--muted-foreground));
-  font-size: 12px;
+  font-size: var(--ov-control-size);
+  line-height: 20px;
   text-decoration: none;
 }
 
@@ -456,7 +514,8 @@ body:has(.openviking-studio) {
 
 .ov-settings-card h2,
 .ov-danger-zone h2 {
-  font-size: 17px;
+  font-size: var(--ov-section-size);
+  line-height: 24px;
 }
 
 .ov-profile-metadata {
@@ -493,14 +552,16 @@ body:has(.openviking-studio) {
 }
 
 .ov-managed-credential strong {
-  font-size: 12px;
+  font-size: var(--ov-body-size);
+  line-height: 21px;
 }
 
 .ov-managed-credential span,
 .ov-security-note {
   margin: 3px 0 0;
   color: hsl(var(--muted-foreground));
-  font-size: 11px;
+  font-size: var(--ov-meta-size);
+  line-height: 18px;
 }
 
 .ov-credential-options {
@@ -514,7 +575,8 @@ body:has(.openviking-studio) {
 
 .ov-credential-options legend {
   padding: 0 5px;
-  font-size: 11px;
+  font-size: var(--ov-control-size);
+  line-height: 20px;
   font-weight: 700;
 }
 
@@ -711,7 +773,8 @@ body:has(.openviking-studio) {
 .ov-tree-state {
   padding: 7px 12px;
   color: hsl(var(--muted-foreground));
-  font-size: 11px;
+  font-size: var(--ov-meta-size);
+  line-height: 18px;
 }
 
 .ov-tree-state-error {
@@ -844,7 +907,8 @@ body:has(.openviking-studio) {
   align-items: center;
   gap: 7px;
   color: hsl(var(--success));
-  font-size: 11px;
+  font-size: var(--ov-meta-size);
+  line-height: 18px;
   font-weight: 650;
 }
 
@@ -927,7 +991,8 @@ body:has(.openviking-studio) {
   min-width: 0;
   gap: 6px;
   color: hsl(var(--foreground) / 0.78);
-  font-size: 12px;
+  font-size: var(--ov-control-size);
+  line-height: 20px;
   font-weight: 600;
 }
 
@@ -953,16 +1018,21 @@ body:has(.openviking-studio) {
 .ov-form-error {
   margin: 0;
   color: hsl(var(--destructive));
-  font-size: 12px;
+  font-size: var(--ov-body-size);
+  line-height: 21px;
 }
 
 .ov-form-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   justify-content: flex-start;
 }
 
 .ov-primary-button {
   min-width: 94px;
+  min-height: var(--ov-control-height);
   padding: 0 14px;
   border-color: hsl(var(--primary));
   background: hsl(var(--primary));
@@ -1049,6 +1119,15 @@ body:has(.openviking-studio) {
   }
 
   .ov-kb-card-actions .ov-primary-link {
+    width: auto;
+  }
+
+  .ov-kb-card-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ov-kb-card-actions .ov-kb-action {
     width: 100%;
   }
 

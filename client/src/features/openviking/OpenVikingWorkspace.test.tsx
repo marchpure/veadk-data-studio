@@ -82,6 +82,47 @@ describe('OpenVikingWorkspace', () => {
     expect(container.querySelector('.openviking-module-nav')).toBeNull()
   })
 
+  it('uses one shared action control contract for every profile card action', async () => {
+    apiMocks.listProfiles.mockResolvedValue([profile('finance', '财务知识库')])
+
+    const { container } = renderRoute('/kb')
+    const card = await screen.findByRole('heading', { name: '财务知识库' })
+      .then((heading) => heading.closest('article')!)
+    const actions = within(card).getByRole('group', { name: '财务知识库 操作' })
+    const controls = [
+      ...within(actions).getAllByRole('link'),
+      ...within(actions).getAllByRole('button'),
+    ]
+
+    expect(controls).toHaveLength(4)
+    expect(controls.every((control) => control.classList.contains('ov-kb-action'))).toBe(true)
+    expect(controls[0].classList.contains('ov-kb-action-primary')).toBe(true)
+    expect(container.querySelector('.ov-kb-action-label')).toBeTruthy()
+  })
+
+  it('keeps the connection-check control dimensions stable while checking', async () => {
+    let resolveValidation!: (value: OpenVikingProfile) => void
+    apiMocks.listProfiles.mockResolvedValue([profile('finance', '财务知识库')])
+    apiMocks.validateProfile.mockReturnValue(
+      new Promise<OpenVikingProfile>((resolve) => {
+        resolveValidation = resolve
+      }),
+    )
+
+    renderRoute('/kb')
+    const card = await screen.findByRole('heading', { name: '财务知识库' })
+      .then((heading) => heading.closest('article')!)
+    const check = within(card).getByRole('button', { name: '检查连接' })
+    expect(check.querySelector('.ov-kb-action-label')).toBeTruthy()
+
+    fireEvent.click(check)
+    expect(within(card).getByRole('button', { name: '检查中…' })).toBe(check)
+    expect(check.querySelector('.ov-kb-action-label')).toBeTruthy()
+
+    resolveValidation(profile('finance', '财务知识库'))
+    await waitFor(() => expect(within(card).getByRole('button', { name: '检查连接' })).toBeTruthy())
+  })
+
   it('restores a profile detail deep link with Chinese section navigation', async () => {
     apiMocks.listProfiles.mockResolvedValue([
       profile('finance', '财务知识库'),

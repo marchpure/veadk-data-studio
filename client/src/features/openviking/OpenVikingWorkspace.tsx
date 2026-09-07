@@ -752,24 +752,36 @@ function KnowledgeBaseList({
                 <div><dt>最近健康检查</dt><dd>{formatDate(profile.last_validated_at)}</dd></div>
                 <div><dt>最近更新</dt><dd>{formatDate(profile.updated_at)}</dd></div>
               </dl>
-              <div className="ov-kb-card-actions">
+              <div
+                aria-label={`${profile.display_name} 操作`}
+                className="ov-kb-card-actions"
+                role="group"
+              >
                 <Link
                   aria-label={`进入 ${profile.display_name}`}
-                  className="ov-primary-link"
+                  className="ov-primary-link ov-kb-action ov-kb-action-primary"
                   to={`/kb/${encodeURIComponent(profile.profile_id)}/resources`}
                 >
                   进入详情
                 </Link>
                 <button
+                  className="ov-kb-action"
                   disabled={validatingId === profile.profile_id}
                   onClick={() => void validate(profile)}
                   type="button"
                 >
-                  {validatingId === profile.profile_id ? '检查中…' : '检查连接'}
+                  <span className="ov-kb-action-label">
+                    {validatingId === profile.profile_id ? '检查中…' : '检查连接'}
+                  </span>
                 </button>
-                <Link to={`/kb/${encodeURIComponent(profile.profile_id)}/settings`}>编辑</Link>
+                <Link
+                  className="ov-kb-action"
+                  to={`/kb/${encodeURIComponent(profile.profile_id)}/settings`}
+                >
+                  编辑
+                </Link>
                 <button
-                  className="is-danger"
+                  className="ov-kb-action is-danger"
                   onClick={() => onRevoke(profile)}
                   type="button"
                 >
