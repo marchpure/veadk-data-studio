@@ -63,6 +63,7 @@ type OpenVikingPage =
   | 'tasks'
   | 'watches'
   | 'settings'
+  | 'access'
 
 const queryClient = new QueryClient()
 const detailPages = new Set<OpenVikingPage>([
@@ -71,6 +72,7 @@ const detailPages = new Set<OpenVikingPage>([
   'tasks',
   'watches',
   'settings',
+  'access',
 ])
 
 export type OpenVikingCredentialPolicy = 'managed' | 'byok' | 'hybrid'
@@ -460,6 +462,50 @@ function ProfileSettings({
   )
 }
 
+function AccessGrantsPage({ profileId }: { profileId: string }) {
+  const [grants, setGrants] = useState<import('./api').OpenVikingAccessGrant[]>([])
+  const [error, setError] = useState('')
+  const [subject, setSubject] = useState('')
+  const [subjectType, setSubjectType] = useState<'user' | 'group'>('user')
+  const [role, setRole] = useState<'Reader' | 'Contributor' | 'Manager' | 'Custom'>('Reader')
+  const [effect, setEffect] = useState<'allow' | 'deny'>('allow')
+  const load = useCallback(async () => {
+    try { setGrants(await openVikingApi.listAccessGrants(profileId)) } catch (value) { setError(value instanceof Error ? value.message : '权限加载失败') }
+  }, [profileId])
+  useEffect(() => { void load() }, [load])
+  async function addGrant(event: FormEvent) {
+    event.preventDefault()
+    try {
+      await openVikingApi.createAccessGrant(profileId, {
+        subject_type: subjectType, subject, role, effect,
+        actions: role === 'Custom' ? ['read'] : [],
+        conditions: {}, reason: 'Data Studio knowledge access',
+      })
+      setSubject('')
+      await load()
+    } catch (value) { setError(value instanceof Error ? value.message : '权限保存失败') }
+  }
+  return (
+    <div className="ov-page-scroll"><div className="ov-page-content">
+      <div className="ov-settings-card">
+        <h2>访问权限</h2>
+        <p>知识库默认拒绝；显式 Deny 优先于 Allow。UserPool 用户和用户组由服务端验证。</p>
+        {error ? <div className="error" role="alert">{error}</div> : null}
+        <form className="ov-form-grid" onSubmit={(event) => void addGrant(event)}>
+          <label>主体类型<select value={subjectType} onChange={(event) => setSubjectType(event.target.value as 'user' | 'group')}><option value="user">UserPool 用户</option><option value="group">UserPool 用户组</option></select></label>
+          <label>主体 ID<input required value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="sub 或 group UID" /></label>
+          <label>角色<select value={role} onChange={(event) => setRole(event.target.value as typeof role)}><option>Reader</option><option>Contributor</option><option>Manager</option><option>Custom</option></select></label>
+          <label>效果<select value={effect} onChange={(event) => setEffect(event.target.value as typeof effect)}><option value="allow">Allow</option><option value="deny">Deny</option></select></label>
+          <button className="ov-primary-button" type="submit">保存授权</button>
+        </form>
+        <div className="ov-profile-metadata">
+          {grants.map((grant) => <div key={grant.grant_id}><dt>{grant.subject_type === 'group' ? 'Group' : 'User'} · {grant.subject}</dt><dd>{grant.effect} · {grant.role} · {grant.actions.join(', ')}</dd><button type="button" onClick={() => void openVikingApi.revokeAccessGrant(profileId, grant.grant_id).then(load)}>撤销</button></div>)}
+        </div>
+      </div>
+    </div></div>
+  )
+}
+
 function ResourceWorkspace({ rootUri, profileId }: { rootUri: string; profileId: string }) {
   const navigate = useNavigate()
   const normalizedRoot = normalizeDirUri(rootUri)
@@ -758,6 +804,7 @@ function KnowledgeBaseHeader({
     ['tasks', '任务'],
     ['watches', '定时同步'],
     ['settings', '设置'],
+    ['access', '访问权限'],
   ]
   const base = `/kb/${encodeURIComponent(profile.profile_id)}`
   return (
@@ -926,6 +973,8 @@ export function OpenVikingWorkspace({
                           打开连接设置
                         </Link>
                       </div>
+                    ) : route.page === 'access' ? (
+                      <AccessGrantsPage profileId={routeProfile.profile_id} />
                     ) : route.page === 'resources' && activeProfile ? (
                       <ResourceWorkspace rootUri="viking://workspace/" profileId={activeProfile.profile_id} />
                     ) : route.page === 'retrieval' ? (

@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from server.services.openviking_access import OpenVikingAccessRepository
 from server.services.runtime_secrets import RuntimeSecretError, get_runtime_secret
 from server.utils.database_config import sync_connect_args
 
@@ -40,10 +41,11 @@ OpenVikingCredentialMode = Literal["managed", "byok"]
 def openviking_credential_policy() -> OpenVikingCredentialPolicy:
     configured = os.getenv("OPENVIKING_CREDENTIAL_POLICY", "").strip().casefold()
     if not configured:
-        managed_runtime = (
-            os.getenv("DWV1_EXTERNAL_OIDC_ENABLED", "").strip().casefold() in {"1", "true", "yes"}
-            or bool(os.getenv("OPENVIKING_MANAGED_BASE_URL", "").strip())
-        )
+        managed_runtime = os.getenv("DWV1_EXTERNAL_OIDC_ENABLED", "").strip().casefold() in {
+            "1",
+            "true",
+            "yes",
+        } or bool(os.getenv("OPENVIKING_MANAGED_BASE_URL", "").strip())
         return "managed" if managed_runtime else "byok"
     if configured not in OPENVIKING_CREDENTIAL_POLICIES:
         raise OpenVikingError(
@@ -64,9 +66,8 @@ def legacy_openviking_credential_mode() -> OpenVikingCredentialMode:
         return "byok"
     if configured in {"managed", "hybrid"}:
         return "managed"
-    managed_runtime = (
-        os.getenv("DWV1_EXTERNAL_OIDC_ENABLED", "").strip().casefold() in {"1", "true", "yes"}
-        or bool(os.getenv("OPENVIKING_MANAGED_BASE_URL", "").strip())
+    managed_runtime = os.getenv("DWV1_EXTERNAL_OIDC_ENABLED", "").strip().casefold() in {"1", "true", "yes"} or bool(
+        os.getenv("OPENVIKING_MANAGED_BASE_URL", "").strip()
     )
     return "managed" if managed_runtime else "byok"
 
@@ -88,11 +89,14 @@ class OpenVikingConfig:
     @classmethod
     def from_env(cls) -> OpenVikingConfig:
         try:
-            raw = get_runtime_secret(
-                "openviking_profile_key",
-                env_name="OPENVIKING_PROFILE_ENCRYPTION_KEY",
-                required=False,
-            ) or ""
+            raw = (
+                get_runtime_secret(
+                    "openviking_profile_key",
+                    env_name="OPENVIKING_PROFILE_ENCRYPTION_KEY",
+                    required=False,
+                )
+                or ""
+            )
         except RuntimeSecretError:
             raw = ""
         if not raw:
@@ -145,6 +149,7 @@ class OpenVikingProfileRepository:
             self._cursor_factory = RealDictCursor
             self._lock = threading.RLock()
             self._init_postgres()
+            self.access = OpenVikingAccessRepository(self._db, self._postgres, self._cursor_factory)
             return
         Path(database).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(database), check_same_thread=False)
@@ -204,6 +209,7 @@ class OpenVikingProfileRepository:
             WHERE uri_digest <> ''"""
         )
         self._db.commit()
+        self.access = OpenVikingAccessRepository(self._db, self._postgres, getattr(self, "_cursor_factory", None))
 
     def _init_postgres(self) -> None:
         with self._db.cursor(cursor_factory=self._cursor_factory) as cursor:
@@ -282,6 +288,26 @@ class OpenVikingProfileRepository:
             FROM openviking_profiles
             WHERE profile_id=? AND tenant_id=? AND workspace_id=? AND principal_id=?""",
             (profile_id, tenant_id, workspace_id, principal_id),
+        ).fetchone()
+        return OpenVikingProfile(**dict(row)) if row else None
+
+    def get_any(self, profile_id: str, tenant_id: str, workspace_id: str) -> OpenVikingProfile | None:
+        """Resolve a profile within tenant scope before grant authorization."""
+        if self._postgres:
+            rows = self._rows(
+                """SELECT profile_id,tenant_id,workspace_id,principal_id,display_name,
+                encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at,
+                credential_mode,last_validated_at FROM openviking_profiles
+                WHERE profile_id=%s AND tenant_id=%s AND workspace_id=%s""",
+                (profile_id, tenant_id, workspace_id),
+            )
+            return OpenVikingProfile(**rows[0]) if rows else None
+        row = self._db.execute(
+            """SELECT profile_id,tenant_id,workspace_id,principal_id,display_name,
+            encrypted_base_url,encrypted_api_key,workspace_uri,status,created_at,updated_at,
+            credential_mode,last_validated_at FROM openviking_profiles
+            WHERE profile_id=? AND tenant_id=? AND workspace_id=?""",
+            (profile_id, tenant_id, workspace_id),
         ).fetchone()
         return OpenVikingProfile(**dict(row)) if row else None
 
@@ -1006,9 +1032,7 @@ class OpenVikingService:
             profile.principal_id,
             values.get("display_name", profile.display_name),
             self._crypt(base_url.rstrip("/"), f"url:{profile.profile_id}") if base_url else profile.encrypted_base_url,
-            self._crypt(api_key, f"key:{profile.profile_id}")
-            if api_key
-            else profile.encrypted_api_key,
+            self._crypt(api_key, f"key:{profile.profile_id}") if api_key else profile.encrypted_api_key,
             values.get("workspace_uri", profile.workspace_uri),
             "pending",
             profile.created_at,
