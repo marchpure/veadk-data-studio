@@ -1,13 +1,15 @@
 import { BookOpen, ChevronDown, Database, Menu, MessageSquare, Plus, Sparkles } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ArtifactPanel } from '../skill/ArtifactPanel'
 import { skillApi } from '../skill/api'
 import { Conversation } from '../skill/Conversation'
 import { ContextPicker } from '../skill/ContextPicker'
 import { NewSkill } from '../skill/NewSkill'
 import { SkillRail } from '../skill/SkillRail'
+import { SkillInspector } from '../skill/SkillInspector'
+import { SkillProgress } from '../skill/SkillProgress'
 import '../skill/skill-ux.css'
+import '../skill/workbench.css'
 import type {
   SkillCatalog,
   SkillContextRef,
@@ -340,13 +342,20 @@ export function SkillMount() {
   }
 
   const artifact = session?.artifact || null
+  const currentStep = isNew
+    ? 1
+    : session?.status === 'ready' || artifact
+      ? 4
+      : session?.status === 'running' || session?.status === 'validation_failed' || session?.status === 'error' || session?.status === 'retryable'
+        ? 3
+        : 2
 
   return (
-    <div className={`dw-skill-workbench ${artifact ? 'has-artifact' : ''}`} data-workshop-skill-mount>
+    <div className={`dw-skill-workbench has-inspector ${artifact ? 'has-artifact' : ''}`} data-workshop-skill-mount>
       <div className="dw-skill-mobile-tabs" aria-label="Skill 移动视图">
         <button className={mobilePane === 'skills' ? 'active' : ''} onClick={() => setMobilePane('skills')}><Menu size={14} />Skill</button>
         <button className={mobilePane === 'conversation' ? 'active' : ''} onClick={() => setMobilePane('conversation')}><MessageSquare size={14} />对话</button>
-        {artifact && <button className={mobilePane === 'artifact' ? 'active' : ''} onClick={() => setMobilePane('artifact')}><Sparkles size={14} />Artifact</button>}
+        {selectedSkill && session && <button className={mobilePane === 'artifact' ? 'active' : ''} onClick={() => setMobilePane('artifact')}><Sparkles size={14} />信息</button>}
       </div>
       <div className={`dw-skill-mobile-pane pane-${mobilePane}`}>
         <SkillRail
@@ -361,11 +370,26 @@ export function SkillMount() {
         <main className="dw-skill-center">
           {(error || importError) && <div className="dw-inline-error dw-skill-global-error">{error || importError}<button onClick={() => { setError(''); setImportError('') }}>关闭</button></div>}
           {isNew ? (
-            <NewSkill catalog={catalog} initialKnowledge={importedKnowledge} creating={creating} onCreate={createSkill} />
+            <>
+              <header className="dw-skill-create-heading">
+                <div>
+                  <span className="dw-eyebrow">Skill 工作台</span>
+                  <h1>创建一个新的 Skill</h1>
+                  <p>从目标开始，选择能力，生成后即可复用。</p>
+                </div>
+                <SkillProgress current={1} />
+              </header>
+              <NewSkill catalog={catalog} initialKnowledge={importedKnowledge} creating={creating} onCreate={createSkill} />
+            </>
           ) : selectedSkill && session ? (
             <>
               <header className="dw-skill-header">
-                <div><span className="dw-eyebrow">Skill 工作台</span><h1>{selectedSkill.title}</h1>{selectedSkill.description && <p>{selectedSkill.description}</p>}</div>
+                <div>
+                  <span className="dw-eyebrow">Skill 工作台</span>
+                  <h1>{selectedSkill.title}</h1>
+                  {selectedSkill.description && <p>{selectedSkill.description}</p>}
+                  <SkillProgress current={currentStep as 1 | 2 | 3 | 4} compact />
+                </div>
                 <div className="dw-session-control">
                   <label><span>会话</span><ChevronDown size={13} />
                     <select
@@ -424,7 +448,9 @@ export function SkillMount() {
             </div>
           )}
         </main>
-        {artifact && selectedSkill && <ArtifactPanel skillId={selectedSkill.id} artifact={artifact} revisions={revisions} />}
+        {selectedSkill && session && (
+          <SkillInspector skillId={selectedSkill.id} session={session} revisions={revisions} />
+        )}
       </div>
     </div>
   )

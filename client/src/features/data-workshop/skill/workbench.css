@@ -1,0 +1,437 @@
+/* Skill workbench-only layout layer. Kept separate from the shared workshop shell. */
+.dw-skill-workbench {
+  --skill-green: #1f6b4f;
+  --skill-ink: #18211c;
+  --skill-muted: #66736a;
+  --skill-line: #dce3de;
+  background: #f4f7f4;
+}
+
+.dw-skill-mobile-pane {
+  grid-template-columns: 248px minmax(480px, 1fr);
+}
+
+.dw-skill-workbench.has-artifact .dw-skill-mobile-pane {
+  grid-template-columns: 248px minmax(430px, 1fr) minmax(320px, 390px);
+}
+
+.dw-skill-workbench.has-inspector:not(.has-artifact) .dw-skill-mobile-pane {
+  grid-template-columns: 248px minmax(430px, 1fr) minmax(280px, 330px);
+}
+
+.dw-skill-rail {
+  background: #fbfcfb;
+}
+
+.dw-skill-rail > header {
+  padding: 20px 16px 14px;
+}
+
+.dw-skill-rail > header strong {
+  font-size: 15px;
+}
+
+.dw-skill-new {
+  height: 36px;
+  border-radius: 4px;
+}
+
+.dw-skill-center {
+  background: #f7f9f7;
+}
+
+.dw-skill-header,
+.dw-skill-create-heading {
+  min-height: 112px;
+  padding: 22px 30px 18px;
+}
+
+.dw-skill-header h1,
+.dw-skill-create-heading h1 {
+  font-size: 21px;
+  letter-spacing: -.01em;
+}
+
+.dw-skill-header .dw-eyebrow,
+.dw-skill-create-heading .dw-eyebrow {
+  font-size: 10px;
+}
+
+.dw-skill-header > div:first-child {
+  min-width: 0;
+}
+
+.dw-skill-header .dw-skill-progress {
+  margin-top: 13px;
+}
+
+.dw-skill-create-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid var(--skill-line);
+  background: #fff;
+}
+
+.dw-skill-create-heading p {
+  margin: 3px 0 0;
+  color: var(--skill-muted);
+  font-size: 11px;
+}
+
+.dw-skill-progress {
+  display: flex;
+  align-items: flex-start;
+  width: min(560px, 100%);
+  padding-top: 2px;
+}
+
+.dw-skill-progress-step {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  color: #9aa79f;
+}
+
+.dw-skill-progress-step i {
+  height: 1px;
+  flex: 1;
+  margin: 10px 7px 0 1px;
+  background: var(--skill-line);
+}
+
+.dw-skill-progress-step.done i {
+  background: #8eb29c;
+}
+
+.dw-skill-progress-marker {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 21px;
+  height: 21px;
+  border: 1px solid #cbd5ce;
+  border-radius: 50%;
+  background: #fff;
+  color: #9aa79f;
+}
+
+.dw-skill-progress-step.active,
+.dw-skill-progress-step.done {
+  color: var(--skill-green);
+}
+
+.dw-skill-progress-step.active .dw-skill-progress-marker {
+  border-color: var(--skill-green);
+  background: #e4f0e8;
+  color: var(--skill-green);
+}
+
+.dw-skill-progress-step.done .dw-skill-progress-marker {
+  border-color: var(--skill-green);
+  background: var(--skill-green);
+  color: #fff;
+}
+
+.dw-skill-progress-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.dw-skill-progress-copy strong {
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.dw-skill-progress-copy small {
+  color: var(--skill-muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.dw-skill-progress.compact {
+  max-width: 450px;
+  padding: 0;
+}
+
+.dw-skill-progress.compact .dw-skill-progress-copy small {
+  display: none;
+}
+
+.dw-skill-progress.compact .dw-skill-progress-step {
+  align-items: center;
+}
+
+.dw-skill-progress.compact .dw-skill-progress-step i {
+  margin-top: 0;
+}
+
+.dw-how-to-use {
+  margin: 0 24px 20px;
+  padding: 17px 18px;
+  border: 1px solid var(--skill-line);
+  background: #fff;
+}
+
+.dw-how-to-use .dw-inspector-heading h2,
+.dw-inspector-heading h2 {
+  margin: 3px 0 0;
+  font-size: 14px;
+}
+
+.dw-inspector-heading .dw-eyebrow {
+  font-size: 9px;
+}
+
+.dw-how-to-use-intro {
+  margin: 7px 0 14px;
+  color: var(--skill-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.dw-how-to-use ol {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dw-how-to-use li {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dw-how-to-use li > span {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  border-radius: 5px;
+  background: #e7f1ea;
+  color: var(--skill-green);
+}
+
+.dw-how-to-use li strong,
+.dw-how-to-use li small {
+  display: block;
+}
+
+.dw-how-to-use li strong {
+  font-size: 10px;
+}
+
+.dw-how-to-use li small {
+  margin-top: 3px;
+  color: var(--skill-muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.dw-how-to-use a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 13px;
+  color: var(--skill-green);
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.dw-skill-inspector {
+  min-width: 0;
+  overflow: auto;
+  background: #fff;
+}
+
+.dw-skill-inspector > .dw-artifact-panel {
+  min-height: auto;
+  max-height: none;
+  border-left: 0;
+}
+
+.dw-skill-inspector > .dw-how-to-use {
+  margin: 0;
+  border-width: 1px 0 0;
+}
+
+.dw-skill-inspector-empty {
+  padding: 23px 18px;
+}
+
+.dw-inspector-status {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0 20px;
+  border-bottom: 1px solid var(--skill-line);
+}
+
+.dw-inspector-status-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+}
+
+.dw-inspector-status-icon.pending {
+  background: #e7f1ea;
+  color: var(--skill-green);
+}
+
+.dw-inspector-status-icon.failed {
+  background: #fcede9;
+  color: #a33a34;
+}
+
+.dw-inspector-status h2 {
+  margin: 3px 0 4px;
+  font-size: 15px;
+}
+
+.dw-inspector-status p {
+  margin: 0;
+  color: var(--skill-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.dw-skill-inspector-empty .dw-how-to-use {
+  margin: 18px 0 0;
+  padding: 0 0 18px;
+  border-width: 0 0 1px;
+}
+
+.dw-skill-inspector-empty .dw-how-to-use ol {
+  grid-template-columns: 1fr;
+}
+
+.dw-inspector-history {
+  padding-top: 18px;
+}
+
+.dw-history-empty,
+.dw-history-failure {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 10px;
+  color: var(--skill-muted);
+  background: #f7f9f7;
+  font-size: 10px;
+}
+
+.dw-history-failure {
+  color: #923b34;
+  background: #fcede9;
+}
+
+.dw-ready-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 16px;
+  color: var(--skill-green);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+@media (max-width: 1100px) {
+  .dw-skill-mobile-pane,
+  .dw-skill-workbench.has-artifact .dw-skill-mobile-pane,
+  .dw-skill-workbench.has-inspector:not(.has-artifact) .dw-skill-mobile-pane {
+    grid-template-columns: 220px minmax(390px, 1fr) 300px;
+  }
+
+  .dw-skill-mobile-pane:not(:has(.dw-skill-inspector)),
+  .dw-skill-workbench:not(.has-inspector) .dw-skill-mobile-pane {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .dw-skill-inspector {
+    display: none;
+    min-height: calc(100vh - 94px);
+  }
+
+  .pane-artifact .dw-skill-inspector {
+    display: block;
+  }
+
+  .pane-artifact .dw-skill-inspector .dw-artifact-panel {
+    display: block;
+  }
+}
+
+@media (max-width: 900px) {
+  .dw-skill-create-heading {
+    display: block;
+  }
+
+  .dw-skill-create-heading .dw-skill-progress {
+    margin-top: 18px;
+  }
+}
+
+@media (max-width: 520px) {
+  .dw-skill-header,
+  .dw-skill-create-heading {
+    padding: 18px 16px 15px;
+  }
+
+  .dw-skill-header .dw-skill-progress {
+    overflow: hidden;
+  }
+
+  .dw-skill-progress-copy strong {
+    font-size: 9px;
+  }
+
+  .dw-skill-progress-step i {
+    margin-right: 3px;
+  }
+
+  .dw-how-to-use {
+    margin: 0 14px 14px;
+    padding: 14px;
+  }
+
+  .dw-how-to-use ol {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .dw-how-to-use li small {
+    font-size: 10px;
+  }
+
+  .dw-skill-inspector-empty {
+    padding: 18px 14px;
+  }
+}
+
+@media (max-width: 390px) {
+  .dw-skill-progress-copy strong {
+    max-width: 50px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dw-skill-header h1,
+  .dw-skill-create-heading h1 {
+    font-size: 19px;
+  }
+}
