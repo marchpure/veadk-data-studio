@@ -1,0 +1,79 @@
+{
+  "checkpoint": "DWV1_POSTRC_EXPERIENCE_CHECKPOINT",
+  "status": "DWV1_POSTRC_DEMO_READY_CHECKPOINT",
+  "branch": "integration/dwv1-postrc-experience-v1",
+  "base_sha": "964c85911fd5e0924a6ff50b408816f02dc764a3",
+  "release_sha": "f95044aa66463d2470c64842e519bd5225d8e342",
+  "changes": {
+    "connections": [
+      "Legacy bodyless launch sessions remain admin-only, expire after 300 seconds, and are limited to approved console surfaces.",
+      "SPA navigation keeps one iframe, serializes surface-bound session updates, ignores stale navigation, and shows a loading overlay.",
+      "OpenConnector public health is warmed in advance without issuing or replacing a browser launch cookie."
+    ],
+    "knowledge": [
+      "OpenViking receives a scoped light neutral-and-green semantic palette instead of inheriting the legacy dark orange theme.",
+      "Focus, hover, status, panel, input, popover, and dialog colors use the same scoped tokens."
+    ],
+    "skill": [
+      "A ready session suppresses historical retry/error phases in the current progress summary.",
+      "Historical events remain available in the collapsed technical details."
+    ]
+  },
+  "verification": {
+    "backend_full": "964 passed, 2 skipped",
+    "openviking_frontend": "140 passed",
+    "data_workshop_frontend": "28 passed",
+    "focused_backend": "26 passed",
+    "typecheck": "passed",
+    "lint": "passed with 358 pre-existing warnings",
+    "ruff": "passed",
+    "production_build": "passed with existing bundle warnings",
+    "git_diff_check": "passed",
+    "secret_scan": "passed; 15 changed files; zero findings",
+    "browser_smoke": {
+      "status": "passed",
+      "connection": "single iframe retained; rapid navigation converged; internal card navigation passed; loading overlay cleared",
+      "knowledge": "list, detail, and retrieval visible; light green palette rendered; no horizontal overflow",
+      "skill": "ready displayed as 生成完成; rev-1 visible; preview, download, and refresh passed",
+      "console_errors": 0
+    }
+  },
+  "cloud": {
+    "openconnector_revision": 15,
+    "openconnector_traffic_percent": 100,
+    "data_studio_revision": 44,
+    "data_studio_traffic_percent": 100,
+    "data_studio_release_record_id": "qtb1yjjl7dg6zguv",
+    "skill_agent_revision": 14,
+    "skill_agent_traffic_percent": 100,
+    "skill_agent_release_record_id": "q05owf0jxanowyal",
+    "mcp_runtime_revision": 11,
+    "health_http_status": {
+      "openconnector": 200,
+      "data_studio": 200,
+      "skill_agent": 200
+    },
+    "cache_control": {
+      "index_html": "no-store, must-revalidate",
+      "config_js": "no-store, must-revalidate"
+    }
+  },
+  "skill_recovery": {
+    "root_cause": "The existing VeFaaS instance retained a failed IAM credential state after its referenced role had been deleted.",
+    "iam_role_restored": true,
+    "policies_restored": 10,
+    "forward_revision": 14,
+    "skill_id": "a55319c2-f413-4a94-9243-cfe00b868c6a",
+    "session_id": "b9d22a9e-569b-4652-9480-c0c9f6a2d0d9",
+    "session_status": "ready",
+    "artifact_revision": "rev-1",
+    "artifact_size_bytes": 5462,
+    "validation_checks_passed": 7,
+    "preview_http_status": 200,
+    "download_http_status": 200
+  },
+  "secrets": {
+    "contains_credentials": false,
+    "contains_signed_urls": false
+  }
+}
