@@ -3,7 +3,7 @@
   "status": "DWV1_I5C_UI_POLISH_V3_READY_FOR_MANUAL_ACCEPTANCE",
   "branch": "integration/dwv1-i5c-ui-polish-v3",
   "base_sha": "6041b3cdc9fdfd2a458dfb9d6128b5ecfeb7669f",
-  "release_sha": "ec71b7f5da45bdc58c962822263620248bc9048b",
+  "release_sha": "45c9c0089d825e367d5d8a3d686a4d9dfa31f0f0",
   "changes": {
     "connections": [
       "Legacy bodyless launch sessions remain admin-only, expire after 300 seconds, and are limited to approved console surfaces.",
