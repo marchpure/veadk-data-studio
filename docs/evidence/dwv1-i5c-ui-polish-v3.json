@@ -31,11 +31,15 @@
     }
   },
   "browser_evidence": {
-    "status": "pending_authenticated_context",
-    "reason": "No reusable authenticated storage state or remote browser debugging endpoint was available in this run.",
-    "screenshots": [],
-    "console_errors": "not collected",
-    "network_evidence": "not collected"
+    "status": "screenshots_collected_authenticated_tab",
+    "screenshots": [
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/access.png",
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/kb.png",
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/skill.png"
+    ],
+    "viewport": "system Chrome screenshot (2160x3840 device pixels)",
+    "console_errors": "not programmatically collected; Chrome JS automation disabled",
+    "network_evidence": "HTTP smoke passed; programmatic network capture pending"
   },
   "secret_free": true
 }

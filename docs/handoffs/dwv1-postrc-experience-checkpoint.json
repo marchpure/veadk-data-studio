@@ -8,18 +8,18 @@
     "connections": [
       "Legacy bodyless launch sessions remain admin-only, expire after 300 seconds, and are limited to approved console surfaces.",
       "SPA navigation keeps one iframe, serializes surface-bound session updates, ignores stale navigation, and shows a loading overlay.",
-      "OpenConnector public health is warmed in advance without issuing or replacing a browser launch cookie."
-      ,"Embedded Access in policy-only mode removes Identity Provider, AccessGrant, Preview, Audit, Token, and UUID-bearing admin modules from the DOM; standalone Access remains full."
+      "OpenConnector public health is warmed in advance without issuing or replacing a browser launch cookie.",
+      "Embedded Access in policy-only mode removes Identity Provider, AccessGrant, Preview, Audit, Token, and UUID-bearing admin modules from the DOM; standalone Access remains full."
     ],
     "knowledge": [
       "OpenViking receives a scoped light neutral-and-green semantic palette instead of inheriting the legacy dark orange theme.",
-      "Focus, hover, status, panel, input, popover, and dialog colors use the same scoped tokens."
-      ,"Knowledge card actions use a shared 13px/20px/600, 36px control box with stable checking label width and responsive wrapping."
+      "Focus, hover, status, panel, input, popover, and dialog colors use the same scoped tokens.",
+      "Knowledge card actions use a shared 13px/20px/600, 36px control box with stable checking label width and responsive wrapping."
     ],
     "skill": [
       "A ready session suppresses historical retry/error phases in the current progress summary.",
-      "Historical events remain available in the collapsed technical details."
-      ,"Skill loading is bounded with independent list/catalog requests, 12s timeout and AbortController cancellation, partial/error/empty/timeout states, retry/new-session actions, and >=12px core typography."
+      "Historical events remain available in the collapsed technical details.",
+      "Skill loading is bounded with independent list/catalog requests, 12s timeout and AbortController cancellation, partial/error/empty/timeout states, retry/new-session actions, and >=12px core typography."
     ]
   },
   "verification": {
@@ -34,11 +34,17 @@
     "git_diff_check": "passed",
     "secret_scan": "passed; targeted changed-file scan; zero findings",
     "browser_smoke": {
-      "status": "partially_verified",
+      "status": "screenshots_collected_auth_context",
       "connection": "HTTP 200 and embedded route smoke passed; authenticated browser E2E requires storage state not present in this run",
       "knowledge": "HTTP 200; focused visual/component tests passed; authenticated browser screenshots pending",
       "skill": "HTTP 200; focused bounded-loading tests passed; authenticated browser screenshots pending",
-      "console_errors": "not collected without authenticated browser context"
+      "console_errors": "not programmatically collected; Chrome JS automation disabled",
+      "screenshots": [
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/access.png",
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/kb.png",
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/skill.png"
+      ],
+      "network_evidence": "HTTP smoke passed; browser network capture pending"
     }
   },
   "cloud": {
@@ -58,8 +64,8 @@
     },
     "cache_control": {
       "index_html": "no-store, must-revalidate",
-    "config_js": "no-store, must-revalidate",
-    "openviking_credential_policy": "hybrid"
+      "config_js": "no-store, must-revalidate",
+      "openviking_credential_policy": "hybrid"
     }
   },
   "skill_recovery": {
