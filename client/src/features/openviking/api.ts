@@ -77,6 +77,22 @@ export type CreateOpenVikingProfile = {
   workspace_uri: string
 }
 
+export type OpenVikingAccessGrant = {
+  grant_id: string
+  profile_id: string
+  subject_type: 'user' | 'group'
+  subject: string
+  role: 'Reader' | 'Contributor' | 'Manager' | 'Custom'
+  effect: 'allow' | 'deny'
+  actions: string[]
+  conditions: Record<string, unknown>
+  reason: string
+  policy_version: string
+  created_at: number
+  updated_at: number
+  revoked_at?: number | null
+}
+
 export const openVikingApi = {
   listProfiles: (signal?: AbortSignal) =>
     request<OpenVikingProfile[]>('/profiles', { signal }),
@@ -152,4 +168,20 @@ export const openVikingApi = {
       method: 'POST',
       body: JSON.stringify({ resource_ref: resourceRef }),
     }),
+  listAccessGrants: (profileId: string) =>
+    request<OpenVikingAccessGrant[]>(`/profiles/${encodeURIComponent(profileId)}/access-grants`),
+  createAccessGrant: (
+    profileId: string,
+    input: Omit<OpenVikingAccessGrant, 'grant_id' | 'profile_id' | 'created_at' | 'updated_at' | 'revoked_at'>,
+  ) =>
+    request<OpenVikingAccessGrant>(`/profiles/${encodeURIComponent(profileId)}/access-grants`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  revokeAccessGrant: (profileId: string, grantId: string) =>
+    request<void>(`/profiles/${encodeURIComponent(profileId)}/access-grants/${encodeURIComponent(grantId)}`, {
+      method: 'DELETE',
+    }),
+  listAccessAudit: (profileId: string) =>
+    request<Array<Record<string, unknown>>>(`/profiles/${encodeURIComponent(profileId)}/access-audit`),
 }

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import time
+import uuid
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -14,6 +16,12 @@ from server.auth.scopes import Scope
 from server.db.session import get_async_session
 from server.schemas.standard_response import success_response
 from server.services.external_oidc import enabled as external_oidc_enabled
+from server.services.openviking_access import (
+    ROLE_ACTIONS,
+    OpenVikingAccessGrant,
+    authorize,
+    grant_view,
+)
 from server.services.openviking_service import (
     OpenVikingConfig,
     OpenVikingError,
@@ -100,20 +108,38 @@ class ConnectionResourceRequest(BaseModel):
     resource_id: str = Field(min_length=1, max_length=128)
 
 
+class AccessGrantRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subject_type: Literal["user", "group"]
+    subject: str = Field(min_length=1, max_length=256)
+    role: Literal["Reader", "Contributor", "Manager", "Custom"] = "Reader"
+    effect: Literal["allow", "deny"] = "allow"
+    actions: list[str] = Field(default_factory=list, max_length=32)
+    conditions: dict[str, Any] = Field(default_factory=dict)
+    reason: str = Field(default="", max_length=500)
+
+
 def _scope(auth: AuthContext) -> tuple[str, str, str]:
     return str(auth.tenant_id), f"tenant:{auth.tenant_id}", str(auth.user_id)
 
 
 def _get_profile(service: OpenVikingService, profile_id: str, auth: AuthContext) -> OpenVikingProfile:
     tenant_id, workspace_id, principal_id = _scope(auth)
-    profile = service.repository.get(profile_id, tenant_id, workspace_id, principal_id)
+    profile = service.repository.get_any(profile_id, tenant_id, workspace_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="OpenViking profile not found")
     return profile
 
 
-def _ready(service: OpenVikingService, profile_id: str, auth: AuthContext) -> OpenVikingProfile:
+def _ready(
+    service: OpenVikingService,
+    profile_id: str,
+    auth: AuthContext,
+    action: str = "read",
+) -> OpenVikingProfile:
     profile = _get_profile(service, profile_id, auth)
+    if not authorize(service.repository.access, profile=profile, auth=auth, action=action):
+        raise HTTPException(status_code=403, detail="Knowledge profile access denied")
     if profile.status != "ready":
         raise HTTPException(status_code=409, detail="OpenViking profile must be validated before use")
     return profile
@@ -164,7 +190,131 @@ def _profile_credentials(values: dict[str, Any]) -> tuple[str, str, str]:
 async def list_profiles(auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))):
     service = _service()
     tenant_id, workspace_id, principal_id = _scope(auth)
-    return success_response(data=[service.public(item) for item in service.repository.list(tenant_id, workspace_id, principal_id)], message="Profiles retrieved")
+    profiles = service.repository.list(tenant_id, workspace_id, principal_id)
+    # Existing creator-scoped profiles remain visible; shared profiles are
+    # resolved by tenant/workspace and filtered through the same policy engine.
+    profiles += [
+        item
+        for item in (
+            service.repository.get_any(profile_id, tenant_id, workspace_id)
+            for profile_id in {
+                grant.profile_id for grant in service.repository.access.list(tenant_id, None, include_revoked=False)
+            }
+        )
+        if item is not None
+        and item.principal_id != principal_id
+        and authorize(service.repository.access, profile=item, auth=auth, action="list")
+    ]
+    unique = {item.profile_id: item for item in profiles}
+    return success_response(data=[service.public(item) for item in unique.values()], message="Profiles retrieved")
+
+
+@router.get("/profiles/{profile_id}/access-grants")
+async def list_access_grants(profile_id: str, auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))):
+    service = _service()
+    profile = _get_profile(service, profile_id, auth)
+    if not authorize(service.repository.access, profile=profile, auth=auth, action="grant_manage"):
+        raise HTTPException(status_code=403, detail="Knowledge profile grant management denied")
+    return success_response(
+        data=[grant_view(item) for item in service.repository.access.list(str(profile.tenant_id), profile.profile_id)],
+        message="Access grants retrieved",
+    )
+
+
+@router.post("/profiles/{profile_id}/access-grants", status_code=201)
+async def create_access_grant(
+    profile_id: str,
+    body: AccessGrantRequest,
+    auth: AuthContext = Depends(require_scope(Scope.DATASET_UPDATE)),
+):
+    service = _service()
+    profile = _get_profile(service, profile_id, auth)
+    if not authorize(service.repository.access, profile=profile, auth=auth, action="grant_manage"):
+        raise HTTPException(status_code=403, detail="Knowledge profile grant management denied")
+    actions = set(body.actions)
+    if body.role != "Custom":
+        actions = set(ROLE_ACTIONS[body.role])
+    if not actions or not actions.issubset(
+        set().union(
+            *ROLE_ACTIONS.values(),
+            {
+                "list",
+                "search",
+                "read",
+                "use_in_skill",
+                "import",
+                "reindex",
+                "sync",
+                "settings",
+                "credential_rotate",
+                "grant_manage",
+                "delete",
+            },
+        )
+    ):
+        raise HTTPException(status_code=422, detail="Grant actions are invalid")
+    now = time.time()
+    grant = OpenVikingAccessGrant(
+        grant_id="ovg_" + uuid.uuid4().hex,
+        tenant_id=str(profile.tenant_id),
+        profile_id=profile.profile_id,
+        subject_type=body.subject_type,
+        subject=body.subject,
+        role=body.role,
+        effect=body.effect,
+        actions=tuple(sorted(actions)),
+        conditions=body.conditions,
+        reason=body.reason,
+        policy_version="v1",
+        created_at=now,
+        updated_at=now,
+    )
+    service.repository.access.put(grant)
+    service.repository.access.audit(
+        str(profile.tenant_id),
+        profile.profile_id,
+        str(auth.user_id),
+        "grant_manage",
+        "allow",
+        body.subject_type,
+        body.subject,
+        {"grant_id": grant.grant_id},
+    )
+    return success_response(data=grant_view(grant), message="Access grant created")
+
+
+@router.delete("/profiles/{profile_id}/access-grants/{grant_id}", status_code=204)
+async def revoke_access_grant(
+    profile_id: str, grant_id: str, auth: AuthContext = Depends(require_scope(Scope.DATASET_UPDATE))
+):
+    service = _service()
+    profile = _get_profile(service, profile_id, auth)
+    if not authorize(service.repository.access, profile=profile, auth=auth, action="grant_manage"):
+        raise HTTPException(status_code=403, detail="Knowledge profile grant management denied")
+    if not service.repository.access.revoke(str(profile.tenant_id), profile.profile_id, grant_id):
+        raise HTTPException(status_code=404, detail="Access grant not found")
+    service.repository.access.audit(
+        str(profile.tenant_id),
+        profile.profile_id,
+        str(auth.user_id),
+        "grant_revoke",
+        "allow",
+        None,
+        None,
+        {"grant_id": grant_id},
+    )
+
+
+@router.get("/profiles/{profile_id}/access-audit")
+async def access_audit(profile_id: str, auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))):
+    service = _service()
+    profile = _get_profile(service, profile_id, auth)
+    if not authorize(service.repository.access, profile=profile, auth=auth, action="grant_manage"):
+        raise HTTPException(status_code=403, detail="Knowledge profile audit denied")
+    return success_response(
+        data=service.repository.access.audits(str(profile.tenant_id), profile.profile_id),
+        message="Access audit retrieved",
+    )
 
 
 @router.post("/profiles", status_code=201)
@@ -184,7 +334,9 @@ async def create_profile(
 
 
 @router.patch("/profiles/{profile_id}")
-async def update_profile(profile_id: str, body: ProfileUpdate, auth: AuthContext = Depends(require_scope(Scope.DATASET_UPDATE))):
+async def update_profile(
+    profile_id: str, body: ProfileUpdate, auth: AuthContext = Depends(require_scope(Scope.DATASET_UPDATE))
+):
     try:
         service = _service()
         values = body.model_dump(exclude_none=True)
@@ -194,6 +346,8 @@ async def update_profile(profile_id: str, body: ProfileUpdate, auth: AuthContext
             values.pop("base_url")
         mode = values.pop("credential_mode", None)
         profile = _get_profile(service, profile_id, auth)
+        if not authorize(service.repository.access, profile=profile, auth=auth, action="settings"):
+            raise HTTPException(status_code=403, detail="Knowledge profile settings denied")
         if mode is not None and mode != profile.credential_mode:
             raise HTTPException(status_code=400, detail="Changing credential_mode is not supported")
         if profile.credential_mode == "managed" and (values.get("base_url") or values.get("api_key")):
@@ -208,7 +362,10 @@ async def update_profile(profile_id: str, body: ProfileUpdate, auth: AuthContext
 async def validate_profile(profile_id: str, auth: AuthContext = Depends(require_scope(Scope.DATASET_UPDATE))):
     try:
         service = _service()
-        profile = await service.validate(_get_profile(service, profile_id, auth))
+        profile = _get_profile(service, profile_id, auth)
+        if not authorize(service.repository.access, profile=profile, auth=auth, action="settings"):
+            raise HTTPException(status_code=403, detail="Knowledge profile settings denied")
+        profile = await service.validate(profile)
         return success_response(data=service.public(profile), message="Profile validated")
     except OpenVikingError as exc:
         raise _error(exc)
@@ -218,23 +375,46 @@ async def validate_profile(profile_id: str, auth: AuthContext = Depends(require_
 async def delete_profile(profile_id: str, auth: AuthContext = Depends(require_scope(Scope.DATASET_DELETE))):
     service = _service()
     profile = _get_profile(service, profile_id, auth)
+    if not authorize(service.repository.access, profile=profile, auth=auth, action="delete"):
+        raise HTTPException(status_code=403, detail="Knowledge profile delete denied")
     service.repository.delete(profile.profile_id, profile.tenant_id, profile.workspace_id, profile.principal_id)
 
 
 @router.post("/profiles/{profile_id}/operations/{operation}")
-async def operation(profile_id: str, operation: str, body: OperationRequest, auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))):
+async def operation(
+    profile_id: str,
+    operation: str,
+    body: OperationRequest,
+    auth: AuthContext = Depends(require_scope(Scope.DATASET_READ)),
+):
     try:
         service = _service()
         write_operations = {
-            "content_write", "content_reindex", "resource_import",
-            "watch_create", "watch_update", "watch_delete", "watch_trigger",
+            "content_write",
+            "content_reindex",
+            "resource_import",
+            "watch_create",
+            "watch_update",
+            "watch_delete",
+            "watch_trigger",
         }
+        action = "read"
+        if operation in {"resource_import"}:
+            action = "import"
+        elif operation in {"content_write", "content_reindex"}:
+            action = "reindex"
+        elif operation.startswith("watch_") or operation == "session_commit":
+            action = "sync"
+        if not authorize(
+            service.repository.access, profile=_get_profile(service, profile_id, auth), auth=auth, action=action
+        ):
+            raise HTTPException(status_code=403, detail="Knowledge profile action denied")
         if operation in write_operations and not (
             auth.has_scope(Scope.DATASET_CREATE) or auth.has_scope(Scope.DATASET_UPDATE)
         ):
             raise HTTPException(status_code=403, detail="OpenViking write permission required")
         result = await service.request(
-            _ready(service, profile_id, auth),
+            _ready(service, profile_id, auth, action),
             operation,
             body.payload,
             idempotency_key=None,
@@ -254,7 +434,14 @@ async def item_operation(
 ):
     try:
         service = _service()
-        if operation in {"watch_update", "watch_delete", "watch_trigger", "session_commit"} and not auth.has_scope(Scope.DATASET_UPDATE):
+        action = "sync" if operation in {"watch_update", "watch_delete", "watch_trigger", "session_commit"} else "read"
+        if not authorize(
+            service.repository.access, profile=_get_profile(service, profile_id, auth), auth=auth, action=action
+        ):
+            raise HTTPException(status_code=403, detail="Knowledge profile action denied")
+        if operation in {"watch_update", "watch_delete", "watch_trigger", "session_commit"} and not auth.has_scope(
+            Scope.DATASET_UPDATE
+        ):
             raise HTTPException(status_code=403, detail="OpenViking update permission required")
         result = await service.item_request(_ready(service, profile_id, auth), operation, item_id, body.payload)
         return success_response(data=result, message="OpenViking item operation completed")
@@ -263,23 +450,27 @@ async def item_operation(
 
 
 @router.post("/profiles/{profile_id}/resource")
-async def delete_resource(profile_id: str, body: OperationRequest, auth: AuthContext = Depends(require_scope(Scope.DATASET_DELETE))):
+async def delete_resource(
+    profile_id: str, body: OperationRequest, auth: AuthContext = Depends(require_scope(Scope.DATASET_DELETE))
+):
     try:
         service = _service()
         payload = dict(body.payload)
         payload.setdefault("recursive", True)
         payload.setdefault("wait", True)
-        result = await service.request(_ready(service, profile_id, auth), "fs_delete", payload)
+        result = await service.request(_ready(service, profile_id, auth, "delete"), "fs_delete", payload)
         return success_response(data=result, message="Resource deleted")
     except OpenVikingError as exc:
         raise _error(exc)
 
 
 @router.post("/profiles/{profile_id}/skill-context")
-async def skill_context(profile_id: str, body: ContextRequest, auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))):
+async def skill_context(
+    profile_id: str, body: ContextRequest, auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))
+):
     try:
         service = _service()
-        profile = _ready(service, profile_id, auth)
+        profile = _ready(service, profile_id, auth, "use_in_skill")
         resolved = await service.resolve_resource(profile, body.resource_ref)
         return success_response(
             data={
@@ -299,10 +490,15 @@ async def skill_context(profile_id: str, body: ContextRequest, auth: AuthContext
 
 
 @router.post("/profiles/{profile_id}/resource/resolve")
-async def resolve_resource(profile_id: str, body: ContextRequest, auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))):
+async def resolve_resource(
+    profile_id: str, body: ContextRequest, auth: AuthContext = Depends(require_scope(Scope.DATASET_READ))
+):
     try:
         service = _service()
-        return success_response(data=await service.resolve_resource(_ready(service, profile_id, auth), body.resource_ref), message="Resource reference resolved")
+        return success_response(
+            data=await service.resolve_resource(_ready(service, profile_id, auth, "read"), body.resource_ref),
+            message="Resource reference resolved",
+        )
     except OpenVikingError as exc:
         raise _error(exc)
 
@@ -317,7 +513,7 @@ async def read_resource(
 ):
     try:
         service = _service()
-        profile = _ready(service, profile_id, auth)
+        profile = _ready(service, profile_id, auth, "read")
         return success_response(
             data=await service.read_resource(profile, body.resource_ref, offset, limit),
             message="Resource content read",
@@ -327,10 +523,14 @@ async def read_resource(
 
 
 @router.post("/profiles/{profile_id}/text")
-async def import_text(profile_id: str, body: TextImportRequest, auth: AuthContext = Depends(require_scope(Scope.DATASET_CREATE))):
+async def import_text(
+    profile_id: str, body: TextImportRequest, auth: AuthContext = Depends(require_scope(Scope.DATASET_CREATE))
+):
     try:
         service = _service()
-        result = await service.import_text(_ready(service, profile_id, auth), body.filename, body.content, body.parent_ref)
+        result = await service.import_text(
+            _ready(service, profile_id, auth, "import"), body.filename, body.content, body.parent_ref
+        )
         return success_response(data=result, message="Text import started")
     except OpenVikingError as exc:
         raise _error(exc)
@@ -363,7 +563,7 @@ async def import_connection_resource(
             },
         }
         result = await service.import_connection_resource(
-            _ready(service, profile_id, auth),
+            _ready(service, profile_id, auth, "import"),
             filename=body.filename,
             parent_ref=body.parent_ref,
             document=document,
@@ -383,7 +583,7 @@ async def upload(
     try:
         service = _service()
         result = await service.upload(
-            _ready(service, profile_id, auth),
+            _ready(service, profile_id, auth, "import"),
             file.filename or "upload",
             file.content_type or "application/octet-stream",
             await file.read(50 * 1024 * 1024 + 1),
