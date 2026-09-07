@@ -63,7 +63,26 @@
     },
     "console_errors": [],
     "unhandled_rejections": [],
-    "note": "Collected through existing authenticated Chrome session; no credentials read or logged."
+    "note": "Collected through existing authenticated Chrome session; no credentials read or logged.",
+    "skill_hard_refreshes": 3,
+    "route_checks": {
+      "access": {
+        "overflow": 0,
+        "loading": false,
+        "launch_session_http": 200
+      },
+      "knowledge": {
+        "overflow": 0,
+        "loading": false,
+        "profiles_http": 200
+      },
+      "skill": {
+        "overflow": 0,
+        "loading": false,
+        "catalog_max_ms": 4150,
+        "list_sessions_revisions_completed": true
+      }
+    }
   },
   "secret_free": true
 }

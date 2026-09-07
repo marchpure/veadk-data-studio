@@ -50,11 +50,20 @@
         "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/skill-1280x800.png",
         "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/skill-390x844.png"
       ],
-      "network_evidence": "authenticated API timings/statuses collected",
+      "network_evidence": "authenticated route probes: Access launch-session 200; OpenViking profiles 200; Skill list/catalog/sessions/revisions completed",
       "dom_access_mode": "policy-only",
       "embedded_forbidden_modules": [],
       "skill_loading_visible": false,
-      "unhandled_rejections": 0
+      "unhandled_rejections": 0,
+      "skill_hard_refreshes": 3,
+      "access_dom_assertion": {
+        "mode": "policy-only",
+        "forbidden_modules": [],
+        "overflow": 0
+      },
+      "knowledge_overflow": 0,
+      "skill_overflow": 0,
+      "skill_catalog_max_ms": 4150
     }
   },
   "cloud": {
