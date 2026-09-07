@@ -39,18 +39,14 @@ export class SkillApiTimeoutError extends SkillApiError {
 async function request<T>(path: string, init?: RequestInit, options?: SkillRequestOptions): Promise<T> {
   const controller = new AbortController()
   let timedOut = false
-  const timeoutId = setTimeout(() => {
-    timedOut = true
-    controller.abort()
-  }, options?.timeoutMs ?? SKILL_REQUEST_TIMEOUT_MS)
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
   const abortFromCaller = () => controller.abort()
   if (options?.signal) {
     if (options.signal.aborted) controller.abort()
     else options.signal.addEventListener('abort', abortFromCaller, { once: true })
   }
-  let response: Response
-  try {
-    response = await apiFetch(`${API_ROOT}${path}`, {
+  const requestPromise = (async () => {
+    const response = await apiFetch(`${API_ROOT}${path}`, {
       credentials: 'include',
       ...init,
       signal: controller.signal,
@@ -59,23 +55,33 @@ async function request<T>(path: string, init?: RequestInit, options?: SkillReque
         ...init?.headers,
       },
     })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      const detail = payload?.detail
+      throw new SkillApiError(
+        detail?.message || payload?.message || detail || '请求失败，请稍后重试',
+        response.status,
+        detail?.code || payload?.code,
+      )
+    }
+    return (payload as Envelope<T>).data
+  })()
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+      reject(new SkillApiTimeoutError(path))
+    }, options?.timeoutMs ?? SKILL_REQUEST_TIMEOUT_MS)
+  })
+  try {
+    return await Promise.race([requestPromise, timeoutPromise])
   } catch (reason) {
     if (timedOut) throw new SkillApiTimeoutError(path)
     throw reason
   } finally {
-    clearTimeout(timeoutId)
+    if (timeoutId) clearTimeout(timeoutId)
     options?.signal?.removeEventListener('abort', abortFromCaller)
   }
-  const payload = await response.json().catch(() => null)
-  if (!response.ok) {
-    const detail = payload?.detail
-    throw new SkillApiError(
-      detail?.message || payload?.message || detail || '请求失败，请稍后重试',
-      response.status,
-      detail?.code || payload?.code,
-    )
-  }
-  return (payload as Envelope<T>).data
 }
 
 export const skillApi = {

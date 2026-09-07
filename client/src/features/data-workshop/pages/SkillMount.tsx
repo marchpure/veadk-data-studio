@@ -111,6 +111,7 @@ export function SkillMount() {
   const loading = loadState === 'loading'
 
   const selectedSkill = skills.find(item => item.id === requestedSkillId) || null
+  const workbenchLoading = loading || (!isNew && !!selectedSkill && sessionState === 'loading')
   const visibleSkills = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase()
     if (!needle) return skills
@@ -175,7 +176,7 @@ export function SkillMount() {
             .then(found => {
               if (active) navigate(queryFor(found.skill_id, found.id), { replace: true })
             })
-            .catch(reason => {
+            .catch(() => {
               if (active && !controller.signal.aborted && items[0]) navigate(queryFor(items[0].id), { replace: true })
             })
         } else if (!isNew && !requestedSkillId && items[0]) {
@@ -420,7 +421,13 @@ export function SkillMount() {
         : 2
 
   return (
-    <div className={`dw-skill-workbench has-inspector ${artifact ? 'has-artifact' : ''}`} data-workshop-skill-mount>
+    <div
+      className={`dw-skill-workbench has-inspector ${artifact ? 'has-artifact' : ''}`}
+      data-workshop-skill-mount
+      data-skill-load-state={loadState}
+      data-skill-catalog-state={catalogState}
+      data-skill-session-state={sessionState}
+    >
       <div className="dw-skill-mobile-tabs" aria-label="Skill 移动视图">
         <button className={mobilePane === 'skills' ? 'active' : ''} onClick={() => setMobilePane('skills')}><Menu size={14} />Skill</button>
         <button className={mobilePane === 'conversation' ? 'active' : ''} onClick={() => setMobilePane('conversation')}><MessageSquare size={14} />对话</button>
@@ -521,20 +528,26 @@ export function SkillMount() {
             <div className="dw-skill-empty">
               <span><Sparkles size={25} /></span>
               <h1>
-                {loading ? '正在打开 Skill 工作台'
+                {workbenchLoading ? '正在打开 Skill 工作台'
                   : loadState === 'timeout' ? '加载超时'
                     : loadState === 'error' ? 'Skill 暂时不可用'
+                      : loadState === 'partial' ? '部分能力暂不可用'
                       : sessionState === 'empty' ? '还没有会话'
+                        : sessionState === 'timeout' ? '会话加载超时'
+                          : sessionState === 'error' ? '会话暂时不可用'
                         : '把数据能力变成可复用的 Skill'}
               </h1>
               <p>
-                {loading ? '正在读取你的 Skill 与会话…'
-                  : loadState === 'timeout' ? '请求等待时间过长，请重试。'
+                {workbenchLoading ? '正在读取你的 Skill 与会话…'
+                    : loadState === 'timeout' ? '请求等待时间过长，请重试。'
                     : loadState === 'error' ? '请检查网络后重试，或新建一个 Skill。'
+                      : loadState === 'partial' ? 'Skill 列表已加载；能力目录暂时不可用，可稍后重试目录。'
                       : sessionState === 'empty' && selectedSkill ? '为这个 Skill 创建第一个会话即可开始。'
+                        : sessionState === 'timeout' ? '会话请求超时，请重试或新建会话。'
+                          : sessionState === 'error' ? '会话加载失败，请重试或新建会话。'
                         : '从一个明确目标开始，连接可见的 Action 与知识资源。'}
               </p>
-              {!loading && (
+              {!workbenchLoading && (
                 <div className="dw-button-row">
                   {(loadState === 'error' || loadState === 'timeout') && <button className="dw-button dw-button-secondary" onClick={() => setLoadAttempt(value => value + 1)}>重试</button>}
                   <button className="dw-button dw-button-primary" onClick={() => selectedSkill ? void createSession() : navigate(queryFor(undefined, undefined, 'new'))}>
