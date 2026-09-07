@@ -1,9 +1,9 @@
 {
   "checkpoint": "DWV1_POSTRC_EXPERIENCE_CHECKPOINT",
   "status": "DWV1_POSTRC_DEMO_READY_CHECKPOINT",
-  "branch": "integration/dwv1-postrc-experience-v1",
-  "base_sha": "964c85911fd5e0924a6ff50b408816f02dc764a3",
-  "release_sha": "f95044aa66463d2470c64842e519bd5225d8e342",
+  "branch": "integration/dwv1-i5c-product-polish-v2",
+  "base_sha": "6041b3cdc9fdfd2a458dfb9d6128b5ecfeb7669f",
+  "release_sha": "8e8ac1334d7a6274fd8849a41c686ce4ab26b658",
   "changes": {
     "connections": [
       "Legacy bodyless launch sessions remain admin-only, expire after 300 seconds, and are limited to approved console surfaces.",
@@ -29,7 +29,7 @@
     "ruff": "passed",
     "production_build": "passed with existing bundle warnings",
     "git_diff_check": "passed",
-    "secret_scan": "passed; 15 changed files; zero findings",
+    "secret_scan": "passed; targeted changed-file scan; zero findings",
     "browser_smoke": {
       "status": "passed",
       "connection": "single iframe retained; rapid navigation converged; internal card navigation passed; loading overlay cleared",
@@ -41,9 +41,9 @@
   "cloud": {
     "openconnector_revision": 15,
     "openconnector_traffic_percent": 100,
-    "data_studio_revision": 44,
+    "data_studio_revision": 49,
     "data_studio_traffic_percent": 100,
-    "data_studio_release_record_id": "qtb1yjjl7dg6zguv",
+    "data_studio_release_record_id": "2ok0bf7biwxb9csw",
     "skill_agent_revision": 14,
     "skill_agent_traffic_percent": 100,
     "skill_agent_release_record_id": "q05owf0jxanowyal",
@@ -55,7 +55,8 @@
     },
     "cache_control": {
       "index_html": "no-store, must-revalidate",
-      "config_js": "no-store, must-revalidate"
+    "config_js": "no-store, must-revalidate",
+    "openviking_credential_policy": "hybrid"
     }
   },
   "skill_recovery": {
