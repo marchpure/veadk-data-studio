@@ -64,3 +64,55 @@ def test_request_faas_credentials_reads_vefaas_iam_file(tmp_path):
             assert get_faas_credentials() == FaaSCredentials("file-ak", "file-sk", "file-session")
     finally:
         faas_runtime._VEFAAS_IAM_CREDENTIAL_PATH = original
+
+
+def test_runtime_secret_startup_reads_mounted_iam_credentials(monkeypatch, tmp_path):
+    from server.services import faas_runtime, runtime_secrets
+
+    path = tmp_path / "credential"
+    path.write_text(
+        '{"access_key_id":"ak","secret_access_key":"sk","session_token":"token"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(faas_runtime, "_VEFAAS_IAM_CREDENTIAL_PATH", path)
+    monkeypatch.setattr(faas_runtime, "get_faas_credentials", lambda: None)
+    captured = {}
+
+    class Provider:
+        def credential_provider(self):
+            return "provider"
+
+    class FakeConfiguration:
+        region = None
+        connect_timeout = None
+        read_timeout = None
+        credential_provider = None
+
+    class FakeApiClient:
+        def __init__(self, configuration):
+            captured["configuration"] = configuration
+
+    class FakeKms:
+        def __init__(self, _client):
+            pass
+
+        def get_secret_value(self, _request):
+            return type("Response", (), {"secret_value": '{"database_url":"postgresql://db"}'})()
+
+    monkeypatch.setattr(runtime_secrets, "_load_secret_document", runtime_secrets._load_secret_document.__wrapped__)
+    monkeypatch.setitem(__import__("sys").modules, "volcenginesdkcore", type("Core", (), {
+        "ApiClient": FakeApiClient,
+        "Configuration": FakeConfiguration,
+    })())
+    class SecretRequest:
+        def __init__(self, *, secret_name):
+            self.secret_name = secret_name
+
+    monkeypatch.setitem(__import__("sys").modules, "volcenginesdkkms", type("Kms", (), {
+        "GetSecretValueRequest": SecretRequest,
+        "KMSApi": FakeKms,
+    })())
+    monkeypatch.setattr(faas_runtime, "_read_vefaas_iam_credentials", lambda: Provider())
+
+    assert runtime_secrets._load_secret_document("secret")["database_url"] == "postgresql://db"
+    assert captured["configuration"].credential_provider == "provider"

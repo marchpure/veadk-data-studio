@@ -35,6 +35,12 @@ def _load_secret_document(secret_name: str) -> dict[str, Any]:
         from server.services.faas_runtime import get_faas_credentials
 
         credentials = get_faas_credentials()
+        if credentials is None:
+            # Startup migrations run before request middleware, so resolve the
+            # platform-mounted IAM credentials directly during initialization.
+            from server.services.faas_runtime import _read_vefaas_iam_credentials
+
+            credentials = _read_vefaas_iam_credentials()
         if credentials is not None:
             configuration.credential_provider = credentials.credential_provider()
         response = KMSApi(ApiClient(configuration)).get_secret_value(GetSecretValueRequest(secret_name=secret_name))
