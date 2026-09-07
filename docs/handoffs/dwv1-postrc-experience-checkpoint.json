@@ -1,49 +1,52 @@
 {
   "checkpoint": "DWV1_POSTRC_EXPERIENCE_CHECKPOINT",
-  "status": "DWV1_POSTRC_DEMO_READY_CHECKPOINT",
-  "branch": "integration/dwv1-i5c-product-polish-v2",
+  "status": "DWV1_I5C_UI_POLISH_V3_READY_FOR_MANUAL_ACCEPTANCE",
+  "branch": "integration/dwv1-i5c-ui-polish-v3",
   "base_sha": "6041b3cdc9fdfd2a458dfb9d6128b5ecfeb7669f",
-  "release_sha": "8e8ac1334d7a6274fd8849a41c686ce4ab26b658",
+  "release_sha": "af9a639cc8b0aa350a627f60e0906f81e62781d9",
   "changes": {
     "connections": [
       "Legacy bodyless launch sessions remain admin-only, expire after 300 seconds, and are limited to approved console surfaces.",
       "SPA navigation keeps one iframe, serializes surface-bound session updates, ignores stale navigation, and shows a loading overlay.",
       "OpenConnector public health is warmed in advance without issuing or replacing a browser launch cookie."
+      ,"Embedded Access in policy-only mode removes Identity Provider, AccessGrant, Preview, Audit, Token, and UUID-bearing admin modules from the DOM; standalone Access remains full."
     ],
     "knowledge": [
       "OpenViking receives a scoped light neutral-and-green semantic palette instead of inheriting the legacy dark orange theme.",
       "Focus, hover, status, panel, input, popover, and dialog colors use the same scoped tokens."
+      ,"Knowledge card actions use a shared 13px/20px/600, 36px control box with stable checking label width and responsive wrapping."
     ],
     "skill": [
       "A ready session suppresses historical retry/error phases in the current progress summary.",
       "Historical events remain available in the collapsed technical details."
+      ,"Skill loading is bounded with independent list/catalog requests, 12s timeout and AbortController cancellation, partial/error/empty/timeout states, retry/new-session actions, and >=12px core typography."
     ]
   },
   "verification": {
     "backend_full": "964 passed, 2 skipped",
     "openviking_frontend": "140 passed",
-    "data_workshop_frontend": "28 passed",
+    "data_workshop_frontend": "focused Skill 24 passed; integrated SkillMount/API 11 passed",
     "focused_backend": "26 passed",
     "typecheck": "passed",
-    "lint": "passed with 358 pre-existing warnings",
+    "lint": "passed with 361 pre-existing warnings, 0 errors",
     "ruff": "passed",
     "production_build": "passed with existing bundle warnings",
     "git_diff_check": "passed",
     "secret_scan": "passed; targeted changed-file scan; zero findings",
     "browser_smoke": {
-      "status": "passed",
-      "connection": "single iframe retained; rapid navigation converged; internal card navigation passed; loading overlay cleared",
-      "knowledge": "list, detail, and retrieval visible; light green palette rendered; no horizontal overflow",
-      "skill": "ready displayed as 生成完成; rev-1 visible; preview, download, and refresh passed",
-      "console_errors": 0
+      "status": "partially_verified",
+      "connection": "HTTP 200 and embedded route smoke passed; authenticated browser E2E requires storage state not present in this run",
+      "knowledge": "HTTP 200; focused visual/component tests passed; authenticated browser screenshots pending",
+      "skill": "HTTP 200; focused bounded-loading tests passed; authenticated browser screenshots pending",
+      "console_errors": "not collected without authenticated browser context"
     }
   },
   "cloud": {
-    "openconnector_revision": 15,
+    "openconnector_revision": 17,
     "openconnector_traffic_percent": 100,
-    "data_studio_revision": 49,
+    "data_studio_revision": 51,
     "data_studio_traffic_percent": 100,
-    "data_studio_release_record_id": "2ok0bf7biwxb9csw",
+    "data_studio_release_record_id": "l1hjs93momryt22i",
     "skill_agent_revision": 14,
     "skill_agent_traffic_percent": 100,
     "skill_agent_release_record_id": "q05owf0jxanowyal",
