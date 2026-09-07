@@ -175,7 +175,7 @@ export function Conversation({
           </div>
         )}
       </div>
-      <div className="dw-composer">
+      <div className="dw-composer" id="skill-composer">
         <textarea
           value={message}
           onChange={event => setMessage(event.target.value)}
