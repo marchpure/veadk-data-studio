@@ -1,7 +1,7 @@
 {
   "workstream": "DWV1 I5C UI polish v3 Data Studio",
   "branch": "integration/dwv1-i5c-ui-polish-v3",
-  "sha": "3dd5742d61070c95c29f8ffbd22620bb3d01649a",
+  "sha": "20cd811452d7d29297722b69ad86cde210fd4202",
   "changes": {
     "knowledge_typography": "Scoped OpenViking tokens and shared 36px action controls; checking label width fixed; responsive wrapping.",
     "skill_loading": "Decoupled list/catalog; 12s timeout and AbortController; bounded loading/ready/empty/partial/error/timeout; invalid query recovery; retry/new-session actions; >=12px core typography."
