@@ -82,7 +82,41 @@
         "catalog_max_ms": 4150,
         "list_sessions_revisions_completed": true
       }
-    }
+    },
+    "knowledge_detail": {
+      "route": "/kb/ov_0451d34afc98618db3be7512/resources",
+      "overflow": 0,
+      "title": "OpenViking",
+      "tabs": [
+        "资源",
+        "检索",
+        "任务",
+        "定时同步",
+        "设置",
+        "访问权限"
+      ],
+      "card_actions": {
+        "font": "13px",
+        "line_height": "20px",
+        "weight": "600",
+        "height": 36,
+        "equal_width": true
+      }
+    },
+    "skill_refresh_results": [
+      {
+        "overflow": 0,
+        "loading": false
+      },
+      {
+        "overflow": 0,
+        "loading": false
+      },
+      {
+        "overflow": 0,
+        "loading": false
+      }
+    ]
   },
   "secret_free": true
 }

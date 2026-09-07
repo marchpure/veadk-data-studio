@@ -63,7 +63,33 @@
       },
       "knowledge_overflow": 0,
       "skill_overflow": 0,
-      "skill_catalog_max_ms": 4150
+      "skill_catalog_max_ms": 4150,
+      "knowledge_detail": {
+        "overflow": 0,
+        "tabs": [
+          "资源",
+          "检索",
+          "任务",
+          "定时同步",
+          "设置",
+          "访问权限"
+        ],
+        "card_actions": "13px/20px/600/36px equal boxes"
+      },
+      "skill_refresh_results": [
+        {
+          "overflow": 0,
+          "loading": false
+        },
+        {
+          "overflow": 0,
+          "loading": false
+        },
+        {
+          "overflow": 0,
+          "loading": false
+        }
+      ]
     }
   },
   "cloud": {
