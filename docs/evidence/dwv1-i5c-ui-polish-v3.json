@@ -1,7 +1,7 @@
 {
   "workstream": "DWV1 I5C UI polish v3 Data Studio",
   "branch": "integration/dwv1-i5c-ui-polish-v3",
-  "sha": "20cd811452d7d29297722b69ad86cde210fd4202",
+  "sha": "ec71b7f5da45bdc58c962822263620248bc9048b",
   "changes": {
     "knowledge_typography": "Scoped OpenViking tokens and shared 36px action controls; checking label width fixed; responsive wrapping.",
     "skill_loading": "Decoupled list/catalog; 12s timeout and AbortController; bounded loading/ready/empty/partial/error/timeout; invalid query recovery; retry/new-session actions; >=12px core typography."
@@ -33,9 +33,15 @@
   "browser_evidence": {
     "status": "authenticated_browser_verified",
     "screenshots": [
-      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/exact/access-1440x900.png",
-      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/exact/kb-1280x800.png",
-      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/exact/skill-390x844.png"
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/access-1440x900.png",
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/access-1280x800.png",
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/access-390x844.png",
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/kb-1440x900.png",
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/kb-1280x800.png",
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/kb-390x844.png",
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/skill-1440x900.png",
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/skill-1280x800.png",
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/skill-390x844.png"
     ],
     "dom": {
       "access_mode": "policy-only",

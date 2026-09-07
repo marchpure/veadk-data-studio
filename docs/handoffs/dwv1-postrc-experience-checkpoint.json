@@ -3,7 +3,7 @@
   "status": "DWV1_I5C_UI_POLISH_V3_READY_FOR_MANUAL_ACCEPTANCE",
   "branch": "integration/dwv1-i5c-ui-polish-v3",
   "base_sha": "6041b3cdc9fdfd2a458dfb9d6128b5ecfeb7669f",
-  "release_sha": "a5bec6d39a28fe94cef81ba0bf7f56518155cec6",
+  "release_sha": "ec71b7f5da45bdc58c962822263620248bc9048b",
   "changes": {
     "connections": [
       "Legacy bodyless launch sessions remain admin-only, expire after 300 seconds, and are limited to approved console surfaces.",
@@ -40,9 +40,15 @@
       "skill": "HTTP 200; focused bounded-loading tests passed; authenticated browser screenshots pending",
       "console_errors": 0,
       "screenshots": [
-        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/exact/access-1440x900.png",
-        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/exact/kb-1280x800.png",
-        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/exact/skill-390x844.png"
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/access-1440x900.png",
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/access-1280x800.png",
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/access-390x844.png",
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/kb-1440x900.png",
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/kb-1280x800.png",
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/kb-390x844.png",
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/skill-1440x900.png",
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/skill-1280x800.png",
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/all/skill-390x844.png"
       ],
       "network_evidence": "authenticated API timings/statuses collected",
       "dom_access_mode": "policy-only",
