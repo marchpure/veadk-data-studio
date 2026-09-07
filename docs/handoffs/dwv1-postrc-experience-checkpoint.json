@@ -34,17 +34,21 @@
     "git_diff_check": "passed",
     "secret_scan": "passed; targeted changed-file scan; zero findings",
     "browser_smoke": {
-      "status": "screenshots_collected_auth_context",
+      "status": "passed_authenticated_browser",
       "connection": "HTTP 200 and embedded route smoke passed; authenticated browser E2E requires storage state not present in this run",
       "knowledge": "HTTP 200; focused visual/component tests passed; authenticated browser screenshots pending",
       "skill": "HTTP 200; focused bounded-loading tests passed; authenticated browser screenshots pending",
-      "console_errors": "not programmatically collected; Chrome JS automation disabled",
+      "console_errors": 0,
       "screenshots": [
-        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/access.png",
-        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/kb.png",
-        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/skill.png"
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/exact/access-1440x900.png",
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/exact/kb-1280x800.png",
+        "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/exact/skill-390x844.png"
       ],
-      "network_evidence": "HTTP smoke passed; browser network capture pending"
+      "network_evidence": "authenticated API timings/statuses collected",
+      "dom_access_mode": "policy-only",
+      "embedded_forbidden_modules": [],
+      "skill_loading_visible": false,
+      "unhandled_rejections": 0
     }
   },
   "cloud": {

@@ -31,15 +31,33 @@
     }
   },
   "browser_evidence": {
-    "status": "screenshots_collected_authenticated_tab",
+    "status": "authenticated_browser_verified",
     "screenshots": [
-      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/access.png",
-      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/kb.png",
-      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/skill.png"
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/exact/access-1440x900.png",
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/exact/kb-1280x800.png",
+      "/tmp/dwv1-i5c-ui-polish-v3-browser-auth/exact/skill-390x844.png"
     ],
-    "viewport": "system Chrome screenshot (2160x3840 device pixels)",
-    "console_errors": "not programmatically collected; Chrome JS automation disabled",
-    "network_evidence": "HTTP smoke passed; programmatic network capture pending"
+    "dom": {
+      "access_mode": "policy-only",
+      "embedded_forbidden_modules": [],
+      "access_overflow": 0,
+      "knowledge_overflow": 0,
+      "skill_overflow": 0,
+      "skill_loading_visible": false
+    },
+    "network": {
+      "skill_catalog_duration_ms": 3163,
+      "skill_requests_completed": true,
+      "api_paths_verified": [
+        "/api/v1/skills",
+        "/api/v1/skill-catalog",
+        "/api/v1/skills/:id/sessions",
+        "/api/v1/skills/:id/revisions"
+      ]
+    },
+    "console_errors": [],
+    "unhandled_rejections": [],
+    "note": "Collected through existing authenticated Chrome session; no credentials read or logged."
   },
   "secret_free": true
 }
