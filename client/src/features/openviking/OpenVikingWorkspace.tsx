@@ -479,7 +479,7 @@ function AccessGrantsPage({ profileId }: { profileId: string }) {
       await openVikingApi.createAccessGrant(profileId, {
         subject_type: subjectType, subject, role, effect,
         actions: role === 'Custom' ? ['read'] : [],
-        conditions: {}, reason: 'Data Studio knowledge access',
+        conditions: {}, reason: 'Data Studio knowledge access', policy_version: 'v1',
       })
       setSubject('')
       await load()
